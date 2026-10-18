@@ -7,6 +7,46 @@
 
 ---
 
+## 0. Status after the Phase 1–4 build (18 October 2026)
+
+Phases 1–4 are built and committed on local branches (not pushed):
+
+| Repo | Branch | What |
+|---|---|---|
+| `Kim-254-de/SMARTTT_BACKEND` | `feature/timetabling-integrations` (from `main`) | `allocator/*` and `generator/*` integration endpoints, `Lecturer.employment_type`, `TimetableSlot.session_key/study_semester/publication`, `TimetablePublication`, publish + allocation pushes to Attendance |
+| `Kim-254-de/Timetable-Allocator` | `feature/t1-allocator` | Full backend + web UI (T1.1, T1.3–T1.5, T4.3 flags) |
+| `Kim-254-de/Timetable-Generator` | `feature/t2-generator` | Solver, backend, worker, web UI, PDF, benchmark (T2.1–T2.5, T3.1–T3.2, T4.1, T4.3) |
+
+**Findings that change this document**
+
+- **C1 is mostly stale.** `Kim-254-de/SMARTTT_BACKEND` `main` is 221 commits ahead of `peter-dri/SMARTTT_BACKEND` and already has `apps/integrations`, `courses`, `notifications`, `schedule`, the reschedule push, and SMARTTT sign-in for Attendance. Treat `Kim-254-de` as the source of truth.
+- **The live timetable model is `TimetableSlot`, not `TimetableSession`.** One row per class row per meeting, with `class_group` (GR A…), `stream`, `lecturer` and `lecturer_name_text`. The integrations are built on `TimetableSlot`.
+- **Excel upload is gone from `main`** (`apps/uploads` no longer exists; timetables arrive as PDF via `pdf_timetable_parser`), so C4–C6 and H1–H3 in section 4 need re-checking against `main` before anyone fixes them.
+
+**Decisions taken while building (review them)**
+
+1. **Allocation unit = section** (unit + group, e.g. `COSC 103 GR A`, key `"<unit id>-<GROUPKEY|MAIN>"`), not a single meeting: every slot of a section gets the same lecturer. The Allocator API keeps the path names `/sessions/{key}/…` from 5.9; the SMARTTT side is `allocator/sections/…` (5.10 below).
+2. **Sign-in:** the new systems do not verify SMARTTT JWTs (that would mean sharing Django's `SECRET_KEY`). Each calls SMARTTT's `…/authenticate/` with its own API key, exactly as Attendance already does, then keeps its own server-side session (hashed token cookie, CSRF, idle/absolute expiry, roles re-read every 5 min via `…/identity/`).
+3. **Roles:** COD = `Department.head_of_department`; department staff = `DepartmentAdmin`; Directorate = Django group `timetabling_office` (`TIMETABLING_OFFICE_GROUP`). **Create that group in Django admin and add the Director's office.**
+4. **Lecturers stay with SMARTTT across versions.** A publish keeps every section's lecturer and is refused (409 `lecturer_clash`) if the new times would double-book one; the Generator's repair mode avoids that (H13).
+5. **First publish over an uploaded timetable** needs `replace_unpublished: true` (a checkbox in the Director's UI), so an upload is never wiped by accident.
+6. **Split class rows:** groups of one unit that share a class row may meet together *or* in turn (rotating labs); the row's other classes avoid all of them. (Forcing them together made lab splits infeasible.)
+7. **Weekly hours / session length are never invented** (open question 1): prefilled only from the published timetable, otherwise the Director enters them; runs are refused until set. L/P/CF are recorded on each allocation as entered, for the PDF form.
+8. **Study semester** is stored separately from the term (`TimetableSlot.study_semester`, `class_rows.study_semester`), as proposed in open question 3.
+9. **Teaching days** Monday–Friday only, 07:00–19:00 — enforced by SMARTTT's publish validation as well as the solver.
+
+**Benchmark (T2.5 phase check)** — Sep–Dec 2026 rebuilt from the PDF (405 class rows, 1663 sessions, 102 rooms): 0 hard violations in 573 s on a 4-core laptop; gaps 31 vs 55, 07:00 starts 258 vs 411, starts ≥15:00 285 vs 411 (hand-made). Room sizes/types and lecturer counts are not in the PDF, so H3/H4 are out of the benchmark and H9 uses each department's hand-made peak.
+
+**Still to do (needs people or data)**
+
+- Push the branches and open PRs; deploy with new env vars: SMARTTT `ALLOCATOR_API_KEY`, `GENERATOR_API_KEY`, `TIMETABLING_OFFICE_GROUP`; Allocator/Generator `SMARTTT_API_KEY`, `DATABASE_URL`, (Generator) `REDIS_URL` + an RQ worker.
+- Phase checks that need the real system: Computer Science entering its Sep–Dec allocation from `VETTED_SEP-DEC ALLOCATION 2026.docx` (T1 check); the Director's office building one school end to end (T3 check); a live mid-term room change reaching Attendance within a minute (T4 check — the push path is covered by a SMARTTT test).
+- Real room capacities and types, and FT/PT on every lecturer (`employment_type` defaults to full-time).
+- The older Word-document allocation upload (`timetable/assign-lecturers/`) can still overwrite lecturers on slots it matches. Once departments use the Allocator, retire that upload or make it skip slots allocated there.
+- Open questions 1 and 2 (section 8) are still open; the code works either way but the Director must enter hours and room types.
+
+---
+
 ## Contents
 
 1. [The platform in one page](#1-the-platform-in-one-page)
@@ -458,15 +498,24 @@ The Allocator keeps no copy of the timetable: it reads published sessions from S
 
 Two keys: `GENERATOR_API_KEY` (Generator endpoints only) and `ALLOCATOR_API_KEY` (Allocator endpoints only).
 
+**As built** (`apps/integrations/timetabling_views.py`; `term` defaults to the current term everywhere):
+
 | Endpoint | Called by | Purpose |
 |---|---|---|
-| `GET /api/v1/integrations/generator/snapshot/?term=<id>` | Generator | Read-only master data for a term, incl. the current published version and its allocated lecturers (for repair re-solves) |
-| `POST /api/v1/integrations/generator/publish/` | Generator | Publish a version (body below) |
-| `GET /api/v1/integrations/generator/publish/<version>/` | Generator | Publish status |
-| `GET /api/v1/integrations/allocator/sessions/?term=<id>&department=<id>` | Allocator | Published sessions whose unit the department owns: key, unit, group, class rows, room, day, start, end, current lecturer |
-| `GET /api/v1/integrations/allocator/lecturers/?department=<id>` | Allocator | Lecturers with employment type and `max_weekly_teaching_hours` |
+| `POST …/allocator/authenticate/`, `POST …/generator/authenticate/` | both | SMARTTT login check → account, `timetabling_office`, `departments[{id, code, name, role: cod\|admin\|editor}]`; wrong password = 200 `{authenticated: false}` |
+| `GET …/allocator/identity/?account_id=`, `GET …/generator/identity/?account_id=` | both | Same identity without a password, for refreshing sessions; 404 when inactive |
+| `GET …/allocator/terms/`, `GET …/generator/terms/` | both | Academic terms |
+| `GET /api/v1/integrations/generator/snapshot/?term=<id>` | Generator | Rooms, departments with FT/PT lecturer counts, lecturers, programmes, units, curricula, class sizes, registrations, `published.{version, sessions[key, unit_id, group_label, section_key, room_id, day, start, end, class_rows, lecturer_id]}`, `warnings` |
+| `POST /api/v1/integrations/generator/publish/` | Generator | Publish a version (body below). 201 new, 200 same version re-sent, 409 `stale_base`/`version_taken`/`unpublished_slots`/`lecturer_clash`, 422 rule violations |
+| `GET /api/v1/integrations/generator/publish/<version>/?term=<id>` | Generator | Publish status |
+| `GET /api/v1/integrations/allocator/departments/` | Allocator | Active departments with their COD, for the Director's progress view |
+| `GET /api/v1/integrations/allocator/sections/?term=<id>&department=<id>` | Allocator | Published sections (unit + group) whose unit the department owns: key, code, unit, group, class rows (with programme department, for servicing), meetings, weekly hours, registered students, current lecturer |
+| `GET /api/v1/integrations/allocator/sections/<key>/?term=<id>` | Allocator | One section |
+| `GET /api/v1/integrations/allocator/lecturers/?department=<id>&term=<id>` | Allocator | Lecturers with employment type and `max_weekly_teaching_hours`; with `term`, each lecturer's meetings and weekly hours (one call for "who is free") |
 | `GET /api/v1/integrations/allocator/lecturers/<id>/sessions/?term=<id>` | Allocator | Everything a lecturer already teaches this term, across all departments |
-| `PATCH /api/v1/integrations/allocator/sessions/<key>/lecturer/` | Allocator | Set/replace the lecturer on one session. SMARTTT re-checks H11/H12 under a lock; 409 on clash |
+| `PATCH /api/v1/integrations/allocator/sections/<key>/lecturer/?term=<id>` | Allocator | `{lecturer_id \| null, expected_lecturer_id}` sets/clears the lecturer on every slot of the section. Row lock on the lecturer; 409 `lecturer_clash`/`max_hours`/`stale`; pushes the change to Attendance |
+
+Session-level rows in SMARTTT are `TimetableSlot` (one per class row per meeting), keyed by the Generator's stable `session_key`; a section is all slots with the same unit and group.
 
 ```json
 {
@@ -477,14 +526,17 @@ Two keys: `GENERATOR_API_KEY` (Generator endpoints only) and `ALLOCATOR_API_KEY`
     {
       "key": "COSC103-GRA-1",
       "unit_id": "…", "group_label": "GR A",
-      "class_row_ids": ["…", "…"],
-      "room_id": "…", "lecturer_id": null,
-      "day_of_week": "TUE", "start_time": "10:00", "end_time": "12:00",
-      "session_type": "lecture"
+      "class_rows": [{"program_id": 10, "year_of_study": 1, "study_semester": 1, "stream": ""}],
+      "room_id": "…",
+      "day_of_week": "TUE", "start_time": "10:00", "end_time": "12:00"
     }
-  ]
+  ],
+  "published_by": "<account id and name>",
+  "replace_unpublished": false
 }
 ```
+
+(As built: class rows are sent as programme/year/semester/stream because SMARTTT has no class-row table; lecturers are not part of the payload — SMARTTT keeps each section's lecturer; `session_type` was dropped because `TimetableSlot` has no such field.)
 
 Rules: validate whole version then write in **one transaction**; **idempotent** on `(term_id, version)`; update by stable `key` (keeps Attendance records linked); refuse if current version ≠ `based_on_version`. After publish or lecturer change, compute changed sessions and send the existing Attendance push (3.5). Attendance can only activate a class once it has a lecturer.
 

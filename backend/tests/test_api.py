@@ -244,3 +244,13 @@ def test_writes_need_csrf(client, smarttt):
     del client.headers["X-XSRF-TOKEN"]
     response = client.post("/api/terms", json={"smarttt_term_id": TERM["id"]})
     assert response.status_code == 403
+
+
+def test_rooms_for_manual_moves_are_the_active_ones(client, smarttt):
+    sign_in(client)
+    term = ok(client.post("/api/terms", json={"smarttt_term_id": TERM["id"]}))
+    assert client.get(f"/api/terms/{term['id']}/rooms").status_code == 409  # no snapshot yet
+    ok(client.post(f"/api/terms/{term['id']}/snapshots"))
+    codes = [r["code"] for r in ok(client.get(f"/api/terms/{term['id']}/rooms"))]
+    assert "OLD 1" not in codes
+    assert codes == sorted(codes, key=lambda c: (c.split()[0], c))
