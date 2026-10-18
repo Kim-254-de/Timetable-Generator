@@ -1,0 +1,57 @@
+# Local stack: PostgreSQL, Redis, the API, the solver worker and the web app
+# (http://localhost:8081). Reads secrets from .env (copy .env.example). SMARTTT runs separately.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: generator
+      POSTGRES_USER: generator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U generator -d generator"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment: &backend-env
+      DATABASE_URL: postgresql+psycopg://generator:${POSTGRES_PASSWORD}@db:5432/generator
+      REDIS_URL: redis://redis:6379/0
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build: ./backend
+    env_file: .env
+    environment: *backend-env
+    command: ["rq", "worker", "generator-runs", "--url", "redis://redis:6379/0"]
+    depends_on:
+      - api
+    # CP-SAT uses every core it is given (SOLVER_WORKERS); give it the machine.
+    deploy:
+      resources:
+        reservations:
+          cpus: "4"
+
+  web:
+    build: ./frontend
+    environment:
+      API_UPSTREAM: http://api:8000
+    ports:
+      - "8081:8080"
+    depends_on:
+      - api
+
+volumes:
+  db-data:
