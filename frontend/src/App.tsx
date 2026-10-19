@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react'
-import { Link, Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AxiosError } from 'axios'
 import clsx from 'clsx'
 import { Field, inputClass } from '@/components/Dialog'
 import { errorMessage } from '@/lib/api'
 import { termText } from '@/lib/format'
+import { readLastTerm } from '@/lib/lastTerm'
 import { useCreateTerm, useLogin, useLogout, useMe, useOpenTerm, useSmartttTerms, useTerms } from '@/lib/queries'
 import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { DraftPage } from '@/pages/DraftPage'
@@ -21,7 +22,8 @@ export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<TermsPage />} />
+        <Route index element={<HomePage />} />
+        <Route path="terms" element={<TermsPage />} />
         <Route path="rooms" element={<RoomsPage />} />
         <Route path="departments" element={<DepartmentsPage />} />
         <Route path="terms/:termId" element={<TermPage />} />
@@ -32,18 +34,32 @@ export function App() {
   )
 }
 
+/** Home is the term being worked on: the one last opened here, else the newest. */
+function HomePage() {
+  const terms = useTerms()
+  if (terms.isPending) return <p className="text-sm text-slate-500">Loading…</p>
+  if (terms.isError) return <p role="alert" className="text-sm text-red-700">{errorMessage(terms.error)}</p>
+  const last = readLastTerm()
+  const term = terms.data.find((t) => t.id === last) ?? terms.data[0]
+  return term ? <Navigate to={`/terms/${term.id}`} replace /> : <TermsPage />
+}
+
+const NAV = [['/', 'Home'], ['/terms', 'Terms'], ['/rooms', 'Lecture halls'], ['/departments', 'Departments']] as const
+
 function Layout() {
   const me = useMe()
   const logout = useLogout()
+  const { pathname } = useLocation()
+  const onTerm = pathname.startsWith('/terms/')
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-[110rem] items-center gap-4 px-4 py-3">
           <Link to="/" className="font-semibold text-emerald-800">Timetable Generator</Link>
           <nav className="flex gap-1 text-sm">
-            {([['/', 'Terms'], ['/rooms', 'Lecture halls'], ['/departments', 'Departments']] as const).map(([to, label]) => (
-              <NavLink key={to} to={to} end={to === '/'}
-                className={({ isActive }) => clsx('rounded-md px-2 py-1', isActive ? 'bg-emerald-50 text-emerald-800' : 'text-slate-600 hover:text-slate-900')}>
+            {NAV.map(([to, label]) => (
+              <NavLink key={to} to={to} end
+                className={({ isActive }) => clsx('rounded-md px-2 py-1', isActive || (to === '/' && onTerm) ? 'bg-emerald-50 text-emerald-800' : 'text-slate-600 hover:text-slate-900')}>
                 {label}
               </NavLink>
             ))}

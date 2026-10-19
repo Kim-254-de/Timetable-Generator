@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, FIRST_HOUR, HOURS, SCORE_LABELS, dateTime, termText } from '@/lib/format'
 import { BulkPaste } from '@/components/BulkPaste'
+import { rememberTerm } from '@/lib/lastTerm'
 import {
   exportUrl,
   useBulkClassRows,
@@ -41,6 +42,8 @@ export function TermPage() {
   const [search, setSearch] = useSearchParams()
   const tab = (search.get('tab') as Tab | null) ?? 'setup'
   const term = useTerm(termId)
+  // The app opens on this term next time (Home).
+  useEffect(() => { if (term.isSuccess) rememberTerm(termId) }, [term.isSuccess, termId])
 
   if (term.isPending) return <p className="text-sm text-slate-500">Loading the term…</p>
   if (term.isError) return <p role="alert" className="text-sm text-red-700">{errorMessage(term.error)}</p>
@@ -48,7 +51,7 @@ export function TermPage() {
   return (
     <div className="space-y-4">
       <div>
-        <Link to="/" className="text-sm text-emerald-700">← All terms</Link>
+        <Link to="/terms" className="text-sm text-emerald-700">Switch term</Link>
         <h1 className="text-xl font-semibold">{term.data.name || termText(term.data)}</h1>
       </div>
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
