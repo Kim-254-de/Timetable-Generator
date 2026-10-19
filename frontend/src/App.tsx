@@ -1,10 +1,14 @@
 import { useState, type FormEvent } from 'react'
-import { Link, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { AxiosError } from 'axios'
+import clsx from 'clsx'
+import { Field, inputClass } from '@/components/Dialog'
 import { errorMessage } from '@/lib/api'
 import { termText } from '@/lib/format'
-import { useLogin, useLogout, useMe, useOpenTerm, useSmartttTerms, useTerms } from '@/lib/queries'
+import { useCreateTerm, useLogin, useLogout, useMe, useOpenTerm, useSmartttTerms, useTerms } from '@/lib/queries'
+import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { DraftPage } from '@/pages/DraftPage'
+import { RoomsPage } from '@/pages/RoomsPage'
 import { TermPage } from '@/pages/TermPage'
 
 export function App() {
@@ -18,6 +22,8 @@ export function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<TermsPage />} />
+        <Route path="rooms" element={<RoomsPage />} />
+        <Route path="departments" element={<DepartmentsPage />} />
         <Route path="terms/:termId" element={<TermPage />} />
         <Route path="terms/:termId/drafts/:draftId" element={<DraftPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -34,7 +40,14 @@ function Layout() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-[110rem] items-center gap-4 px-4 py-3">
           <Link to="/" className="font-semibold text-emerald-800">Timetable Generator</Link>
-          <span className="text-sm text-slate-500">Directorate of Examinations and Timetabling</span>
+          <nav className="flex gap-1 text-sm">
+            {([['/', 'Terms'], ['/rooms', 'Lecture halls'], ['/departments', 'Departments']] as const).map(([to, label]) => (
+              <NavLink key={to} to={to} end={to === '/'}
+                className={({ isActive }) => clsx('rounded-md px-2 py-1', isActive ? 'bg-emerald-50 text-emerald-800' : 'text-slate-600 hover:text-slate-900')}>
+                {label}
+              </NavLink>
+            ))}
+          </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
             <span className="text-slate-600">{me.data?.full_name}</span>
             <button onClick={() => logout.mutate()} className="text-emerald-700">Sign out</button>
@@ -59,22 +72,81 @@ function TermsPage() {
       <h1 className="text-xl font-semibold">Terms</h1>
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
         {terms.data?.map((t) => (
-          <li key={t.id} className="px-4 py-3"><Link to={`/terms/${t.id}`} className="font-medium text-emerald-800">{termText(t)}</Link></li>
+          <li key={t.id} className="px-4 py-3">
+            <Link to={`/terms/${t.id}`} className="font-medium text-emerald-800">{t.name || termText(t)}</Link>
+            {t.name && <span className="ml-2 text-sm text-slate-500">{termText(t)}</span>}
+          </li>
         ))}
-        {terms.data?.length === 0 && <li className="px-4 py-3 text-sm text-slate-500">No term opened yet.</li>}
+        {terms.data?.length === 0 && <li className="px-4 py-3 text-sm text-slate-500">No term yet. Create the first one below.</li>}
       </ul>
-      <section className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white p-4 text-sm">
-        <label>Open a SMARTTT term
-          <select value={choice} onChange={(e) => setChoice(e.target.value)} className="mt-1 block rounded-md border border-slate-300 px-2 py-1">
-            <option value="">Choose…</option>
-            {available.map((t) => <option key={t.id} value={t.id}>{termText(t)}{t.is_current ? ' (current)' : ''}</option>)}
-          </select>
-        </label>
-        <button disabled={!choice || open.isPending} onClick={() => open.mutate(choice, { onSuccess: () => setChoice('') })}
-          className="rounded-md bg-emerald-700 px-3 py-2 text-white disabled:opacity-50">Open</button>
-        {(open.isError || smarttt.isError) && <p role="alert" className="w-full text-red-700">{errorMessage(open.error ?? smarttt.error)}</p>}
-      </section>
+      <CreateTermForm />
+      {/* Opening a SMARTTT term is optional; it only shows when SMARTTT is connected. */}
+      {smarttt.isSuccess && available.length > 0 && (
+        <section className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          <label>Or open a term from SMARTTT
+            <select value={choice} onChange={(e) => setChoice(e.target.value)} className="mt-1 block rounded-md border border-slate-300 px-2 py-1">
+              <option value="">Choose…</option>
+              {available.map((t) => <option key={t.id} value={t.id}>{termText(t)}{t.is_current ? ' (current)' : ''}</option>)}
+            </select>
+          </label>
+          <button disabled={!choice || open.isPending} onClick={() => open.mutate(choice, { onSuccess: () => setChoice('') })}
+            className="rounded-md border border-slate-300 px-3 py-2 disabled:opacity-50">Open</button>
+          {open.isError && <p role="alert" className="w-full text-red-700">{errorMessage(open.error)}</p>}
+        </section>
+      )}
     </div>
+  )
+}
+
+function CreateTermForm() {
+  const terms = useTerms()
+  const create = useCreateTerm()
+  const navigate = useNavigate()
+  const [form, setForm] = useState({ academic_year: '', semester: 1, name: '', start_date: '', end_date: '', copy_from_term_id: '' })
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    create.mutate(
+      {
+        academic_year: form.academic_year.trim(),
+        semester: form.semester,
+        name: form.name.trim() || undefined,
+        start_date: form.start_date || undefined,
+        end_date: form.end_date || undefined,
+        copy_from_term_id: form.copy_from_term_id || undefined,
+      },
+      { onSuccess: (t) => navigate(`/terms/${t.id}`) },
+    )
+  }
+  return (
+    <form onSubmit={submit} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+      <h2 className="font-semibold">Create a new term</h2>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Academic year" hint="e.g. 2026/2027">
+          <input required pattern="\d{4}/\d{4}" value={form.academic_year} onChange={(e) => setForm({ ...form, academic_year: e.target.value })}
+            placeholder="2026/2027" className={inputClass} />
+        </Field>
+        <Field label="Semester" hint="May–August is semester 3">
+          <select value={form.semester} onChange={(e) => setForm({ ...form, semester: Number(e.target.value) })} className={inputClass}>
+            <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option>
+          </select>
+        </Field>
+        <Field label="Name on the timetable" hint="e.g. September-December 2026">
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} />
+        </Field>
+        <Field label="Start date"><input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className={inputClass} /></Field>
+        <Field label="End date"><input type="date" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} className={inputClass} /></Field>
+        <Field label="Copy class rows and units from" hint="Optional: start from a previous term">
+          <select value={form.copy_from_term_id} onChange={(e) => setForm({ ...form, copy_from_term_id: e.target.value })} className={inputClass}>
+            <option value="">Start empty</option>
+            {terms.data?.map((t) => <option key={t.id} value={t.id}>{t.name || termText(t)}</option>)}
+          </select>
+        </Field>
+      </div>
+      {create.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(create.error)}</p>}
+      <button type="submit" disabled={create.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">
+        {create.isPending ? 'Creating…' : 'Create term'}
+      </button>
+    </form>
   )
 }
 
@@ -88,7 +160,7 @@ function LoginPage() {
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Timetable Generator</h1>
-          <p className="mt-1 text-sm text-slate-600">Directorate of Examinations and Timetabling. Sign in with your SMARTTT account.</p>
+          <p className="mt-1 text-sm text-slate-600">Directorate of Examinations and Timetabling. Sign in with your university (SMARTTT) account.</p>
         </div>
         <label className="block text-sm"><span className="font-medium text-slate-700">Staff ID or email</span>
           <input className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" autoComplete="username" value={identifier}

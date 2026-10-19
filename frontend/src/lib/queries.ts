@@ -1,17 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, get } from './api'
 import type {
+  BulkResult,
   ClassRow,
+  Department,
   DraftSummary,
   Grid,
   Group,
   Me,
   Offering,
   Room,
+  RoomRecord,
+  RoomType,
   Run,
   SmartttTerm,
   SnapshotSummary,
   Term,
+  TermInput,
   TermOverview,
   View,
 } from './types'
@@ -27,6 +32,8 @@ export const keys = {
   runs: (id: string) => ['runs', id] as const,
   run: (id: string) => ['run', id] as const,
   grid: (id: string, view: View) => ['grid', id, view] as const,
+  roomList: ['room-list'] as const,
+  departments: ['departments'] as const,
 }
 
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
@@ -85,6 +92,104 @@ function useTermMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
   })
 }
 
+export function useCreateTerm() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: TermInput) => post<Term>('/terms', body),
+    onSettled: () => void qc.invalidateQueries({ queryKey: keys.terms }),
+  })
+}
+
+export const usePatchTerm = (termId: string) =>
+  useTermMutation(termId, (body: TermInput) => patch<Term>(`/terms/${termId}`, body))
+
+export const useCopyTerm = (termId: string) =>
+  useTermMutation(termId, (sourceTermId: string) =>
+    post<{ class_rows_copied: number; units_copied: number }>(`/terms/${termId}/copy`, { source_term_id: sourceTermId }),
+  )
+
+// -- lecture halls and departments: shared by every term --------------------------------
+
+/** Changing halls or departments changes every term's readiness and draft views. */
+function useMasterMutation<TVars, TData>(key: readonly string[], fn: (vars: TVars) => Promise<TData>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: key })
+      for (const k of ['term', 'rooms', 'offerings', 'rows', 'grid']) void qc.invalidateQueries({ queryKey: [k] })
+    },
+  })
+}
+
+export interface RoomInput {
+  code?: string
+  building?: string
+  capacity?: number
+  room_type?: RoomType
+  active?: boolean
+  unavailable?: number[]
+}
+export const useRoomList = () => useQuery({ queryKey: keys.roomList, queryFn: () => get<RoomRecord[]>('/rooms') })
+export const useSaveRoom = () =>
+  useMasterMutation(keys.roomList, ({ id, body }: { id?: string; body: RoomInput }) =>
+    id ? patch<RoomRecord>(`/rooms/${id}`, body) : post<RoomRecord>('/rooms', body),
+  )
+export const useDeleteRoom = () => useMasterMutation(keys.roomList, (id: string) => api.delete(`/rooms/${id}`))
+export const useBulkRooms = () =>
+  useMasterMutation(keys.roomList, (rows: Record<string, string>[]) => post<BulkResult>('/rooms/bulk', { rows }))
+
+export interface DepartmentInput {
+  code?: string
+  name?: string
+  school?: string
+  lecturer_count?: number | null
+}
+export const useDepartments = () => useQuery({ queryKey: keys.departments, queryFn: () => get<Department[]>('/departments') })
+export const useSaveDepartment = () =>
+  useMasterMutation(keys.departments, ({ id, body }: { id?: number; body: DepartmentInput }) =>
+    id ? patch<Department>(`/departments/${id}`, body) : post<Department>('/departments', body),
+  )
+export const useDeleteDepartment = () =>
+  useMasterMutation(keys.departments, (id: number) => api.delete(`/departments/${id}`))
+export const useBulkDepartments = () =>
+  useMasterMutation(keys.departments, (rows: Record<string, string>[]) => post<BulkResult>('/departments/bulk', { rows }))
+
+// -- a term's class rows and units -----------------------------------------------------------
+
+export interface ClassRowInput {
+  program_code?: string
+  study_year?: number
+  study_semester?: number
+  sub_class?: string
+  department_id?: number | null
+  student_count?: number | null
+}
+export const useCreateClassRow = (termId: string) =>
+  useTermMutation(termId, (body: ClassRowInput) => post<ClassRow>(`/terms/${termId}/class-rows`, body))
+export const useDeleteClassRow = (termId: string) =>
+  useTermMutation(termId, (id: string) => api.delete(`/class-rows/${id}`))
+export const useBulkClassRows = (termId: string) =>
+  useTermMutation(termId, (rows: Record<string, string>[]) => post<BulkResult>(`/terms/${termId}/class-rows/bulk`, { rows }))
+
+export interface OfferingInput {
+  unit_code?: string
+  unit_name?: string
+  department_id?: number
+  weekly_hours?: number
+  session_length?: number
+  room_type?: RoomType
+  class_row_ids?: string[]
+}
+export const useCreateOffering = (termId: string) =>
+  useTermMutation(termId, (body: OfferingInput) => post<Offering>(`/terms/${termId}/offerings`, body))
+export const useEditOffering = (termId: string) =>
+  useTermMutation(termId, ({ id, body }: { id: string; body: OfferingInput }) => patch<Offering>(`/offerings/${id}`, body))
+export const useDeleteOffering = (termId: string) =>
+  useTermMutation(termId, (id: string) => api.delete(`/offerings/${id}`))
+export const useBulkOfferings = (termId: string) =>
+  useTermMutation(termId, (rows: Record<string, string>[]) => post<BulkResult>(`/terms/${termId}/offerings/bulk`, { rows }))
+
 export function useOpenTerm() {
   const qc = useQueryClient()
   return useMutation({
@@ -100,7 +205,7 @@ export const useImport = (termId: string) =>
     post<{ class_rows_created: number; offerings_created: number; unresolved: string[] }>(`/terms/${termId}/setup/import`),
   )
 export const usePatchRow = (termId: string) =>
-  useTermMutation(termId, ({ id, body }: { id: string; body: Partial<Pick<ClassRow, 'student_count' | 'unavailable'>> }) =>
+  useTermMutation(termId, ({ id, body }: { id: string; body: ClassRowInput & { unavailable?: number[] } }) =>
     patch<ClassRow>(`/class-rows/${id}`, body),
   )
 export const usePatchOffering = (termId: string) =>
@@ -154,10 +259,11 @@ export const useCopyDraft = (termId: string, draftId: string) =>
   useTermMutation(termId, () => post<DraftSummary>(`/drafts/${draftId}/copy`))
 export const usePublish = (termId: string, draftId: string) =>
   useTermMutation(termId, (replace_unpublished: boolean) =>
-    post<{ version: number; smarttt: { changes?: Record<string, unknown> } }>(`/drafts/${draftId}/publish`, {
+    post<{ version: number; smarttt: { sent?: boolean; reason?: string; changes?: Record<string, unknown> } }>(`/drafts/${draftId}/publish`, {
       replace_unpublished,
     }),
   )
 
-export const exportUrl = (draftId: string, view: View) =>
-  `${import.meta.env.VITE_API_URL ?? '/api'}/drafts/${draftId}/export.pdf?view=${view}`
+export type ExportFormat = 'pdf' | 'docx' | 'xlsx'
+export const exportUrl = (draftId: string, view: View, format: ExportFormat = 'pdf') =>
+  `${import.meta.env.VITE_API_URL ?? '/api'}/drafts/${draftId}/export.${format}?view=${view}`

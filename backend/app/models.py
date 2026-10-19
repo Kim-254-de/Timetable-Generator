@@ -1,21 +1,26 @@
 """
-The Generator's own data (handoff 5.8): the term being built, snapshots of
-SMARTTT's master data, class rows, unit offerings and their groups, solver
-runs, drafts and their sessions, publications, the audit trail, and sign-in
-sessions. Master data itself (rooms, units, programmes, lecturers) stays in
-SMARTTT and is only copied here inside snapshots.
+The Generator's own data: the term being built, the Directorate's master data
+(lecture halls and departments, entered here or imported from SMARTTT),
+class rows, unit offerings and their groups, snapshots of that data taken for
+each solver run, drafts and their sessions, publications, the audit trail,
+and sign-in sessions.
+
+The Directorate enters everything the solver needs in the Generator. SMARTTT
+is optional: "Import from SMARTTT" pre-fills the same tables, and publishing
+sends the finished timetable there.
 """
 
 from __future__ import annotations
 
 import enum
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -63,10 +68,53 @@ class Term(Base):
     __tablename__ = "terms"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    smarttt_term_id: Mapped[str] = mapped_column(String(64), unique=True)
+    # Set when the term was opened from SMARTTT; None for a term created here.
+    smarttt_term_id: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     academic_year: Mapped[str] = mapped_column(String(20))
     semester: Mapped[int] = mapped_column(Integer)  # calendar term 1-3; May-August is 3
+    # Printed on the timetable: "SEPTEMBER-DECEMBER 2026", the version line, the footer.
+    name: Mapped[str] = mapped_column(String(120), default="")
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    version_label: Mapped[str] = mapped_column(String(120), default="")
+    use_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    prepared_by: Mapped[str] = mapped_column(String(255), default="")
+    prepared_by_title: Mapped[str] = mapped_column(String(255), default="Director Examination & Timetabling")
+    # Used for a unit whose own hours/session length aren't set.
+    default_session_length: Mapped[int] = mapped_column(Integer, default=3)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Department(Base):
+    """
+    A department that owns units. `lecturer_count` caps how many of its
+    classes may run at once (rule H9); left empty, no cap is applied. The id
+    is SMARTTT's department id when imported, else a number from 100000 up.
+    """
+
+    __tablename__ = "departments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    school: Mapped[str] = mapped_column(String(255), default="")
+    lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    smarttt_department_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
+
+
+class Room(Base):
+    """A lecture hall, lab or seminar room. The id is SMARTTT's room id when imported, else a random one."""
+
+    __tablename__ = "rooms"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    code: Mapped[str] = mapped_column(String(30), unique=True)
+    building: Mapped[str] = mapped_column(String(120), default="")
+    capacity: Mapped[int] = mapped_column(Integer)
+    room_type: Mapped[str] = mapped_column(String(30), default="lecture_hall")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Slots (0-59) the room can't be used, e.g. maintenance.
+    unavailable: Mapped[list[int]] = mapped_column(JSON, default=list)
 
 
 class Snapshot(Base):
@@ -92,7 +140,9 @@ class ClassRow(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
-    smarttt_program_id: Mapped[int] = mapped_column(Integer)
+    # Set when imported from SMARTTT; None for a class row entered here.
+    smarttt_program_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    department_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     program_code: Mapped[str] = mapped_column(String(64))
     study_year: Mapped[int] = mapped_column(Integer)
     study_semester: Mapped[int] = mapped_column(Integer)
@@ -112,7 +162,8 @@ class UnitOffering(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
-    smarttt_unit_id: Mapped[int] = mapped_column(Integer)
+    # Set when imported from SMARTTT; None for a unit entered here.
+    smarttt_unit_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     unit_code: Mapped[str] = mapped_column(String(64))
     unit_name: Mapped[str] = mapped_column(String(255))
     owning_department_id: Mapped[int] = mapped_column(Integer)

@@ -69,13 +69,17 @@ def build_problem(
             building=r["building"] or r["code"],
             capacity=r["capacity"],
             room_type=r["room_type"],
+            unavailable=frozenset(r.get("unavailable") or ()),
         )
         for r in data["rooms"]
         if r["status"] == "active"
     ]
+    # A department with no lecturer count (entered in the Generator but left
+    # empty) has no cap: H9 is skipped for it rather than forbidding every class.
     capacity = {
-        d["id"]: int(d["lecturers"].get("full_time", 0)) + int(d["lecturers"].get("part_time", 0))
+        d["id"]: int(d["lecturers"].get("full_time") or 0) + int(d["lecturers"].get("part_time") or 0)
         for d in data["departments"]
+        if d.get("lecturers")
     }
 
     rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}

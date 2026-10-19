@@ -53,9 +53,13 @@ export function DraftPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <a href={exportUrl(draftId, view)} className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-2">
-            <Download size={16} /> PDF
-          </a>
+          <span className="text-slate-600">Download:</span>
+          {([['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']] as const).map(([format, label]) => (
+            <a key={format} href={exportUrl(draftId, view, format)}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-2">
+              <Download size={16} /> {label}
+            </a>
+          ))}
           {editable ? (
             <>
               <button onClick={() => resolve.mutate(600, { onSuccess: () => navigate(`/terms/${termId}?tab=runs`) })}
@@ -70,7 +74,7 @@ export function DraftPage() {
               )}
               <button onClick={() => publish.mutate(replaceUploaded)} disabled={!draft.publishable || publish.isPending}
                 className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white disabled:opacity-50"
-                title={draft.publishable ? 'Approve and publish to SMARTTT' : 'Fix the hard-rule problems first'}>
+                title={draft.publishable ? 'Approve this timetable and publish it (sent to SMARTTT when connected)' : 'Fix the hard-rule problems first'}>
                 {publish.isPending ? 'Publishing…' : 'Approve and publish'}
               </button>
             </>
@@ -83,7 +87,10 @@ export function DraftPage() {
 
       {publish.isSuccess && (
         <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Published as version {publish.data.version}. Students now see it; departments can allocate lecturers.
+          Approved as version {publish.data.version}. Departments can now allocate lecturers and download it.{' '}
+          {publish.data.smarttt.sent === false
+            ? `Not yet sent to SMARTTT: ${publish.data.smarttt.reason ?? 'SMARTTT is not connected'}.`
+            : 'Students now see it in SMARTTT.'}
         </p>
       )}
       {publish.isError && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage(publish.error)}</p>}

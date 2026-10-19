@@ -1,8 +1,15 @@
 """
-Opening a term: take a snapshot of SMARTTT's master data, then import the
-term's class rows and unit offerings from it. Importing only ever adds what
-is missing, so the Director's edits (sizes, hours, room types, groups) are
-never overwritten by a later snapshot.
+Opening a term and the data the solver reads.
+
+The Directorate enters lecture halls, departments, class rows and units in
+the Generator (app.services.master). Optionally, a snapshot of SMARTTT's
+master data can be imported to pre-fill them; importing only ever adds what
+is missing, so the Director's edits are never overwritten.
+
+Everything downstream (runs, drafts, grouping, readiness) reads one
+*snapshot*: `latest_snapshot()`. Once any lecture hall exists in the
+Generator, that is a snapshot of the Generator's own data, rebuilt whenever
+the data changes; before that, the latest SMARTTT snapshot.
 """
 
 from __future__ import annotations
@@ -12,15 +19,28 @@ import json
 import re
 import uuid
 from collections import Counter, defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import Identity
 from app.clients.smarttt import SmartttClient
 from app.errors import ApiError
-from app.models import AuditLog, ClassRow, Group, OfferingClassRow, Snapshot, Term, UnitOffering
+from app.models import (
+    AuditLog,
+    ClassRow,
+    Department,
+    DraftSession,
+    Group,
+    OfferingClassRow,
+    Publication,
+    Room,
+    Snapshot,
+    Term,
+    UnitOffering,
+)
 
 ROOM_TYPES = ("lecture_hall", "lab", "seminar")
 
@@ -57,6 +77,67 @@ def get_term(db: Session, term_id: str) -> Term:
     return term
 
 
+def term_dict(term: Term) -> dict[str, Any]:
+    return {
+        "id": str(term.id),
+        "smarttt_term_id": term.smarttt_term_id,
+        "academic_year": term.academic_year,
+        "semester": term.semester,
+        "name": term.name,
+        "start_date": term.start_date.isoformat() if term.start_date else None,
+        "end_date": term.end_date.isoformat() if term.end_date else None,
+        "version_label": term.version_label,
+        "use_from": term.use_from.isoformat() if term.use_from else None,
+        "prepared_by": term.prepared_by,
+        "prepared_by_title": term.prepared_by_title,
+        "default_session_length": term.default_session_length,
+    }
+
+
+TERM_FIELDS = (
+    "academic_year",
+    "semester",
+    "name",
+    "start_date",
+    "end_date",
+    "version_label",
+    "use_from",
+    "prepared_by",
+    "prepared_by_title",
+    "default_session_length",
+)
+
+
+def create_term(db: Session, identity: Identity, fields: dict[str, Any]) -> Term:
+    """A term created in the Generator, with no SMARTTT term behind it."""
+    duplicate = db.scalar(
+        select(Term).where(Term.academic_year == fields["academic_year"], Term.semester == fields["semester"])
+    )
+    if duplicate is not None:
+        raise ApiError(409, "TERM_EXISTS", f"{fields['academic_year']} semester {fields['semester']} already exists.")
+    term = Term(smarttt_term_id=None, **{k: v for k, v in fields.items() if k in TERM_FIELDS and v is not None})
+    db.add(term)
+    db.flush()
+    audit(db, identity, "term.create", "term", str(term.id), None, term_dict(term))
+    db.commit()
+    return term
+
+
+def update_term(db: Session, identity: Identity, term: Term, fields: dict[str, Any]) -> Term:
+    before = term_dict(term)
+    for key, value in fields.items():
+        if key in TERM_FIELDS:
+            setattr(term, key, value)
+    clash = db.scalar(
+        select(Term).where(Term.academic_year == term.academic_year, Term.semester == term.semester, Term.id != term.id)
+    )
+    if clash is not None:
+        raise ApiError(409, "TERM_EXISTS", f"{term.academic_year} semester {term.semester} already exists.")
+    audit(db, identity, "term.update", "term", str(term.id), before, term_dict(term))
+    db.commit()
+    return term
+
+
 def open_term(db: Session, smarttt: SmartttClient, identity: Identity, smarttt_term_id: str) -> Term:
     existing = db.scalar(select(Term).where(Term.smarttt_term_id == smarttt_term_id))
     if existing is not None:
@@ -74,16 +155,137 @@ def open_term(db: Session, smarttt: SmartttClient, identity: Identity, smarttt_t
     return term
 
 
+LOCAL = "local"
+
+
+def latest_smarttt_snapshot(db: Session, term: Term) -> Snapshot | None:
+    """The latest snapshot read from SMARTTT (not one built from the Generator's own data)."""
+    for snapshot in db.scalars(
+        select(Snapshot).where(Snapshot.term_id == term.id).order_by(Snapshot.created_at.desc())
+    ):
+        if snapshot.data.get("source") != LOCAL:
+            return snapshot
+    return None
+
+
+def uses_local_data(db: Session) -> bool:
+    return bool(db.scalar(select(func.count()).select_from(Room)))
+
+
+def _sha(data: dict[str, Any]) -> str:
+    canonical = json.dumps({k: v for k, v in data.items() if k != "taken_at"}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _local_published(db: Session, term: Term) -> dict[str, Any]:
+    """
+    The published timetable, for repair re-solves. SMARTTT's copy wins when
+    there is one (it carries the lecturers departments allocated); otherwise
+    the Generator's latest publication.
+    """
+    smarttt = latest_smarttt_snapshot(db, term)
+    if smarttt is not None and (smarttt.data.get("published") or {}).get("version"):
+        return dict(smarttt.data["published"])
+    publication = db.scalar(
+        select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()).limit(1)
+    )
+    if publication is None:
+        return {"version": None, "sessions": []}
+    sessions = db.scalars(select(DraftSession).where(DraftSession.draft_id == publication.draft_id))
+    return {
+        "version": publication.version,
+        "sessions": [
+            {
+                "key": s.key,
+                "day_of_week": ("MON", "TUE", "WED", "THU", "FRI")[s.start_slot // 12],
+                "start_time": f"{7 + s.start_slot % 12:02d}:00",
+                "end_time": f"{7 + s.start_slot % 12 + s.length:02d}:00",
+                "room_id": s.smarttt_room_id,
+                "lecturer_id": None,
+                "class_rows": [],
+            }
+            for s in sessions
+        ],
+    }
+
+
+def local_snapshot_data(db: Session, term: Term) -> dict[str, Any]:
+    """The Generator's own master data in the shape of a SMARTTT snapshot, so the solver reads it unchanged."""
+    rooms = db.scalars(select(Room).order_by(Room.code))
+    departments = db.scalars(select(Department).order_by(Department.code))
+    return {
+        "source": LOCAL,
+        "taken_at": datetime.now(UTC).isoformat(),
+        "rooms": [
+            {
+                "id": r.id,
+                "code": r.code,
+                "name": r.code,
+                "building": r.building or r.code,
+                "capacity": r.capacity,
+                "capacity_confirmed": True,
+                "room_type": r.room_type,
+                "status": "active" if r.active else "inactive",
+                "unavailable": sorted(r.unavailable or []),
+            }
+            for r in rooms
+        ],
+        "departments": [
+            {
+                "id": d.id,
+                "code": d.code,
+                "name": d.name,
+                # No count entered = no cap (H9 is skipped for the department).
+                "lecturers": {"full_time": d.lecturer_count, "part_time": 0} if d.lecturer_count else {},
+            }
+            for d in departments
+        ],
+        "lecturers": [],
+        "programs": [],
+        "units": [],
+        "curricula": [],
+        "class_sizes": [],
+        "published": _local_published(db, term),
+        "warnings": [],
+    }
+
+
 def latest_snapshot(db: Session, term: Term) -> Snapshot | None:
-    return db.scalar(select(Snapshot).where(Snapshot.term_id == term.id).order_by(Snapshot.created_at.desc()).limit(1))
+    """
+    The data the solver and the draft views read. With lecture halls entered
+    in the Generator: a snapshot of the Generator's own data, stored again
+    only when it changed (so each run keeps the exact data it was solved
+    with). Otherwise the latest SMARTTT snapshot, or None.
+    """
+    if not uses_local_data(db):
+        return latest_smarttt_snapshot(db, term)
+    data = local_snapshot_data(db, term)
+    sha = _sha(data)
+    latest_local = next(
+        (
+            s
+            for s in db.scalars(
+                select(Snapshot).where(Snapshot.term_id == term.id).order_by(Snapshot.created_at.desc())
+            )
+            if s.data.get("source") == LOCAL
+        ),
+        None,
+    )
+    if latest_local is not None and latest_local.sha256 == sha:
+        return latest_local
+    snapshot = Snapshot(term_id=term.id, data=data, sha256=sha, created_by="Generator data")
+    db.add(snapshot)
+    db.flush()
+    return snapshot
 
 
 def take_snapshot(db: Session, smarttt: SmartttClient, identity: Identity, term: Term) -> Snapshot:
+    if not term.smarttt_term_id:
+        raise ApiError(
+            409, "NOT_A_SMARTTT_TERM", "This term was created in the Generator; there is no SMARTTT term to read."
+        )
     data = smarttt.snapshot(term.smarttt_term_id)
-    canonical = json.dumps({k: v for k, v in data.items() if k != "taken_at"}, sort_keys=True, separators=(",", ":"))
-    snapshot = Snapshot(
-        term_id=term.id, data=data, sha256=hashlib.sha256(canonical.encode()).hexdigest(), created_by=identity.actor
-    )
+    snapshot = Snapshot(term_id=term.id, data=data, sha256=_sha(data), created_by=identity.actor)
     db.add(snapshot)
     db.flush()
     audit(
@@ -110,6 +312,7 @@ def snapshot_summary(snapshot: Snapshot) -> dict[str, Any]:
             k: len(d.get(k) or [])
             for k in ("rooms", "departments", "lecturers", "programs", "units", "curricula", "class_sizes")
         },
+        "source": d.get("source") or "smarttt",
         "published_version": (d.get("published") or {}).get("version"),
         "published_sessions": len((d.get("published") or {}).get("sessions") or []),
         "warnings": d.get("warnings") or [],
@@ -135,10 +338,11 @@ def import_setup(db: Session, identity: Identity, term: Term) -> dict[str, Any]:
     - weekly hours, session length and room type prefilled from the
       published timetable when the unit is in it, otherwise left to set.
     """
-    snapshot = latest_snapshot(db, term)
+    snapshot = latest_smarttt_snapshot(db, term)
     if snapshot is None:
         raise ApiError(409, "NO_SNAPSHOT", "Take a snapshot of SMARTTT first.")
     data = snapshot.data
+    rooms_added, departments_added = _import_master_data(db, data)
     programs = {p["id"]: p for p in data["programs"]}
     units = {u["id"]: u for u in data["units"]}
     rooms = {r["id"]: r for r in data["rooms"]}
@@ -290,14 +494,69 @@ def import_setup(db: Session, identity: Identity, term: Term) -> dict[str, Any]:
         "term",
         str(term.id),
         None,
-        {"class_rows": created_rows, "offerings": created_offerings, "snapshot_id": str(snapshot.id)},
+        {
+            "class_rows": created_rows,
+            "offerings": created_offerings,
+            "rooms": rooms_added,
+            "departments": departments_added,
+            "snapshot_id": str(snapshot.id),
+        },
     )
     db.commit()
     return {
         "class_rows_created": created_rows,
         "offerings_created": created_offerings,
+        "rooms_created": rooms_added,
+        "departments_created": departments_added,
         "unresolved": sorted(set(unresolved))[:200],
     }
+
+
+def _import_master_data(db: Session, data: dict[str, Any]) -> tuple[int, int]:
+    """Adds SMARTTT's lecture halls and departments the Generator doesn't have yet (by code)."""
+    room_codes = {code.upper() for code in db.scalars(select(Room.code))}
+    rooms_added = 0
+    for r in data.get("rooms") or []:
+        code = str(r.get("code") or "").strip()
+        if not code or code.upper() in room_codes or db.get(Room, str(r["id"])) is not None:
+            continue
+        db.add(
+            Room(
+                id=str(r["id"]),
+                code=code,
+                building=r.get("building") or "",
+                capacity=int(r.get("capacity") or 0),
+                room_type=r.get("room_type") if r.get("room_type") in ROOM_TYPES else "lecture_hall",
+                active=r.get("status", "active") == "active",
+                unavailable=[],
+            )
+        )
+        room_codes.add(code.upper())
+        rooms_added += 1
+    department_codes = {code.upper() for code in db.scalars(select(Department.code))}
+    departments_added = 0
+    for d in data.get("departments") or []:
+        if db.get(Department, int(d["id"])) is not None:
+            continue
+        code = str(d.get("code") or f"D{d['id']}").strip()
+        if code.upper() in department_codes:
+            code = f"{code}-{d['id']}"
+        lecturers = d.get("lecturers") or {}
+        count = int(lecturers.get("full_time", 0)) + int(lecturers.get("part_time", 0))
+        db.add(
+            Department(
+                id=int(d["id"]),
+                code=code,
+                name=d.get("name") or code,
+                school=d.get("faculty") or "",
+                lecturer_count=count or None,
+                smarttt_department_id=int(d["id"]),
+            )
+        )
+        department_codes.add(code.upper())
+        departments_added += 1
+    db.flush()
+    return rooms_added, departments_added
 
 
 def _hours(start: str, end: str) -> int:
@@ -311,7 +570,15 @@ def readiness(db: Session, term: Term) -> dict[str, Any]:
     snapshot = latest_snapshot(db, term)
     problems: list[dict[str, str]] = []
     if snapshot is None:
-        return {"ready": False, "problems": [{"code": "no_snapshot", "message": "Take a snapshot of SMARTTT."}]}
+        return {
+            "ready": False,
+            "problems": [
+                {
+                    "code": "no_rooms",
+                    "message": "Add the lecture halls (Lecture halls tab), or import them from SMARTTT.",
+                }
+            ],
+        }
     rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
     offerings = list(db.scalars(select(UnitOffering).where(UnitOffering.term_id == term.id)))
     biggest: dict[str, int] = defaultdict(int)
@@ -355,6 +622,18 @@ def readiness(db: Session, term: Term) -> dict[str, Any]:
                         f"{biggest.get(o.room_type, 0)}.",
                     }
                 )
+    known_departments = {int(d["id"]) for d in snapshot.data.get("departments") or []}
+    for o in offerings:
+        if known_departments and o.owning_department_id not in known_departments:
+            problems.append(
+                {
+                    "code": "offering_department",
+                    "entity": o.unit_code,
+                    "message": f"{o.unit_code}: its department isn't in the Departments list.",
+                }
+            )
+    if not offerings:
+        problems.append({"code": "no_units", "message": "Add the units taught this term (Units tab)."})
     used_rows = {link.class_row_id for o in offerings for link in o.class_rows}
     for row_id in used_rows:
         row = rows.get(row_id)
@@ -376,6 +655,7 @@ def class_row_dict(row: ClassRow) -> dict[str, Any]:
         "label": row.label,
         "program_id": row.smarttt_program_id,
         "program_code": row.program_code,
+        "department_id": row.department_id,
         "study_year": row.study_year,
         "study_semester": row.study_semester,
         "sub_class": row.sub_class,

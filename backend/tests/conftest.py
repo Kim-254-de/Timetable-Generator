@@ -8,6 +8,7 @@ import pytest
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("SMARTTT_API_KEY", "test-generator-key")
+os.environ.setdefault("ALLOCATOR_API_KEY", "test-allocator-key")
 os.environ.setdefault("RUN_INLINE", "true")
 os.environ.setdefault("SOLVER_WORKERS", "2")
 

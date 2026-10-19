@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.auth import Identity
-from app.clients.smarttt import SmartttClient, SmartttRefused
+from app.clients.smarttt import SmartttClient, SmartttMisconfigured, SmartttRefused, SmartttUnavailable
 from app.errors import ApiError
 from app.models import Draft, DraftSession, DraftStatus, Publication, RunMode, Term
 from app.services.problem import Built, build_problem, placements_of, times
@@ -268,10 +268,17 @@ def publish(
         group = built.groups[ds.key]
         offering = built.offerings[ds.key]
         day, start, end = times(ds.start_slot, ds.length)
+        room = built.rooms.get(ds.smarttt_room_id, {})
         sessions.append(
             {
                 "key": ds.key,
                 "unit_id": offering.smarttt_unit_id,
+                # Codes as well as ids, so SMARTTT can match (or create) units,
+                # rooms and class rows entered in the Generator.
+                "unit_code": offering.unit_code,
+                "unit_name": offering.unit_name,
+                "room_code": room.get("code"),
+                "class_row_labels": [built.rows[m.class_row_id].label for m in group.members],
                 "group_label": group.label or None,
                 "class_rows": [
                     {
@@ -290,14 +297,27 @@ def publish(
         )
     payload = {
         "term_id": term.smarttt_term_id,
+        "academic_year": term.academic_year,
+        "semester": term.semester,
         "version": version,
         "based_on_version": last.version if last else None,
         "published_by": identity.actor,
         "replace_unpublished": replace_unpublished,
         "sessions": sessions,
     }
+    # The Director's approval stands even when SMARTTT can't be told yet (a
+    # term created in the Generator, or SMARTTT down): the version is recorded
+    # here, downloads and the Allocator use it, and `sent` says it still has to
+    # reach SMARTTT. SMARTTT refusing the timetable (409/422) is different: it
+    # is reported and nothing is published.
     try:
-        _status, response = smarttt.publish(payload)
+        if not term.smarttt_term_id:
+            response: dict[str, Any] = {"sent": False, "reason": "This term exists only in the Generator."}
+        else:
+            _status, response = smarttt.publish(payload)
+            response = {"sent": True, **response}
+    except (SmartttUnavailable, SmartttMisconfigured) as down:
+        response = {"sent": False, "reason": getattr(down, "message", None) or str(down) or "SMARTTT unavailable."}
     except SmartttRefused as refused:
         audit(
             db,
@@ -343,6 +363,9 @@ def publications(db: Session, term: Term) -> list[dict[str, Any]]:
             "published_by": p.published_by,
             "published_at": p.published_at.isoformat(),
             "changes": p.smarttt_response.get("changes"),
+            # False: approved here but not (yet) received by SMARTTT.
+            "sent_to_smarttt": bool(p.smarttt_response.get("sent", True)),
+            "not_sent_reason": p.smarttt_response.get("reason"),
         }
         for p in rows
     ]

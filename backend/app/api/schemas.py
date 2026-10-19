@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Literal
+from datetime import date
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -18,19 +19,123 @@ class LoginBody(_Strict):
     password: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
 
 
+Text = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
+Code = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+RoomType = Literal["lecture_hall", "lab", "seminar"]
+Slots = Annotated[list[Annotated[int, Field(ge=0, le=59)]], Field(max_length=60)]
+AcademicYear = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^\d{4}/\d{4}$")]
+
+
 class OpenTermBody(_Strict):
-    smarttt_term_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    """Either open a SMARTTT term (`smarttt_term_id`) or create one here (`academic_year` + `semester`)."""
+
+    smarttt_term_id: Annotated[str, StringConstraints(min_length=1, max_length=64)] | None = None
+    academic_year: AcademicYear | None = None
+    semester: Annotated[int, Field(ge=1, le=3)] | None = None
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    version_label: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] | None = None
+    use_from: date | None = None
+    prepared_by: Text | None = None
+    prepared_by_title: Text | None = None
+    default_session_length: Annotated[int, Field(ge=1, le=6)] | None = None
+    copy_from_term_id: uuid.UUID | None = None
+
+
+class TermPatch(_Strict):
+    academic_year: AcademicYear | None = None
+    semester: Annotated[int, Field(ge=1, le=3)] | None = None
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    version_label: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] | None = None
+    use_from: date | None = None
+    prepared_by: Text | None = None
+    prepared_by_title: Text | None = None
+    default_session_length: Annotated[int, Field(ge=1, le=6)] | None = None
+
+
+class RoomBody(_Strict):
+    code: Code
+    building: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] = ""
+    capacity: Annotated[int, Field(ge=1, le=5000)]
+    room_type: RoomType = "lecture_hall"
+    active: bool = True
+    unavailable: Slots = []
+
+
+class RoomPatch(_Strict):
+    code: Code | None = None
+    building: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] | None = None
+    capacity: Annotated[int, Field(ge=1, le=5000)] | None = None
+    room_type: RoomType | None = None
+    active: bool | None = None
+    unavailable: Slots | None = None
+
+
+class DepartmentBody(_Strict):
+    code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    school: Text = ""
+    lecturer_count: Annotated[int, Field(ge=1, le=2000)] | None = None
+
+
+class DepartmentPatch(_Strict):
+    code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)] | None = None
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
+    school: Text | None = None
+    lecturer_count: Annotated[int, Field(ge=0, le=2000)] | None = None  # 0 clears the count
+
+
+class ClassRowBody(_Strict):
+    program_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    study_year: Annotated[int, Field(ge=1, le=7)]
+    study_semester: Annotated[int, Field(ge=1, le=3)]
+    sub_class: Annotated[str, StringConstraints(strip_whitespace=True, max_length=10)] = ""
+    department_id: int | None = None
+    student_count: Annotated[int, Field(ge=0, le=5000)] | None = None
+    unavailable: Slots = []
 
 
 class ClassRowPatch(_Strict):
+    program_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)] | None = None
+    study_year: Annotated[int, Field(ge=1, le=7)] | None = None
+    study_semester: Annotated[int, Field(ge=1, le=3)] | None = None
+    sub_class: Annotated[str, StringConstraints(strip_whitespace=True, max_length=10)] | None = None
+    department_id: int | None = None
     student_count: Annotated[int, Field(ge=0, le=5000)] | None = None
-    unavailable: Annotated[list[Annotated[int, Field(ge=0, le=59)]], Field(max_length=60)] | None = None
+    unavailable: Slots | None = None
+
+
+class OfferingBody(_Strict):
+    unit_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)]
+    unit_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    department_id: int
+    weekly_hours: Annotated[int, Field(ge=1, le=20)] | None = None
+    session_length: Annotated[int, Field(ge=1, le=6)] | None = None
+    room_type: RoomType = "lecture_hall"
+    class_row_ids: Annotated[list[uuid.UUID], Field(max_length=200)] = []
 
 
 class OfferingPatch(_Strict):
+    unit_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)] | None = None
+    unit_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
+    department_id: int | None = None
     weekly_hours: Annotated[int, Field(ge=1, le=20)] | None = None
     session_length: Annotated[int, Field(ge=1, le=6)] | None = None
-    room_type: Literal["lecture_hall", "lab", "seminar"] | None = None
+    room_type: RoomType | None = None
+    class_row_ids: Annotated[list[uuid.UUID], Field(max_length=200)] | None = None
+
+
+class BulkBody(_Strict):
+    """Rows pasted from Excel or read from a CSV, already split into fields by the browser."""
+
+    rows: Annotated[list[dict[str, Any]], Field(min_length=1, max_length=3000)]
+
+
+class CopyTermBody(_Strict):
+    source_term_id: uuid.UUID
 
 
 class GroupMember(_Strict):

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     smarttt_api_key: str = ""
     smarttt_timeout_seconds: float = 60.0  # a publish writes the whole term
 
+    # The Timetable Allocator reads units, groups and published meetings with
+    # this key (X-API-Key); it must equal GENERATOR_API_KEY in the Allocator.
+    # Unset = the Allocator can't connect.
+    allocator_api_key: str = ""
+
     session_cookie_name: str = "tg_session"
     csrf_cookie_name: str = "XSRF-TOKEN"
     csrf_header_name: str = "X-XSRF-TOKEN"

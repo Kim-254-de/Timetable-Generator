@@ -3,22 +3,37 @@
 Tharaka University's teaching-timetable generator, run by the Directorate of
 Examinations and Timetabling. It decides when and where every class meets
 (group splits, room, day, time) with a constraint solver (OR-Tools CP-SAT),
-lets the Director review and adjust the result, and publishes the approved
-version to SMARTTT. Departments then allocate lecturers in the Timetable
-Allocator.
+lets the Director review and adjust the result, approves it, and provides the
+timetable as **PDF, Word and Excel** downloads. Departments then allocate
+lecturers in the Timetable Allocator.
 
-The Generator talks **only to SMARTTT** (never to the Allocator), over
-SMARTTT's `/api/v1/integrations/generator/` endpoints with its own
-`X-API-Key`. See `SYSTEM_HANDOFF.md` for the whole platform.
+**Everything is entered here.** The Directorate types in (or pastes from Excel)
+the lecture halls, departments, class rows and units; nothing has to come from
+another system. SMARTTT is optional: its data can be imported to pre-fill the
+same screens, and an approved timetable is sent to it (over SMARTTT's
+`/api/v1/integrations/generator/` endpoints, `X-API-Key`) when it is connected.
+The Timetable Allocator reads each term's units, groups and published meetings
+from `/api/integrations/allocator/` here, with its own key (`ALLOCATOR_API_KEY`).
+See `SYSTEM_HANDOFF.md` for the whole platform.
 
 ## Workflow
 
-1. **Open a term** (a SMARTTT term) and **take a snapshot** of SMARTTT's master
-   data: rooms, departments with lecturer counts, programmes, units, curricula,
-   class sizes, and the current published timetable with its lecturers.
-2. **Import** class rows and units from the snapshot. Weekly hours, session
-   length and room type are prefilled from the last published timetable where
-   the unit is in it; otherwise the Director sets them. Nothing is invented.
+1. **Create a term** (academic year, semester 1–3, the name and version line
+   printed on the timetable), optionally copying a previous term's class rows,
+   units and groups.
+2. **Enter the data**, one at a time or with **Paste from Excel** (a template
+   is downloadable on each screen):
+   - **Lecture halls**: code, building, capacity, type (lecture hall, lab,
+     seminar room), available or closed, blocked hours. Shared by every term.
+   - **Departments**: code, name, school, number of lecturers (caps how many of
+     its classes run at once). Shared by every term.
+   - **Class rows**: programme, year, study semester, sub class, department,
+     number of students, unavailable hours.
+   - **Units**: code, title, owning department, hours per week, class length,
+     room type, and the class rows that take it. A new unit starts as one whole
+     class.
+   (Or, for a SMARTTT term, **import** rooms, departments, class rows and units
+   from a SMARTTT snapshot; anything already entered is kept.)
 3. **Propose groups**: each unit is split so every group fits the largest room
    of its type. The Director decides the final split.
 4. **Run** the solver in the background (a time limit, default 10 minutes).
@@ -28,9 +43,15 @@ SMARTTT's `/api/v1/integrations/generator/` endpoints with its own
    soft-constraint scores. **Drag a class** to another hour, or change its room;
    every move is checked against the hard rules and refused with the reason if
    it breaks one. Moved classes are pinned. **Re-solve** around the pins.
-6. **Approve and publish**: the draft becomes the term's next numbered version
-   in SMARTTT. Students see room and time; lecturers come from the Allocator.
-7. **Mid-term change**: take a new snapshot and run a **repair**. It keeps every
+6. **Approve and publish**: the draft becomes the term's next numbered version.
+   It is sent to SMARTTT when SMARTTT is connected (students see room and
+   time; lecturers come from the Allocator); otherwise it is marked "not yet in
+   SMARTTT" and still counts as approved for downloads and the Allocator.
+7. **Download** any draft or version as **PDF**, **Word (.docx)** or
+   **Excel (.xlsx)**, by class row, lecture hall or department, in the
+   Directorate's layout (header, Mon–Fri × 07:00–19:00 grid, "UNIT / GR / ROOM"
+   cells, version line, "Prepared by … Director Examination & Timetabling").
+8. **Mid-term change**: edit the data (or take a new snapshot) and run a **repair**. It keeps every
    session where it was unless a rule forces a move, and never moves a class
    onto an hour its allocated lecturer already teaches (H13).
 

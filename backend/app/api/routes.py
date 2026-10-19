@@ -10,24 +10,33 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
+    BulkBody,
+    ClassRowBody,
     ClassRowPatch,
+    CopyTermBody,
+    DepartmentBody,
+    DepartmentPatch,
     GroupBody,
     LoginBody,
     MoveBody,
+    OfferingBody,
     OfferingPatch,
     OpenTermBody,
     ProposeBody,
     PublishBody,
     ResolveBody,
+    RoomBody,
+    RoomPatch,
     RunBody,
+    TermPatch,
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
 from app.clients.smarttt import SmartttClient, get_smarttt
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError, ok
-from app.models import ClassRow, Group, Run, RunMode, Term, UnitOffering
-from app.services import drafts, export, grouping, runs, setup
+from app.models import ClassRow, Group, Room, Run, RunMode, Term, UnitOffering
+from app.services import drafts, export, grouping, integration, master, runs, setup
 
 router = APIRouter()
 
@@ -85,30 +94,21 @@ def smarttt_terms(_me: Me, smarttt: Smarttt) -> dict[str, Any]:
 @router.get("/terms")
 def list_terms(_me: Me, db: Db) -> dict[str, Any]:
     terms = db.scalars(select(Term).order_by(Term.academic_year.desc(), Term.semester.desc()))
-    return ok(
-        [
-            {
-                "id": str(t.id),
-                "smarttt_term_id": t.smarttt_term_id,
-                "academic_year": t.academic_year,
-                "semester": t.semester,
-            }
-            for t in terms
-        ]
-    )
+    return ok([setup.term_dict(t) for t in terms])
 
 
 @router.post("/terms")
 def open_term(body: OpenTermBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
-    term = setup.open_term(db, smarttt, identity, body.smarttt_term_id)
-    return ok(
-        {
-            "id": str(term.id),
-            "smarttt_term_id": term.smarttt_term_id,
-            "academic_year": term.academic_year,
-            "semester": term.semester,
-        }
-    )
+    """Opens a SMARTTT term, or creates a term here when academic year and semester are given."""
+    if body.smarttt_term_id:
+        term = setup.open_term(db, smarttt, identity, body.smarttt_term_id)
+    elif body.academic_year and body.semester:
+        term = setup.create_term(db, identity, body.model_dump(exclude={"smarttt_term_id", "copy_from_term_id"}))
+    else:
+        raise ApiError(422, "VALIDATION_ERROR", "Give the academic year and semester of the new term.")
+    if body.copy_from_term_id:
+        master.copy_term(db, identity, term, setup.get_term(db, str(body.copy_from_term_id)))
+    return ok(setup.term_dict(term))
 
 
 @router.get("/terms/{term_id}")
@@ -116,15 +116,89 @@ def term_overview(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
     term = setup.get_term(db, term_id)
     return ok(
         {
-            "id": str(term.id),
-            "smarttt_term_id": term.smarttt_term_id,
-            "academic_year": term.academic_year,
-            "semester": term.semester,
+            **setup.term_dict(term),
             "readiness": setup.readiness(db, term),
             "drafts": drafts.drafts_of(db, term),
             "publications": drafts.publications(db, term),
         }
     )
+
+
+@router.patch("/terms/{term_id}")
+def patch_term(term_id: str, body: TermPatch, identity: Me, db: Db) -> dict[str, Any]:
+    term = setup.get_term(db, term_id)
+    return ok(setup.term_dict(setup.update_term(db, identity, term, body.model_dump(exclude_unset=True))))
+
+
+@router.post("/terms/{term_id}/copy")
+def copy_term(term_id: str, body: CopyTermBody, identity: Me, db: Db) -> dict[str, Any]:
+    target = setup.get_term(db, term_id)
+    return ok(master.copy_term(db, identity, target, setup.get_term(db, str(body.source_term_id))))
+
+
+# -- lecture halls and departments (shared by every term) ---------------------------------
+
+
+def _room(db: Session, room_id: str) -> Room:
+    room = db.get(Room, room_id)
+    if room is None:
+        raise ApiError(404, "NOT_FOUND", "No such lecture hall.")
+    return room
+
+
+@router.get("/rooms")
+def list_rooms(_me: Me, db: Db) -> dict[str, Any]:
+    return ok(master.list_rooms(db))
+
+
+@router.post("/rooms")
+def create_room(body: RoomBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(master.room_dict(master.create_room(db, identity, body.model_dump())))
+
+
+@router.post("/rooms/bulk")
+def bulk_rooms(body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(master.bulk_rooms(db, identity, body.rows))
+
+
+@router.patch("/rooms/{room_id}")
+def patch_room(room_id: str, body: RoomPatch, identity: Me, db: Db) -> dict[str, Any]:
+    room = master.update_room(db, identity, _room(db, room_id), body.model_dump(exclude_unset=True))
+    return ok(master.room_dict(room))
+
+
+@router.delete("/rooms/{room_id}")
+def delete_room(room_id: str, identity: Me, db: Db) -> dict[str, Any]:
+    master.delete_room(db, identity, _room(db, room_id))
+    return ok(None)
+
+
+@router.get("/departments")
+def list_departments(_me: Me, db: Db) -> dict[str, Any]:
+    return ok(master.list_departments(db))
+
+
+@router.post("/departments")
+def create_department(body: DepartmentBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(master.department_dict(master.create_department(db, identity, body.model_dump())))
+
+
+@router.post("/departments/bulk")
+def bulk_departments(body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(master.bulk_departments(db, identity, body.rows))
+
+
+@router.patch("/departments/{department_id}")
+def patch_department(department_id: int, body: DepartmentPatch, identity: Me, db: Db) -> dict[str, Any]:
+    department = master.get_department(db, department_id)
+    updated = master.update_department(db, identity, department, body.model_dump(exclude_unset=True))
+    return ok(master.department_dict(updated))
+
+
+@router.delete("/departments/{department_id}")
+def delete_department(department_id: int, identity: Me, db: Db) -> dict[str, Any]:
+    master.delete_department(db, identity, master.get_department(db, department_id))
+    return ok(None)
 
 
 @router.post("/terms/{term_id}/snapshots")
@@ -143,7 +217,7 @@ def term_rooms(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
     """Active rooms from the latest snapshot, for moving sessions by hand."""
     snapshot = setup.latest_snapshot(db, setup.get_term(db, term_id))
     if snapshot is None:
-        raise ApiError(409, "NO_SNAPSHOT", "Take a snapshot of SMARTTT first.")
+        raise ApiError(409, "NO_SNAPSHOT", "Add the lecture halls first (or import them from SMARTTT).")
     rooms = [r for r in snapshot.data["rooms"] if r["status"] == "active"]
     return ok(sorted(rooms, key=lambda r: (r["building"] or "", r["code"])))
 
@@ -155,17 +229,31 @@ def class_rows(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
     return ok([setup.class_row_dict(r) for r in rows])
 
 
+@router.post("/terms/{term_id}/class-rows")
+def create_class_row(term_id: str, body: ClassRowBody, identity: Me, db: Db) -> dict[str, Any]:
+    term = setup.get_term(db, term_id)
+    return ok(setup.class_row_dict(master.create_class_row(db, identity, term, body.model_dump())))
+
+
+@router.post("/terms/{term_id}/class-rows/bulk")
+def bulk_class_rows(term_id: str, body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(master.bulk_class_rows(db, identity, setup.get_term(db, term_id), body.rows))
+
+
 @router.patch("/class-rows/{row_id}")
 def patch_class_row(row_id: str, body: ClassRowPatch, identity: Me, db: Db) -> dict[str, Any]:
     row: ClassRow = _get(db, ClassRow, row_id, "class row")
     before = setup.class_row_dict(row)
-    if body.student_count is not None:
-        row.student_count = body.student_count
-    if body.unavailable is not None:
-        row.unavailable = sorted(set(body.unavailable))
+    master.update_class_row(db, row, body.model_dump(exclude_unset=True))
     setup.audit(db, identity, "class_row.update", "class_row", row_id, before, setup.class_row_dict(row))
     db.commit()
     return ok(setup.class_row_dict(row))
+
+
+@router.delete("/class-rows/{row_id}")
+def delete_class_row(row_id: str, identity: Me, db: Db) -> dict[str, Any]:
+    master.delete_class_row(db, identity, _get(db, ClassRow, row_id, "class row"))
+    return ok(None)
 
 
 @router.get("/terms/{term_id}/offerings")
@@ -176,29 +264,45 @@ def offerings(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
     return ok([setup.offering_dict(o, rows) for o in found])
 
 
+@router.post("/terms/{term_id}/offerings")
+def create_offering(term_id: str, body: OfferingBody, identity: Me, db: Db) -> dict[str, Any]:
+    term = setup.get_term(db, term_id)
+    offering = master.create_offering(db, identity, term, body.model_dump())
+    rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
+    return ok(setup.offering_dict(offering, rows))
+
+
+@router.post("/terms/{term_id}/offerings/bulk")
+def bulk_offerings(term_id: str, body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(master.bulk_offerings(db, identity, setup.get_term(db, term_id), body.rows))
+
+
 @router.patch("/offerings/{offering_id}")
 def patch_offering(offering_id: str, body: OfferingPatch, identity: Me, db: Db) -> dict[str, Any]:
     offering: UnitOffering = _get(db, UnitOffering, offering_id, "offering")
+    term = setup.get_term(db, str(offering.term_id))
     rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == offering.term_id))}
     before = setup.offering_dict(offering, rows)
-    for field in ("weekly_hours", "session_length", "room_type"):
-        value = getattr(body, field)
-        if value is not None:
-            setattr(offering, field, value)
-    if offering.weekly_hours and offering.session_length and offering.session_length > offering.weekly_hours:
-        raise ApiError(422, "VALIDATION_ERROR", "A session can't be longer than the unit's weekly hours.")
+    master.update_offering(db, term, offering, body.model_dump(exclude_unset=True))
     after = setup.offering_dict(offering, rows)
+    fields = ("unit_code", "unit_name", "department_id", "weekly_hours", "session_length", "room_type", "class_rows")
     setup.audit(
         db,
         identity,
         "offering.update",
         "offering",
         offering_id,
-        {k: before[k] for k in ("weekly_hours", "session_length", "room_type")},
-        {k: after[k] for k in ("weekly_hours", "session_length", "room_type")},
+        {k: before[k] for k in fields},
+        {k: after[k] for k in fields},
     )
     db.commit()
     return ok(after)
+
+
+@router.delete("/offerings/{offering_id}")
+def delete_offering(offering_id: str, identity: Me, db: Db) -> dict[str, Any]:
+    master.delete_offering(db, identity, _get(db, UnitOffering, offering_id, "offering"))
+    return ok(None)
 
 
 @router.post("/terms/{term_id}/groups/propose")
@@ -294,13 +398,39 @@ def publish(draft_id: str, body: PublishBody, identity: Me, db: Db, smarttt: Sma
     return ok(drafts.publish(db, smarttt, identity, drafts.get_draft(db, draft_id), body.replace_unpublished))
 
 
-@router.get("/drafts/{draft_id}/export.pdf")
-def export_pdf(draft_id: str, identity: Me, db: Db, view: str = Query("row")) -> Response:
+EXPORTS = {
+    "pdf": ("application/pdf", export.build_pdf),
+    "docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", export.build_docx),
+    "xlsx": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", export.build_xlsx),
+}
+
+
+@router.get("/drafts/{draft_id}/export.{fmt}")
+def export_draft(draft_id: str, fmt: str, identity: Me, db: Db, view: str = Query("row")) -> Response:
+    """The timetable as PDF, Word (.docx) or Excel (.xlsx), by class row, lecture hall or department."""
+    if fmt not in EXPORTS:
+        raise ApiError(404, "NOT_FOUND", "Downloads are .pdf, .docx or .xlsx.")
+    media_type, build = EXPORTS[fmt]
     draft = drafts.get_draft(db, draft_id)
     data = drafts.grid(db, draft, view)
     term = setup.get_term(db, str(draft.term_id))
-    pdf = export.build_pdf(term, data, identity.full_name)
-    filename = f"teaching-timetable-{term.academic_year.replace('/', '-')}-S{term.semester}-{view}.pdf"
+    content = build(term, data, identity.full_name)
+    filename = f"teaching-timetable-{term.academic_year.replace('/', '-')}-S{term.semester}-{view}.{fmt}"
     return Response(
-        pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+# -- for the Timetable Allocator (shared key, no user session) ------------------------------
+
+AllocatorKey = Depends(integration.require_allocator_key)
+
+
+@router.get("/integrations/allocator/terms", dependencies=[AllocatorKey])
+def allocator_terms(db: Db) -> dict[str, Any]:
+    return ok(integration.allocator_terms(db))
+
+
+@router.get("/integrations/allocator/terms/{term_id}/sections", dependencies=[AllocatorKey])
+def allocator_sections(term_id: str, db: Db) -> dict[str, Any]:
+    return ok(integration.allocator_sections(db, setup.get_term(db, term_id)))

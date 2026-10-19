@@ -3,9 +3,16 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, FIRST_HOUR, HOURS, SCORE_LABELS, dateTime, termText } from '@/lib/format'
+import { BulkPaste } from '@/components/BulkPaste'
 import {
+  exportUrl,
+  useBulkClassRows,
+  useBulkOfferings,
   useClassRows,
+  useDeleteClassRow,
   useDeleteGroup,
+  useDeleteOffering,
+  useDepartments,
   useImport,
   useOfferings,
   usePatchOffering,
@@ -18,13 +25,14 @@ import {
   useTerm,
 } from '@/lib/queries'
 import type { ClassRow, Group, Offering, RoomType } from '@/lib/types'
+import { CLASS_ROW_COLUMNS, ClassRowForm, OfferingForm, TermDetails, UNIT_COLUMNS } from './TermEntry'
 
 const TABS = [
-  ['setup', 'Setup'],
+  ['setup', 'Term details'],
   ['rows', 'Class rows'],
   ['units', 'Units and groups'],
-  ['runs', 'Runs'],
-  ['drafts', 'Drafts and versions'],
+  ['runs', 'Generate'],
+  ['drafts', 'Timetables and downloads'],
 ] as const
 type Tab = (typeof TABS)[number][0]
 
@@ -41,7 +49,7 @@ export function TermPage() {
     <div className="space-y-4">
       <div>
         <Link to="/" className="text-sm text-emerald-700">← All terms</Link>
-        <h1 className="text-xl font-semibold">{termText(term.data)}</h1>
+        <h1 className="text-xl font-semibold">{term.data.name || termText(term.data)}</h1>
       </div>
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
         {TABS.map(([t, label]) => (
@@ -51,7 +59,12 @@ export function TermPage() {
           </button>
         ))}
       </div>
-      {tab === 'setup' && <SetupTab termId={termId} />}
+      {tab === 'setup' && (
+        <div className="space-y-4">
+          <TermDetails termId={termId} />
+          <SetupTab termId={termId} fromSmarttt={Boolean(term.data.smarttt_term_id)} />
+        </div>
+      )}
       {tab === 'rows' && <RowsTab termId={termId} />}
       {tab === 'units' && <UnitsTab termId={termId} />}
       {tab === 'runs' && <RunsTab termId={termId} />}
@@ -60,7 +73,7 @@ export function TermPage() {
   )
 }
 
-function SetupTab({ termId }: { termId: string }) {
+function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolean }) {
   const term = useTerm(termId)
   const snapshot = useSnapshot(termId)
   const importSetup = useImport(termId)
@@ -70,8 +83,9 @@ function SetupTab({ termId }: { termId: string }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      {fromSmarttt && (<>
       <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="font-semibold">1. Snapshot of SMARTTT</h2>
+        <h2 className="font-semibold">Optional: import from SMARTTT</h2>
         <p className="text-sm text-slate-600">Copies rooms, programmes, units, curricula, class sizes, lecturer counts and the current published timetable.</p>
         {snap ? (
           <p className="text-sm">Taken {dateTime(snap.taken_at)} by {snap.taken_by}: {snap.counts.rooms} rooms, {snap.counts.units} units,{' '}
@@ -93,8 +107,8 @@ function SetupTab({ termId }: { termId: string }) {
       </section>
 
       <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="font-semibold">2. Class rows and units</h2>
-        <p className="text-sm text-slate-600">Adds what the snapshot implies. Your edits are never overwritten.</p>
+        <h2 className="font-semibold">Add class rows, units, halls and departments from the snapshot</h2>
+        <p className="text-sm text-slate-600">Adds what is missing. Anything entered here is never overwritten.</p>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => importSetup.mutate(undefined)} disabled={importSetup.isPending || !snap}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Import from the snapshot</button>
@@ -111,11 +125,12 @@ function SetupTab({ termId }: { termId: string }) {
         )}
         {(importSetup.isError || propose.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(importSetup.error ?? propose.error)}</p>}
       </section>
+      </>)}
 
       <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 lg:col-span-2">
-        <h2 className="font-semibold">3. Ready to solve?</h2>
+        <h2 className="font-semibold">Ready to generate?</h2>
         {readiness?.ready
-          ? <p className="text-sm text-emerald-800">Everything is set. Start a run on the Runs tab.</p>
+          ? <p className="text-sm text-emerald-800">Everything is set. Generate the timetable on the Generate tab.</p>
           : (
             <>
               <p className="text-sm text-amber-800">{readiness?.problem_count ?? readiness?.problems.length} things to fix first:</p>
@@ -132,24 +147,40 @@ function SetupTab({ termId }: { termId: string }) {
 function RowsTab({ termId }: { termId: string }) {
   const rows = useClassRows(termId)
   const patch = usePatchRow(termId)
+  const remove = useDeleteClassRow(termId)
+  const bulk = useBulkClassRows(termId)
+  const departments = useDepartments()
+  const deptCode = new Map((departments.data ?? []).map((d) => [d.id, d.code]))
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<ClassRow | null>(null)
+  const [form, setForm] = useState<ClassRow | 'new' | null>(null)
+  const [pasting, setPasting] = useState(false)
   const shown = (rows.data ?? []).filter((r) => r.label.toLowerCase().includes(query.trim().toLowerCase()))
 
   return (
     <div className="space-y-3">
-      <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter class rows"
-        className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
-      {patch.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error)}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter class rows"
+          className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
+        <div className="flex gap-2 text-sm">
+          <button onClick={() => setPasting(true)} className="rounded-md border border-slate-300 bg-white px-3 py-2">Paste from Excel</button>
+          <button onClick={() => setForm('new')} className="rounded-md bg-emerald-700 px-3 py-2 text-white">+ Add a class row</button>
+        </div>
+      </div>
+      {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error ?? remove.error)}</p>}
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr><th className="px-3 py-2">Class row</th><th className="px-3 py-2">Students</th><th className="px-3 py-2">Unavailable hours</th><th /></tr>
+            <tr><th className="px-3 py-2">Class row</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Students</th><th className="px-3 py-2">Unavailable hours</th><th /></tr>
           </thead>
           <tbody>
+            {rows.data?.length === 0 && (
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">No class rows yet. Add them one by one or paste them from Excel.</td></tr>
+            )}
             {shown.map((r) => (
               <tr key={r.id} className="border-t border-slate-100">
                 <td className="px-3 py-2 font-medium">{r.label}</td>
+                <td className="px-3 py-2 text-slate-600">{r.department_id != null ? deptCode.get(r.department_id) ?? '?' : '—'}</td>
                 <td className="px-3 py-2">
                   <input type="number" min={0} defaultValue={r.student_count ?? ''} aria-label={`Students in ${r.label}`}
                     onBlur={(e) => {
@@ -159,7 +190,11 @@ function RowsTab({ termId }: { termId: string }) {
                     className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-amber-400' : 'border-slate-300')} />
                 </td>
                 <td className="px-3 py-2 text-slate-600">{r.unavailable.length ? `${r.unavailable.length} hours` : '—'}</td>
-                <td className="px-3 py-2 text-right"><button onClick={() => setEditing(r)} className="text-emerald-700">Set unavailable hours</button></td>
+                <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
+                  <button onClick={() => setEditing(r)} className="text-emerald-700">Unavailable hours</button>
+                  <button onClick={() => setForm(r)} className="text-emerald-700">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${r.label}?`)) remove.mutate(r.id) }} className="text-red-700">Delete</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -167,6 +202,11 @@ function RowsTab({ termId }: { termId: string }) {
       </div>
       {editing && <UnavailableEditor row={editing} onClose={() => setEditing(null)}
         onSave={(slots) => patch.mutate({ id: editing.id, body: { unavailable: slots } }, { onSuccess: () => setEditing(null) })} />}
+      {form && <ClassRowForm termId={termId} row={form === 'new' ? null : form} onClose={() => setForm(null)} />}
+      {pasting && (
+        <BulkPaste title="Paste class rows" columns={CLASS_ROW_COLUMNS} templateName="class-rows.csv"
+          submit={(r) => bulk.mutateAsync(r)} onClose={() => setPasting(false)} />
+      )}
     </div>
   )
 }
@@ -207,8 +247,14 @@ function UnitsTab({ termId }: { termId: string }) {
   const offerings = useOfferings(termId)
   const rows = useClassRows(termId)
   const patch = usePatchOffering(termId)
+  const remove = useDeleteOffering(termId)
+  const bulk = useBulkOfferings(termId)
+  const departments = useDepartments()
+  const deptCode = new Map((departments.data ?? []).map((d) => [d.id, d.code]))
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Offering | null>(null)
+  const [form, setForm] = useState<Offering | 'new' | null>(null)
+  const [pasting, setPasting] = useState(false)
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (offerings.data ?? []).filter((o) => !q || o.unit_code.toLowerCase().includes(q) || o.unit_name.toLowerCase().includes(q))
@@ -217,19 +263,29 @@ function UnitsTab({ termId }: { termId: string }) {
 
   return (
     <div className="space-y-3">
-      <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter units"
-        className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
-      {patch.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error)}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter units"
+          className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
+        <div className="flex gap-2 text-sm">
+          <button onClick={() => setPasting(true)} className="rounded-md border border-slate-300 bg-white px-3 py-2">Paste from Excel</button>
+          <button onClick={() => setForm('new')} className="rounded-md bg-emerald-700 px-3 py-2 text-white">+ Add a unit</button>
+        </div>
+      </div>
+      {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error ?? remove.error)}</p>}
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Class rows</th><th className="px-3 py-2">Hours / week</th>
-              <th className="px-3 py-2">Session</th><th className="px-3 py-2">Room type</th><th className="px-3 py-2">Groups</th></tr>
+            <tr><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Class rows</th><th className="px-3 py-2">Hours / week</th>
+              <th className="px-3 py-2">Session</th><th className="px-3 py-2">Room type</th><th className="px-3 py-2">Groups</th><th /></tr>
           </thead>
           <tbody>
+            {offerings.data?.length === 0 && (
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-500">No units yet. Add them one by one or paste them from Excel.</td></tr>
+            )}
             {shown.map((o) => (
               <tr key={o.id} className="border-t border-slate-100">
                 <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span><span className="block text-slate-600">{o.unit_name}</span></td>
+                <td className="px-3 py-2 text-slate-600">{deptCode.get(o.department_id) ?? '?'}</td>
                 <td className="px-3 py-2 text-slate-600">{o.class_rows.join(', ')}</td>
                 <td className="px-3 py-2">
                   <input type="number" min={1} max={20} defaultValue={o.weekly_hours ?? ''} aria-label={`Weekly hours of ${o.unit_code}`}
@@ -253,12 +309,21 @@ function UnitsTab({ termId }: { termId: string }) {
                     {o.groups.length ? o.groups.map((g) => g.label || 'Whole class').join(', ') : 'Set groups'}
                   </button>
                 </td>
+                <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
+                  <button onClick={() => setForm(o)} className="text-emerald-700">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${o.unit_code}?`)) remove.mutate(o.id) }} className="text-red-700">Delete</button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {current && <GroupsEditor offering={current} rows={rows.data ?? []} termId={termId} onClose={() => setOpen(null)} />}
+      {form && <OfferingForm termId={termId} offering={form === 'new' ? null : form} rows={rows.data ?? []} onClose={() => setForm(null)} />}
+      {pasting && (
+        <BulkPaste title="Paste units" columns={UNIT_COLUMNS} templateName="units.csv"
+          submit={(r) => bulk.mutateAsync(r)} onClose={() => setPasting(false)} />
+      )}
     </div>
   )
 }
@@ -404,9 +469,15 @@ function DraftsTab({ termId }: { termId: string }) {
         <h2 className="mb-2 font-semibold">Published versions</h2>
         <ul className="space-y-1 text-sm">
           {term.data?.publications.map((p) => (
-            <li key={p.version}>
+            <li key={p.version} className="space-y-0.5">
               <b>Version {p.version}</b> · {dateTime(p.published_at)} by {p.published_by}
               {p.changes && <span className="block text-slate-600">{p.changes.added?.length ?? 0} added, {p.changes.moved?.length ?? 0} moved, {p.changes.removed?.length ?? 0} removed</span>}
+              {!p.sent_to_smarttt && <span className="block text-amber-800">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
+              <span className="flex gap-3">
+                Download: <a href={exportUrl(p.draft_id, 'row', 'pdf')} className="text-emerald-700">PDF</a>
+                <a href={exportUrl(p.draft_id, 'row', 'docx')} className="text-emerald-700">Word</a>
+                <a href={exportUrl(p.draft_id, 'row', 'xlsx')} className="text-emerald-700">Excel</a>
+              </span>
             </li>
           ))}
           {term.data?.publications.length === 0 && <li className="text-slate-500">Nothing published yet.</li>}

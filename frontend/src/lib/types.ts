@@ -18,9 +18,47 @@ export interface SmartttTerm {
 
 export interface Term {
   id: string
-  smarttt_term_id: string
+  smarttt_term_id: string | null
   academic_year: string
   semester: number
+  name: string
+  start_date: string | null
+  end_date: string | null
+  version_label: string
+  use_from: string | null
+  prepared_by: string
+  prepared_by_title: string
+  default_session_length: number
+}
+
+export type TermInput = Partial<Omit<Term, 'id' | 'smarttt_term_id'>> & { copy_from_term_id?: string }
+
+/** A lecture hall, lab or seminar room, shared by every term. */
+export interface RoomRecord {
+  id: string
+  code: string
+  building: string
+  capacity: number
+  room_type: RoomType
+  active: boolean
+  unavailable: number[]
+  in_use: number
+}
+
+export interface Department {
+  id: number
+  code: string
+  name: string
+  school: string
+  lecturer_count: number | null
+  smarttt_department_id: number | null
+}
+
+export interface BulkResult {
+  created: number
+  updated: number
+  errors: { line: number; message: string }[]
+  error_count: number
 }
 
 export interface Problem {
@@ -35,6 +73,7 @@ export interface SnapshotSummary {
   taken_at: string
   taken_by: string
   counts: Record<string, number>
+  source: 'local' | 'smarttt'
   published_version: number | null
   published_sessions: number
   warnings: { code: string; detail: string }[]
@@ -62,6 +101,8 @@ export interface PublicationItem {
   published_by: string
   published_at: string
   changes: { added?: string[]; moved?: string[]; removed?: string[]; unchanged?: number } | null
+  sent_to_smarttt: boolean
+  not_sent_reason: string | null
 }
 
 export interface TermOverview extends Term {
@@ -73,8 +114,9 @@ export interface TermOverview extends Term {
 export interface ClassRow {
   id: string
   label: string
-  program_id: number
+  program_id: number | null
   program_code: string
+  department_id: number | null
   study_year: number
   study_semester: number
   sub_class: string
@@ -97,7 +139,7 @@ export interface Group {
 
 export interface Offering {
   id: string
-  unit_id: number
+  unit_id: number | null
   unit_code: string
   unit_name: string
   department_id: number
