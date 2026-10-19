@@ -74,6 +74,10 @@ class RoomPatch(_Strict):
     unavailable: Slots | None = None
 
 
+# A department typed by name or code; a name not yet in the Departments list is added to it.
+DepartmentText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
+
 class DepartmentBody(_Strict):
     code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
@@ -94,6 +98,7 @@ class ClassRowBody(_Strict):
     study_semester: Annotated[int, Field(ge=1, le=3)]
     sub_class: Annotated[str, StringConstraints(strip_whitespace=True, max_length=10)] = ""
     department_id: int | None = None
+    department: DepartmentText | None = None
     student_count: Annotated[int, Field(ge=0, le=5000)] | None = None
     unavailable: Slots = []
 
@@ -104,6 +109,7 @@ class ClassRowPatch(_Strict):
     study_semester: Annotated[int, Field(ge=1, le=3)] | None = None
     sub_class: Annotated[str, StringConstraints(strip_whitespace=True, max_length=10)] | None = None
     department_id: int | None = None
+    department: DepartmentText | None = None
     student_count: Annotated[int, Field(ge=0, le=5000)] | None = None
     unavailable: Slots | None = None
 
@@ -111,7 +117,8 @@ class ClassRowPatch(_Strict):
 class OfferingBody(_Strict):
     unit_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)]
     unit_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
-    department_id: int
+    department_id: int | None = None  # this or `department` is required
+    department: DepartmentText | None = None
     weekly_hours: Annotated[int, Field(ge=1, le=20)] | None = None
     session_length: Annotated[int, Field(ge=1, le=6)] | None = None
     room_type: RoomType = "lecture_hall"
@@ -122,6 +129,7 @@ class OfferingPatch(_Strict):
     unit_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)] | None = None
     unit_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
     department_id: int | None = None
+    department: DepartmentText | None = None
     weekly_hours: Annotated[int, Field(ge=1, le=20)] | None = None
     session_length: Annotated[int, Field(ge=1, le=6)] | None = None
     room_type: RoomType | None = None

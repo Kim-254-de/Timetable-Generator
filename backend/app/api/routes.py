@@ -244,7 +244,7 @@ def bulk_class_rows(term_id: str, body: BulkBody, identity: Me, db: Db) -> dict[
 def patch_class_row(row_id: str, body: ClassRowPatch, identity: Me, db: Db) -> dict[str, Any]:
     row: ClassRow = _get(db, ClassRow, row_id, "class row")
     before = setup.class_row_dict(row)
-    master.update_class_row(db, row, body.model_dump(exclude_unset=True))
+    master.update_class_row(db, identity, row, body.model_dump(exclude_unset=True))
     setup.audit(db, identity, "class_row.update", "class_row", row_id, before, setup.class_row_dict(row))
     db.commit()
     return ok(setup.class_row_dict(row))
@@ -283,7 +283,7 @@ def patch_offering(offering_id: str, body: OfferingPatch, identity: Me, db: Db) 
     term = setup.get_term(db, str(offering.term_id))
     rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == offering.term_id))}
     before = setup.offering_dict(offering, rows)
-    master.update_offering(db, term, offering, body.model_dump(exclude_unset=True))
+    master.update_offering(db, identity, term, offering, body.model_dump(exclude_unset=True))
     after = setup.offering_dict(offering, rows)
     fields = ("unit_code", "unit_name", "department_id", "weekly_hours", "session_length", "room_type", "class_rows")
     setup.audit(

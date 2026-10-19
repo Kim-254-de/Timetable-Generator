@@ -189,6 +189,55 @@ def delete_department(db: Session, identity: Identity, d: Department) -> None:
     db.commit()
 
 
+_NAME_PREFIX = re.compile(r"^(department|dept\.?)(\s+of)?\s+", re.IGNORECASE)
+_CODE_FILLER = {"OF", "AND", "THE", "FOR", "IN"}
+
+
+def _name_key(name: str) -> str:
+    """'Department of  Computer Science' and 'computer science' are the same department."""
+    return _NAME_PREFIX.sub("", " ".join(name.split())).casefold()
+
+
+def find_department(db: Session, text: str) -> Department | None:
+    """The department whose code or name was typed (case, spacing and a leading 'Department of' ignored)."""
+    found = _department_by_code(db, text)
+    if found is not None:
+        return found
+    key = _name_key(text)
+    return next((d for d in db.scalars(select(Department)) if _name_key(d.name) == key), None)
+
+
+def _new_department_code(db: Session, name: str) -> str:
+    """A short unused code from the name: 'Computer Science' -> 'CS', 'Education' -> 'EDUCATIO'."""
+    words = [w for w in re.findall(r"[A-Za-z0-9]+", _NAME_PREFIX.sub("", name).upper()) if w not in _CODE_FILLER]
+    base = (words[0][:8] if len(words) == 1 else "".join(w[0] for w in words)[:8]) if words else "DEPT"
+    code, n = base, 2
+    while _department_by_code(db, code) is not None:
+        code, n = f"{base}{n}", n + 1
+    return code
+
+
+def department_for(db: Session, identity: Identity, text: str) -> Department:
+    """
+    The department typed on a class row or unit. A name not yet in the
+    Departments list is added there, with a code made from the name that the
+    Director can change on the Departments page.
+    """
+    found = find_department(db, text)
+    if found is not None:
+        return found
+    name = " ".join(text.split())
+    return create_department(db, identity, {"code": _new_department_code(db, name), "name": name}, commit=False)
+
+
+def _resolved_department_id(db: Session, identity: Identity, fields: dict[str, Any]) -> int | None:
+    """Called once every other check has passed, so a refused save never adds a department."""
+    if fields.get("department"):
+        return department_for(db, identity, fields["department"]).id
+    department_id: int | None = fields.get("department_id")
+    return department_id
+
+
 # -- class rows -------------------------------------------------------------------------------
 
 
@@ -212,7 +261,7 @@ def create_class_row(
     row = ClassRow(
         term_id=term.id,
         smarttt_program_id=None,
-        department_id=fields.get("department_id"),
+        department_id=_resolved_department_id(db, identity, fields),
         program_code=fields["program_code"],
         study_year=fields["study_year"],
         study_semester=fields["study_semester"],
@@ -229,7 +278,7 @@ def create_class_row(
     return row
 
 
-def update_class_row(db: Session, row: ClassRow, fields: dict[str, Any]) -> None:
+def update_class_row(db: Session, identity: Identity, row: ClassRow, fields: dict[str, Any]) -> None:
     """Applies a patch (the caller audits and commits). Everything is checked before anything changes."""
     if fields.get("department_id") is not None:
         _check_department(db, fields["department_id"])
@@ -242,11 +291,12 @@ def update_class_row(db: Session, row: ClassRow, fields: dict[str, Any]) -> None
         term = db.get(Term, row.term_id)
         if term is not None and _label_taken(db, term, label, row.id):
             raise ApiError(409, "LABEL_TAKEN", f"{label} already exists in this term.")
+    department_id = _resolved_department_id(db, identity, fields)
     for key, value in new.items():
         setattr(row, key, value)
     row.label = label
-    if fields.get("department_id") is not None:
-        row.department_id = fields["department_id"]
+    if department_id is not None:
+        row.department_id = department_id
     if fields.get("student_count") is not None:
         row.student_count = fields["student_count"]
     if fields.get("unavailable") is not None:
@@ -294,18 +344,23 @@ def create_offering(
 ) -> UnitOffering:
     if _offering_code_taken(db, term, fields["unit_code"], None):
         raise ApiError(409, "CODE_TAKEN", f"{fields['unit_code']} is already a unit in this term.")
-    get_department(db, fields["department_id"])
+    if not fields.get("department"):
+        if fields.get("department_id") is None:
+            raise ApiError(422, "VALIDATION_ERROR", "Type the department that owns the unit.")
+        get_department(db, fields["department_id"])
     rows = _term_rows(db, term.id, list(fields.get("class_row_ids") or []))
     session_length = fields.get("session_length") or term.default_session_length
     weekly_hours = fields.get("weekly_hours") or session_length
     if session_length > weekly_hours:
         raise ApiError(422, "VALIDATION_ERROR", "A session can't be longer than the unit's weekly hours.")
+    department_id = _resolved_department_id(db, identity, fields)
+    assert department_id is not None  # checked above
     offering = UnitOffering(
         term_id=term.id,
         smarttt_unit_id=None,
         unit_code=fields["unit_code"],
         unit_name=fields["unit_name"],
-        owning_department_id=fields["department_id"],
+        owning_department_id=department_id,
         weekly_hours=weekly_hours,
         session_length=session_length,
         room_type=fields.get("room_type") or "lecture_hall",
@@ -330,7 +385,9 @@ def create_offering(
     return offering
 
 
-def update_offering(db: Session, term: Term, offering: UnitOffering, fields: dict[str, Any]) -> None:
+def update_offering(
+    db: Session, identity: Identity, term: Term, offering: UnitOffering, fields: dict[str, Any]
+) -> None:
     """Applies a patch (the caller audits and commits). Everything is checked before anything changes."""
     if fields.get("unit_code") is not None and _offering_code_taken(db, term, fields["unit_code"], offering.id):
         raise ApiError(409, "CODE_TAKEN", f"{fields['unit_code']} is already a unit in this term.")
@@ -342,12 +399,13 @@ def update_offering(db: Session, term: Term, offering: UnitOffering, fields: dic
     if weekly and length and length > weekly:
         raise ApiError(422, "VALIDATION_ERROR", "A session can't be longer than the unit's weekly hours.")
 
+    department_id = _resolved_department_id(db, identity, fields)
     if fields.get("unit_code") is not None:
         offering.unit_code = fields["unit_code"]
     if fields.get("unit_name") is not None:
         offering.unit_name = fields["unit_name"]
-    if fields.get("department_id") is not None:
-        offering.owning_department_id = fields["department_id"]
+    if department_id is not None:
+        offering.owning_department_id = department_id
     for key in ("weekly_hours", "session_length", "room_type"):
         if fields.get(key) is not None:
             setattr(offering, key, fields[key])
@@ -502,15 +560,6 @@ def bulk_departments(db: Session, identity: Identity, rows: list[dict[str, Any]]
     return _bulk(db, rows, one)
 
 
-def _department_id(db: Session, value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    found = _department_by_code(db, str(value))
-    if found is None:
-        raise ValueError(f"department '{value}' is not in the Departments list (use its code)")
-    return found.id
-
-
 def bulk_class_rows(db: Session, identity: Identity, term: Term, rows: list[dict[str, Any]]) -> dict[str, Any]:
     def one(r: dict[str, Any]) -> str:
         fields = _validated(
@@ -520,7 +569,7 @@ def bulk_class_rows(db: Session, identity: Identity, term: Term, rows: list[dict
                 "study_year": r.get("year") or r.get("study_year"),
                 "study_semester": r.get("semester") or r.get("study_semester"),
                 "sub_class": str(r.get("sub_class") or r.get("sub") or ""),
-                "department_id": _department_id(db, r.get("department")),
+                "department": r.get("department") or None,
                 "student_count": r.get("students") or r.get("student_count"),
             },
         )
@@ -536,8 +585,9 @@ def bulk_class_rows(db: Session, identity: Identity, term: Term, rows: list[dict
         if existing is not None:
             update_class_row(
                 db,
+                identity,
                 existing,
-                {"department_id": fields["department_id"], "student_count": fields["student_count"]},
+                {"department": fields["department"], "student_count": fields["student_count"]},
             )
             return "updated"
         create_class_row(db, identity, term, fields, commit=False)
@@ -558,15 +608,14 @@ def bulk_offerings(db: Session, identity: Identity, term: Term, rows: list[dict[
         missing = [n for n in names if compact(n) not in labels]
         if missing:
             raise ValueError(f"class rows not found: {', '.join(missing[:5])}")
-        department_id = _department_id(db, r.get("department"))
-        if department_id is None:
-            raise ValueError("department is required (use its code)")
+        if not r.get("department"):
+            raise ValueError("department is required (its name or code)")
         kind = r.get("room_type") or r.get("type")
         given = _given(
             {
                 "unit_code": r.get("unit_code") or r.get("code"),
                 "unit_name": r.get("unit_title") or r.get("title") or r.get("unit_name"),
-                "department_id": department_id,
+                "department": r.get("department"),
                 "weekly_hours": r.get("hours_per_week") or r.get("weekly_hours"),
                 "session_length": r.get("class_length") or r.get("session_length"),
                 "room_type": _room_type(kind) if kind is not None else None,
@@ -583,7 +632,7 @@ def bulk_offerings(db: Session, identity: Identity, term: Term, rows: list[dict[
             None,
         )
         if existing is not None:
-            update_offering(db, term, existing, {k: v for k, v in fields.items() if k in given})
+            update_offering(db, identity, term, existing, {k: v for k, v in fields.items() if k in given})
             return "updated"
         create_offering(db, identity, term, fields, commit=False)
         return "created"

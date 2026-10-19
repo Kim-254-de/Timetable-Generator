@@ -254,7 +254,6 @@ def test_duplicates_are_refused_and_bulk_updates(client, smarttt):
                     {
                         "unit_code": "COSC 105",
                         "unit_title": "Support",
-                        "department": "NOPE",
                         "class_rows": "BSC.COMP SCI Y1S1",
                     },
                     {
@@ -286,3 +285,59 @@ def test_copy_a_term_into_the_next(client, smarttt):
     assert twice == {"class_rows_copied": 0, "units_copied": 0}
     clash = client.post("/api/terms", json={"academic_year": "2026/2027", "semester": 2})
     assert clash.status_code == 409
+
+
+def test_departments_are_typed_by_name_and_added_when_new(client, smarttt):
+    sign_in(client)
+    term = ok(client.post("/api/terms", json={"academic_year": "2026/2027", "semester": 1, "name": "Sep-Dec 2026"}))
+    cs = ok(client.post("/api/departments", json={"code": "DCOMP", "name": "Computer Science"}))
+
+    # An existing department is found by name (case, spacing and "Department of" ignored) or by code.
+    row = ok(
+        client.post(
+            f"/api/terms/{term['id']}/class-rows",
+            json={
+                "program_code": "BSC.COMP SCI",
+                "study_year": 1,
+                "study_semester": 1,
+                "department": "department of  computer science",
+            },
+        )
+    )
+    assert row["department_id"] == cs["id"]
+    unit = ok(
+        client.post(
+            f"/api/terms/{term['id']}/offerings",
+            json={"unit_code": "COSC 100", "unit_name": "Intro", "department": "dcomp", "class_row_ids": [row["id"]]},
+        )
+    )
+    assert unit["department_id"] == cs["id"]
+
+    # A new name is added to the Departments list, with a code made from the name.
+    unit = ok(client.patch(f"/api/offerings/{unit['id']}", json={"department": "Mathematics and Statistics"}))
+    departments = {d["name"]: d for d in ok(client.get("/api/departments"))}
+    assert departments["Mathematics and Statistics"]["code"] == "MS"
+    assert unit["department_id"] == departments["Mathematics and Statistics"]["id"]
+    row = ok(client.patch(f"/api/class-rows/{row['id']}", json={"department": "Mathematics and Statistics"}))
+    assert row["department_id"] == unit["department_id"]
+    assert len(ok(client.get("/api/departments"))) == 2  # not added twice
+
+    # A unit still needs a department, and a refused save adds none.
+    response = client.post(f"/api/terms/{term['id']}/offerings", json={"unit_code": "COSC 101", "unit_name": "X"})
+    assert response.status_code == 422
+    response = client.post(
+        f"/api/terms/{term['id']}/offerings",
+        json={"unit_code": "COSC 100", "unit_name": "Again", "department": "Physics"},
+    )
+    assert response.status_code == 409
+    assert "Physics" not in {d["name"] for d in ok(client.get("/api/departments"))}
+
+    # Pasting from Excel takes names too.
+    result = ok(
+        client.post(
+            f"/api/terms/{term['id']}/class-rows/bulk",
+            json={"rows": [{"programme": "BED.ARTS", "year": "2", "semester": "1", "department": "Education"}]},
+        )
+    )
+    assert result["created"] == 1 and result["error_count"] == 0
+    assert "Education" in {d["name"] for d in ok(client.get("/api/departments"))}

@@ -84,7 +84,8 @@ function useTermMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
   return useMutation({
     mutationFn: fn,
     onSettled: () => {
-      for (const k of [keys.term(termId), keys.rows(termId), keys.offerings(termId), keys.rooms(termId), keys.runs(termId)]) {
+      // Typing a new department on a class row or unit adds it to Departments.
+      for (const k of [keys.term(termId), keys.rows(termId), keys.offerings(termId), keys.rooms(termId), keys.runs(termId), keys.departments]) {
         void qc.invalidateQueries({ queryKey: k })
       }
       void qc.invalidateQueries({ queryKey: ['grid'] })
@@ -162,7 +163,8 @@ export interface ClassRowInput {
   study_year?: number
   study_semester?: number
   sub_class?: string
-  department_id?: number | null
+  /** A department's name or code; a new name is added to the Departments list. */
+  department?: string
   student_count?: number | null
 }
 export const useCreateClassRow = (termId: string) =>
@@ -175,7 +177,8 @@ export const useBulkClassRows = (termId: string) =>
 export interface OfferingInput {
   unit_code?: string
   unit_name?: string
-  department_id?: number
+  /** A department's name or code; a new name is added to the Departments list. */
+  department?: string
   weekly_hours?: number
   session_length?: number
   room_type?: RoomType
