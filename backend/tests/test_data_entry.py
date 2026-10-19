@@ -341,3 +341,37 @@ def test_departments_are_typed_by_name_and_added_when_new(client, smarttt):
     )
     assert result["created"] == 1 and result["error_count"] == 0
     assert "Education" in {d["name"] for d in ok(client.get("/api/departments"))}
+
+
+def test_naming_a_group_replaces_the_whole_class(client, smarttt):
+    """COSC 100 starts as one whole class; once split into GR A/GR B it no longer appears on its own."""
+    sign_in(client)
+    term = enter_term(client)
+    headers = {"X-API-Key": "test-allocator-key"}
+    draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
+    ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
+    cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
+    row_id = cosc100["groups"][0]["members"][0]["class_row_id"]
+
+    for label, students in (("GR A", 45), ("GR B", 45)):
+        ok(
+            client.post(
+                f"/api/offerings/{cosc100['id']}/groups",
+                json={"label": label, "members": [{"class_row_id": row_id, "students": students}]},
+            )
+        )
+    cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
+    assert [g["label"] for g in cosc100["groups"]] == ["GR A", "GR B"]
+
+    # Its whole-class meetings leave the saved timetable, and the Allocator sees only the groups.
+    grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
+    assert all(c["unit_code"] != "COSC 100" for e in grid["entities"] for c in e["cells"])
+    sections = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
+    assert {s["key"] for s in sections["sections"] if s["unit_code"] == "COSC 100"} == {"COSC100-GRA", "COSC100-GRB"}
+
+    # The whole class can't come back beside its groups.
+    again = client.post(
+        f"/api/offerings/{cosc100['id']}/groups",
+        json={"label": "", "members": [{"class_row_id": row_id, "students": 90}]},
+    )
+    assert again.status_code == 409 and again.json()["error"]["code"] == "UNIT_SPLIT"

@@ -336,8 +336,11 @@ def patch_group(group_id: str, body: GroupBody, identity: Me, db: Db) -> dict[st
 @router.delete("/groups/{group_id}")
 def delete_group(group_id: str, identity: Me, db: Db) -> dict[str, Any]:
     group: Group = _get(db, Group, group_id, "group")
+    offering = db.get(UnitOffering, group.offering_id)
+    if offering is None:
+        raise ApiError(404, "NOT_FOUND", "No such offering.")
     setup.audit(db, identity, "group.delete", "group", group_id, {"label": group.label}, None)
-    db.delete(group)
+    grouping.remove_group(db, offering, group)
     db.commit()
     return ok(None)
 
