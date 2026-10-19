@@ -5,13 +5,13 @@ import type { ApiErrorBody } from './types'
  * Sign-in uses an httpOnly session cookie set by the Allocator API, so no
  * token is ever readable from JavaScript. Because the browser attaches that
  * cookie automatically, state-changing requests also carry the CSRF token the
- * API sets in the `XSRF-TOKEN` cookie, echoed back as `X-XSRF-TOKEN`.
+ * API sets in the `tg_xsrf` cookie, echoed back as `X-XSRF-TOKEN`.
  */
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? '/api',
   withCredentials: true,
   withXSRFToken: true,
-  xsrfCookieName: 'XSRF-TOKEN',
+  xsrfCookieName: 'tg_xsrf',
   xsrfHeaderName: 'X-XSRF-TOKEN',
   timeout: 30_000,
 })

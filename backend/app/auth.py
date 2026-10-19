@@ -6,7 +6,7 @@ The Generator then keeps its own server-side session:
 
 - an opaque random token in an httpOnly, SameSite=Lax cookie; only its
   SHA-256 is stored, so a database leak can't be replayed as sessions;
-- a CSRF token, readable by the web app from the XSRF-TOKEN cookie and
+- a CSRF token, readable by the web app from the tg_xsrf cookie and
   required back in the X-XSRF-TOKEN header on every state-changing request;
 - idle and absolute expiry, and revocation on sign-out;
 - roles re-read from SMARTTT every IDENTITY_REFRESH_SECONDS, so someone who

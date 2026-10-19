@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     allocator_api_key: str = ""
 
     session_cookie_name: str = "tg_session"
-    csrf_cookie_name: str = "XSRF-TOKEN"
+    # Distinct from the Allocator's, so both apps can be signed in on one host.
+    csrf_cookie_name: str = "tg_xsrf"
     csrf_header_name: str = "X-XSRF-TOKEN"
     session_idle_minutes: int = 120
     session_absolute_hours: int = 12

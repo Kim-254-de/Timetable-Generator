@@ -64,5 +64,5 @@ def client(smarttt: FakeSmarttt) -> Iterator[TestClient]:
 def sign_in(client: TestClient, identifier: str = "director") -> TestClient:
     response = client.post("/api/auth/login", json={"identifier": identifier, "password": "right-password"})
     assert response.status_code == 200, response.text
-    client.headers["X-XSRF-TOKEN"] = client.cookies["XSRF-TOKEN"]
+    client.headers["X-XSRF-TOKEN"] = client.cookies["tg_xsrf"]
     return client
