@@ -289,6 +289,12 @@ class Publication(Base):
     published_by: Mapped[str] = mapped_column(String(255))
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     smarttt_response: Mapped[dict[str, Any]] = mapped_column(JSON)
+    # Frozen at approval, so later edits to units, groups or rooms never change
+    # an approved version: `payload` is exactly what SMARTTT is (or will be)
+    # sent; `record` holds the version's classes as its views and downloads
+    # show them. Empty for versions approved before these were kept.
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    record: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
 
 class AuditLog(Base):

@@ -62,8 +62,16 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _production_requirements(self) -> Settings:
         if self.environment == "production":
+            # The defaults point at a developer's machine; production must say where things are.
+            missing = [
+                name.upper()
+                for name in ("database_url", "redis_url", "smarttt_base_url")
+                if name not in self.model_fields_set
+            ]
             if not self.smarttt_api_key:
-                raise ValueError("Missing required setting in production: SMARTTT_API_KEY")
+                missing.append("SMARTTT_API_KEY")
+            if missing:
+                raise ValueError(f"Missing required settings in production: {', '.join(missing)}")
             if not self.cookie_secure:
                 raise ValueError("COOKIE_SECURE must be true in production.")
             if self.run_inline:

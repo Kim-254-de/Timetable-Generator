@@ -358,13 +358,16 @@ def start_run(body: RunBody, identity: Me, db: Db) -> dict[str, Any]:
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, _me: Me, db: Db) -> dict[str, Any]:
-    return ok(runs.run_dict(_get(db, Run, run_id, "run")))
+    run: Run = _get(db, Run, run_id, "run")
+    runs.reap_stale(db, [run])
+    return ok(runs.run_dict(run))
 
 
 @router.get("/terms/{term_id}/runs")
 def term_runs(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
     term = setup.get_term(db, term_id)
-    found = db.scalars(select(Run).where(Run.term_id == term.id).order_by(Run.created_at.desc()).limit(50))
+    found = list(db.scalars(select(Run).where(Run.term_id == term.id).order_by(Run.created_at.desc()).limit(50)))
+    runs.reap_stale(db, found)
     return ok([runs.run_dict(r) for r in found])
 
 
@@ -399,6 +402,11 @@ def copy(draft_id: str, identity: Me, db: Db) -> dict[str, Any]:
 @router.post("/drafts/{draft_id}/publish")
 def publish(draft_id: str, body: PublishBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
     return ok(drafts.publish(db, smarttt, identity, drafts.get_draft(db, draft_id), body.replace_unpublished))
+
+
+@router.post("/terms/{term_id}/publications/{version}/send")
+def send_publication(term_id: str, version: int, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    return ok(drafts.send_publication(db, smarttt, identity, setup.get_term(db, term_id), version))
 
 
 EXPORTS = {

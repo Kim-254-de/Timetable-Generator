@@ -68,7 +68,15 @@ def allocator_sections(db: Session, term: Term) -> dict[str, Any]:
     publication = latest_publication(db, term)
     meetings: dict[Any, list[dict[str, str]]] = {}
     room_codes: dict[str, str] = {}
-    if publication is not None:
+    # An approved version's meetings, as approved (by section key).
+    approved: dict[str, list[dict[str, str]]] | None = None
+    if publication is not None and publication.record is not None:
+        approved = {}
+        for c in publication.record:
+            approved.setdefault(section_key(c["unit_code"], c["group"]), []).append(
+                {"day_of_week": c["day"], "start_time": c["start_time"], "end_time": c["end_time"], "room": c["room"]}
+            )
+    elif publication is not None:  # approved before versions were kept as approved
         room_codes = {r.id: r.code for r in db.scalars(select(Room))}
         for s in db.scalars(select(DraftSession).where(DraftSession.draft_id == publication.draft_id)):
             day, start, end = times(s.start_slot, s.length)
@@ -111,7 +119,12 @@ def allocator_sections(db: Session, term: Term) -> dict[str, Any]:
                         }
                         for r in members
                     ],
-                    "meetings": sorted(meetings.get(g.id, []), key=_meeting_order),
+                    "meetings": sorted(
+                        approved.get(section_key(o.unit_code, g.label), [])
+                        if approved is not None
+                        else meetings.get(g.id, []),
+                        key=_meeting_order,
+                    ),
                 }
             )
     return {

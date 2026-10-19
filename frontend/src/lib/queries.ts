@@ -9,6 +9,7 @@ import type {
   Group,
   Me,
   Offering,
+  PublicationItem,
   Room,
   RoomRecord,
   RoomType,
@@ -266,6 +267,10 @@ export const usePublish = (termId: string, draftId: string) =>
       replace_unpublished,
     }),
   )
+
+/** Sends an approved version SMARTTT missed (it was down), exactly as approved. */
+export const useSendPublication = (termId: string) =>
+  useTermMutation(termId, (version: number) => post<PublicationItem>(`/terms/${termId}/publications/${version}/send`, {}))
 
 export type ExportFormat = 'pdf' | 'docx' | 'xlsx'
 export const exportUrl = (draftId: string, view: View, format: ExportFormat = 'pdf') =>

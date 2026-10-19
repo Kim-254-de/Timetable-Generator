@@ -198,7 +198,7 @@ function CellPanel({ cell, termId, editable, saving, onClose, onSave }: CellPane
           </div>
         </>
       ) : (
-        <p className="text-sm text-slate-600">This draft is published. Copy it to a new draft to change it.</p>
+        <p className="text-sm text-slate-600">This draft is an approved version. It shows exactly as approved, whatever has changed since. Copy it to a new draft to change it.</p>
       )}
     </aside>
   )

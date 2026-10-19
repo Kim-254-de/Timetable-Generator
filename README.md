@@ -139,6 +139,16 @@ cd backend && ruff check . && ruff format --check . && mypy app && pytest
 cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+## Dependencies
+
+The image installs `backend/requirements.lock`: every package pinned to the tested
+version and checked by hash. After changing `backend/pyproject.toml`, regenerate it
+(Linux, Python 3.12, as in the image) and run the checks again:
+
+```bash
+cd backend && uv pip compile pyproject.toml --python-version 3.12 \n  --python-platform x86_64-unknown-linux-gnu --generate-hashes --no-header -o requirements.lock
+```
+
 ## Access
 
 Only members of SMARTTT's `timetabling_office` group (the Directorate) can sign

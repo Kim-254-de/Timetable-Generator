@@ -54,3 +54,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  images:
+    # The images that get deployed build (pinned dependencies install on Linux).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --pull -t ci-api backend
+      - run: docker build --pull -t ci-web frontend

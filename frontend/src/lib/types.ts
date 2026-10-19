@@ -103,6 +103,8 @@ export interface PublicationItem {
   changes: { added?: string[]; moved?: string[]; removed?: string[]; unchanged?: number } | null
   sent_to_smarttt: boolean
   not_sent_reason: string | null
+  /** Not yet in SMARTTT, the latest version, and SMARTTT has the term: it can be sent now. */
+  can_send: boolean
 }
 
 export interface TermOverview extends Term {
@@ -226,6 +228,8 @@ export interface Grid {
   days: Day[]
   first_hour: number
   hours: number
+  /** An approved version, shown exactly as it was approved. */
+  as_approved: boolean
   entities: Entity[]
 }
 

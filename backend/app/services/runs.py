@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -32,6 +34,48 @@ MODE_DEFAULTS: dict[RunMode, dict[str, int]] = {
     RunMode.RESOLVE: {"keep_previous": 0},
     RunMode.REPAIR: {},
 }
+
+
+# A job may run this long past the solver's own limit (room phase, writing the draft).
+JOB_GRACE_SECONDS = 900
+# A queued run no worker has picked up within this long was lost (e.g. Redis restarted).
+QUEUE_WAIT = timedelta(hours=1)
+
+
+def _aware(moment: datetime) -> datetime:
+    # SQLite hands back naive datetimes; everything here is UTC.
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def reap_stale(db: Session, found: Iterable[Run]) -> None:
+    """
+    Marks failed the runs whose worker died (killed, out of memory, redeployed)
+    or whose job was lost, which would otherwise show as queued or running
+    forever: running past the job's own timeout, or queued over QUEUE_WAIT.
+    """
+    now = utcnow()
+    changed = False
+    for run in found:
+        if run.status == RunStatus.RUNNING and run.started_at is not None:
+            stale = _aware(run.started_at) + timedelta(seconds=run.time_limit_s + JOB_GRACE_SECONDS) < now
+            message = "The solver stopped without finishing (its worker was restarted). Start the run again."
+        elif run.status == RunStatus.QUEUED:
+            stale = _aware(run.created_at) + QUEUE_WAIT < now
+            message = "No solver worker picked this run up. Check the worker is running, then start it again."
+        else:
+            continue
+        if stale:
+            run.status = RunStatus.FAILED
+            run.failure = {
+                "stage": "worker",
+                "count": 1,
+                "reasons": [{"rule": "?", "entity": "run", "message": message}],
+            }
+            run.finished_at = now
+            changed = True
+            logger.warning("Run %s marked failed: %s", run.id, message)
+    if changed:
+        db.commit()
 
 
 def run_dict(run: Run) -> dict[str, Any]:
@@ -120,9 +164,12 @@ def _enqueue(run_id: str, time_limit_s: int) -> None:
 
     settings = get_settings()
     queue = Queue(settings.run_queue, connection=Redis.from_url(settings.redis_url))
-    # The job may run a little past the solver's own limit (room phase, writing the draft).
     queue.enqueue(
-        "app.worker.jobs.execute_run", run_id, job_timeout=time_limit_s + 900, result_ttl=3600, failure_ttl=86400
+        "app.worker.jobs.execute_run",
+        run_id,
+        job_timeout=time_limit_s + JOB_GRACE_SECONDS,
+        result_ttl=3600,
+        failure_ttl=86400,
     )
 
 

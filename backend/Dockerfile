@@ -3,9 +3,11 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 RUN useradd --create-home --uid 10001 app
-COPY pyproject.toml ./
+# Exactly the tested versions, checked by hash (regenerate: see README).
+COPY requirements.lock pyproject.toml ./
+RUN pip install --require-hashes --no-deps -r requirements.lock
 COPY app ./app
-RUN pip install .
+RUN pip install --no-deps .
 COPY alembic.ini ./
 COPY alembic ./alembic
 USER app

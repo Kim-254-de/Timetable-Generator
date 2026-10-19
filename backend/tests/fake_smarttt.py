@@ -153,6 +153,7 @@ class FakeSmarttt:
         self.publications: dict[int, dict[str, Any]] = {}
         self.payloads: list[dict[str, Any]] = []
         self.refuse_publish: dict[str, Any] | None = None
+        self.down = False  # True: SMARTTT can't be reached
 
     def identity(self, account: str, office: bool) -> dict[str, Any]:
         return {
@@ -172,6 +173,8 @@ class FakeSmarttt:
         return httpx.MockTransport(self.handle)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        if self.down:
+            raise httpx.ConnectError("SMARTTT is down", request=request)
         if request.headers.get("X-API-Key") != API_KEY:
             return httpx.Response(403, json={"detail": "A valid X-API-Key header is required."})
         route = request.url.path[len(PREFIX) :]

@@ -21,6 +21,7 @@ import {
   useProposeGroups,
   useRuns,
   useSaveGroup,
+  useSendPublication,
   useSnapshot,
   useStartRun,
   useTerm,
@@ -454,6 +455,7 @@ function RunsTab({ termId }: { termId: string }) {
 
 function DraftsTab({ termId }: { termId: string }) {
   const term = useTerm(termId)
+  const send = useSendPublication(termId)
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -476,6 +478,12 @@ function DraftsTab({ termId }: { termId: string }) {
               <b>Version {p.version}</b> · {dateTime(p.published_at)} by {p.published_by}
               {p.changes && <span className="block text-slate-600">{p.changes.added?.length ?? 0} added, {p.changes.moved?.length ?? 0} moved, {p.changes.removed?.length ?? 0} removed</span>}
               {!p.sent_to_smarttt && <span className="block text-amber-800">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
+              {p.can_send && (
+                <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
+                  className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900 disabled:opacity-50">
+                  {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
+                </button>
+              )}
               <span className="flex gap-3">
                 Download: <a href={exportUrl(p.draft_id, 'row', 'pdf')} className="text-emerald-700">PDF</a>
                 <a href={exportUrl(p.draft_id, 'row', 'docx')} className="text-emerald-700">Word</a>
@@ -485,6 +493,7 @@ function DraftsTab({ termId }: { termId: string }) {
           ))}
           {term.data?.publications.length === 0 && <li className="text-slate-500">Nothing published yet.</li>}
         </ul>
+        {send.isError && <p role="alert" className="mt-2 text-sm text-red-700">{errorMessage(send.error)}</p>}
       </section>
     </div>
   )

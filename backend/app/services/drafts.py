@@ -78,12 +78,65 @@ def draft_summary(db: Session, draft: Draft) -> dict[str, Any]:
     }
 
 
-def grid(db: Session, draft: Draft, view: str) -> dict[str, Any]:
-    """The draft laid out like the printed timetable: one grid per class row, room or department."""
-    if view not in VIEWS:
-        raise ApiError(422, "VALIDATION_ERROR", f"view must be one of {', '.join(VIEWS)}.")
+# What a timetable cell shows; the other fields of a class only place it in a view.
+CELL_FIELDS = (
+    "key",
+    "unit_code",
+    "group",
+    "room_id",
+    "room",
+    "day",
+    "start_time",
+    "end_time",
+    "start_slot",
+    "length",
+    "pinned",
+    "students",
+)
+
+
+def _cells(db: Session, draft: Draft) -> list[dict[str, Any]]:
+    """Every class in the draft, with what each view needs, from the term's current data."""
     built = _built(db, draft)
     by_key = {s.key: s for s in built.problem.sessions}
+    snapshot = latest_snapshot(db, db.get(Term, draft.term_id))  # type: ignore[arg-type]
+    department_names = {str(d["id"]): d["name"] for d in (snapshot.data["departments"] if snapshot else [])}
+    cells = []
+    for ds in draft.sessions:
+        s = by_key.get(ds.key)
+        group = built.groups.get(ds.key)
+        offering = built.offerings.get(ds.key)
+        room = built.rooms.get(ds.smarttt_room_id, {})
+        day, start, end = times(ds.start_slot, ds.length)
+        department = str(offering.owning_department_id if offering else 0)
+        class_rows = []
+        for row_id in s.class_row_ids if s else []:
+            row = built.rows.get(uuid.UUID(row_id))
+            class_rows.append({"id": row_id, "label": row.label if row else row_id})
+        cells.append(
+            {
+                "key": ds.key,
+                "unit_code": offering.unit_code if offering else ds.key,
+                "group": group.label if group else "",
+                "room_id": ds.smarttt_room_id,
+                "room": room.get("code", "?"),
+                "day": day,
+                "start_time": start,
+                "end_time": end,
+                "start_slot": ds.start_slot,
+                "length": ds.length,
+                "pinned": ds.pinned,
+                "students": s.students if s else None,
+                "class_rows": class_rows,
+                "department": {"id": department, "name": department_names.get(department, f"Department {department}")},
+                "room_capacity": room.get("capacity"),
+                "room_building": room.get("building"),
+            }
+        )
+    return cells
+
+
+def _layout(cells: list[dict[str, Any]], view: str) -> list[dict[str, Any]]:
     entities: dict[str, dict[str, Any]] = {}
 
     def entity(eid: str, label: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -91,55 +144,49 @@ def grid(db: Session, draft: Draft, view: str) -> dict[str, Any]:
             entities[eid] = {"id": eid, "label": label, "cells": [], **(extra or {})}
         return entities[eid]
 
-    for ds in draft.sessions:
-        s = by_key.get(ds.key)
-        group = built.groups.get(ds.key)
-        offering = built.offerings.get(ds.key)
-        room = built.rooms.get(ds.smarttt_room_id, {})
-        day, start, end = times(ds.start_slot, ds.length)
-        cell = {
-            "key": ds.key,
-            "unit_code": offering.unit_code if offering else ds.key,
-            "group": group.label if group else "",
-            "room_id": ds.smarttt_room_id,
-            "room": room.get("code", "?"),
-            "day": day,
-            "start_time": start,
-            "end_time": end,
-            "start_slot": ds.start_slot,
-            "length": ds.length,
-            "pinned": ds.pinned,
-            "students": s.students if s else None,
-        }
+    for c in cells:
+        cell = {k: c.get(k) for k in CELL_FIELDS}
         if view == "room":
-            entity(
-                ds.smarttt_room_id,
-                room.get("code", "?"),
-                {"capacity": room.get("capacity"), "building": room.get("building")},
-            )["cells"].append(cell)
+            extra = {"capacity": c.get("room_capacity"), "building": c.get("room_building")}
+            entity(c["room_id"], c["room"], extra)["cells"].append(cell)
         elif view == "department":
-            dept = offering.owning_department_id if offering else 0
-            entity(str(dept), f"Department {dept}")["cells"].append(cell)
-        elif s is not None:
-            for row_id in s.class_row_ids:
-                row = built.rows.get(uuid.UUID(row_id))
-                entity(row_id, row.label if row else row_id)["cells"].append(cell)
-
-    if view == "department":
-        snapshot = latest_snapshot(db, db.get(Term, draft.term_id))  # type: ignore[arg-type]
-        names = {str(d["id"]): d["name"] for d in (snapshot.data["departments"] if snapshot else [])}
-        for eid, e in entities.items():
-            e["label"] = names.get(eid, e["label"])
+            entity(c["department"]["id"], c["department"]["name"])["cells"].append(cell)
+        else:
+            for row in c["class_rows"]:
+                entity(row["id"], row["label"])["cells"].append(cell)
     ordered = sorted(entities.values(), key=lambda e: e["label"])
     for e in ordered:
         e["cells"].sort(key=lambda c: (c["start_slot"], c["unit_code"]))
+    return ordered
+
+
+def publication_of(db: Session, draft: Draft) -> Publication | None:
+    """The version this draft was approved as, if it was."""
+    if draft.status == DraftStatus.DRAFT:
+        return None
+    return db.scalar(
+        select(Publication).where(Publication.draft_id == draft.id).order_by(Publication.version.desc()).limit(1)
+    )
+
+
+def grid(db: Session, draft: Draft, view: str) -> dict[str, Any]:
+    """
+    The draft laid out like the printed timetable: one grid per class row,
+    room or department. An approved version shows (and downloads) exactly as
+    it was approved, whatever has been edited since.
+    """
+    if view not in VIEWS:
+        raise ApiError(422, "VALIDATION_ERROR", f"view must be one of {', '.join(VIEWS)}.")
+    publication = publication_of(db, draft)
+    frozen = publication.record if publication is not None else None
     return {
         "draft": draft_summary(db, draft),
         "view": view,
         "days": list(DAYS),
         "first_hour": 7,
         "hours": 12,
-        "entities": ordered,
+        "as_approved": frozen is not None,
+        "entities": _layout(frozen if frozen is not None else _cells(db, draft), view),
     }
 
 
@@ -332,7 +379,13 @@ def publish(
         raise
 
     publication = Publication(
-        term_id=term.id, version=version, draft_id=draft.id, published_by=identity.actor, smarttt_response=response
+        term_id=term.id,
+        version=version,
+        draft_id=draft.id,
+        published_by=identity.actor,
+        smarttt_response=response,
+        payload=payload,
+        record=_cells(db, draft),
     )
     db.add(publication)
     db.execute(
@@ -355,7 +408,10 @@ def publish(
 
 
 def publications(db: Session, term: Term) -> list[dict[str, Any]]:
-    rows = db.scalars(select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()))
+    rows = list(
+        db.scalars(select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()))
+    )
+    latest = rows[0].version if rows else None
     return [
         {
             "version": p.version,
@@ -366,9 +422,61 @@ def publications(db: Session, term: Term) -> list[dict[str, Any]]:
             # False: approved here but not (yet) received by SMARTTT.
             "sent_to_smarttt": bool(p.smarttt_response.get("sent", True)),
             "not_sent_reason": p.smarttt_response.get("reason"),
+            "can_send": (
+                not p.smarttt_response.get("sent", True)
+                and p.version == latest
+                and bool(term.smarttt_term_id)
+                and p.payload is not None
+            ),
         }
         for p in rows
     ]
+
+
+def send_publication(
+    db: Session, smarttt: SmartttClient, identity: Identity, term: Term, version: int
+) -> dict[str, Any]:
+    """
+    Sends an approved version that SMARTTT didn't receive (it was down, or the
+    term wasn't linked yet) exactly as it was approved. Only the term's latest
+    version can be sent, so SMARTTT never moves back to an older timetable.
+    """
+    publication = db.scalar(select(Publication).where(Publication.term_id == term.id, Publication.version == version))
+    if publication is None:
+        raise ApiError(404, "NOT_FOUND", f"No version {version} for this term.")
+    if publication.smarttt_response.get("sent", True):
+        raise ApiError(409, "ALREADY_SENT", f"SMARTTT already has version {version}.")
+    latest = db.scalar(
+        select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()).limit(1)
+    )
+    if latest is not None and latest.version != version:
+        raise ApiError(409, "NOT_LATEST", f"Version {latest.version} replaced version {version}; send that one.")
+    if not term.smarttt_term_id:
+        raise ApiError(
+            409, "NO_SMARTTT_TERM", "This term exists only in the Generator, so SMARTTT has nowhere to put it."
+        )
+    if publication.payload is None:
+        raise ApiError(
+            409,
+            "NOT_KEPT",
+            "This version was approved before versions were kept as approved. Copy its draft and approve the copy.",
+        )
+    payload = {**publication.payload, "term_id": term.smarttt_term_id}
+    try:
+        _status, response = smarttt.publish(payload)
+    except (SmartttUnavailable, SmartttMisconfigured) as down:
+        reason = getattr(down, "message", None) or str(down) or "SMARTTT unavailable."
+        raise ApiError(503, "SMARTTT_UNAVAILABLE", f"SMARTTT could not be reached: {reason} Try again later.") from down
+    except SmartttRefused as refused:
+        audit(
+            db, identity, "publication.send_refused", "publication", str(publication.id), None, {"code": refused.code}
+        )
+        db.commit()
+        raise
+    publication.smarttt_response = {"sent": True, **response}
+    audit(db, identity, "publication.send", "publication", str(publication.id), None, {"version": version})
+    db.commit()
+    return next(p for p in publications(db, term) if p["version"] == version)
 
 
 def drafts_of(db: Session, term: Term) -> list[dict[str, Any]]:

@@ -363,9 +363,16 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
     cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
     assert [g["label"] for g in cosc100["groups"]] == ["GR A", "GR B"]
 
-    # Its whole-class meetings leave the saved timetable, and the Allocator sees only the groups.
+    # The approved version still reads as approved; the next draft needs the groups (it is out of date),
+    # and the Allocator sees only the groups.
     grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
-    assert all(c["unit_code"] != "COSC 100" for e in grid["entities"] for c in e["cells"])
+    assert grid["as_approved"] is True
+    assert any(c["unit_code"] == "COSC 100" and c["group"] == "" for e in grid["entities"] for c in e["cells"])
+    copy = ok(client.post(f"/api/drafts/{draft_id}/copy"))
+    assert set(ok(client.get(f"/api/drafts/{copy['id']}?view=row"))["draft"]["stale"]["missing"]) >= {
+        "COSC100-GRA-1",
+        "COSC100-GRB-1",
+    }
     sections = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
     assert {s["key"] for s in sections["sections"] if s["unit_code"] == "COSC 100"} == {"COSC100-GRA", "COSC100-GRB"}
 
