@@ -36,6 +36,22 @@ def section_key(unit_code: str, group_label: str) -> str:
     return f"{compact(unit_code)}-{compact(group_label) or 'MAIN'}"
 
 
+def smarttt_section_key(offering: UnitOffering, group_label: str) -> str | None:
+    """
+    The class's key in SMARTTT ('412-GRA': SMARTTT's unit id and the group),
+    where the Allocator sends its lecturer. None for a unit SMARTTT doesn't
+    have, which SMARTTT can't timetable either.
+    """
+    if offering.smarttt_unit_id is None:
+        return None
+    return f"{offering.smarttt_unit_id}-{compact(group_label) or 'MAIN'}"
+
+
+def in_smarttt(publication: Publication | None) -> bool:
+    """Whether SMARTTT has this approved version (approved while SMARTTT was down: not yet)."""
+    return publication is not None and bool(publication.smarttt_response.get("sent", True))
+
+
 def latest_publication(db: Session, term: Term) -> Publication | None:
     return db.scalar(
         select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()).limit(1)
@@ -52,7 +68,9 @@ def allocator_terms(db: Session) -> list[dict[str, Any]]:
                 "academic_year": t.academic_year,
                 "semester": t.semester,
                 "name": t.name,
+                "smarttt_term_id": t.smarttt_term_id,
                 "published_version": publication.version if publication else None,
+                "in_smarttt": in_smarttt(publication),
             }
         )
     return out
@@ -102,6 +120,7 @@ def allocator_sections(db: Session, term: Term) -> dict[str, Any]:
             sections.append(
                 {
                     "key": section_key(o.unit_code, g.label),
+                    "smarttt_key": smarttt_section_key(o, g.label),
                     "unit_code": o.unit_code,
                     "unit_name": o.unit_name,
                     "group": g.label or None,
@@ -133,7 +152,10 @@ def allocator_sections(db: Session, term: Term) -> dict[str, Any]:
             "academic_year": term.academic_year,
             "semester": term.semester,
             "name": term.name,
+            "smarttt_term_id": term.smarttt_term_id,
         },
         "published_version": publication.version if publication else None,
+        # The Allocator sends lecturers to SMARTTT only once SMARTTT has the version.
+        "in_smarttt": in_smarttt(publication),
         "sections": sections,
     }
