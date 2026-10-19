@@ -86,7 +86,7 @@ Tharaka University (Marimanti, Kenya) wants to move timetabling and attendance f
 └───────────────────────────┘                       └──────────────────────┘
 ```
 
-The Generator and the Allocator **never call each other**. Both talk only to SMARTTT. The Generator publishes the timetable to SMARTTT; the Allocator reads the published sessions from SMARTTT and writes the lecturer for each session back to SMARTTT.
+The Generator publishes the timetable to SMARTTT. **Decision, 19 October 2026:** the Allocator may also read from the Generator, one way only. The Director's office enters each term's units and groups in the Generator, so the Allocator's allocation form reads units, groups, class rows and published meetings from the Generator's read-only `/api/integrations/allocator/` endpoints (Allocator `GENERATOR_API_KEY` = Generator `ALLOCATOR_API_KEY`). The form's allocations are kept in the Allocator's own database. The Generator never calls the Allocator. The earlier SMARTTT board in the Allocator still reads published sessions from SMARTTT and writes each lecturer back there. Sign-in for both systems still goes through SMARTTT.
 
 | System | Repo | Job | Users |
 |---|---|---|---|
@@ -622,7 +622,7 @@ Ask the team; do not assume.
 
 - **Never** commit `.env`, databases, logs, uploaded files or personal data (phone numbers, student lists).
 - **Which repo?** Timetable building, groups, solver, Director UI → `Timetable-Generator`. Lecturer allocation, availability, COD UI → `Timetable-Allocator`. Master data, published timetable, the integration endpoints both new repos call → `SMARTTT_BACKEND`. A task that changes an API contract updates both sides in the same piece of work, and this file.
-- The two new repos must not import each other's code or call each other's API. Shared contract = the SMARTTT endpoints in 5.10.
+- The two new repos must not import each other's code. The only call between them is the Allocator reading the Generator's read-only `/api/integrations/allocator/` endpoints (see section 1); the Generator never calls the Allocator. Everything else goes through the SMARTTT endpoints in 5.10.
 - Shared-key auth between services: header `X-API-Key`, compared in constant time; fail closed when unset.
 - Keep each repo's existing style: Django apps with `services/ selectors/ validators/` in SMARTTT; `*.routes/controller/service/repository/schema.ts` in Attendance; Zod/Pydantic validation at the edge.
 - Every behaviour change ships with tests. Use the real sample files (section 10) as fixtures.

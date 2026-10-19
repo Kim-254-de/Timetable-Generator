@@ -348,7 +348,7 @@ def import_setup(db: Session, identity: Identity, term: Term) -> dict[str, Any]:
     rooms = {r["id"]: r for r in data["rooms"]}
     published = (data.get("published") or {}).get("sessions") or []
 
-    rows: dict[tuple[int, int, int, str], ClassRow] = {
+    rows: dict[tuple[int | None, int, int, str], ClassRow] = {
         (r.smarttt_program_id, r.study_year, r.study_semester, r.sub_class): r
         for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))
     }

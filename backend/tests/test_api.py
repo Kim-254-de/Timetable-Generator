@@ -41,7 +41,13 @@ def test_import_builds_class_rows_and_offerings(client, smarttt):
     snapshot = ok(client.post(f"/api/terms/{term['id']}/snapshots"))
     assert snapshot["counts"]["rooms"] == 5
     result = ok(client.post(f"/api/terms/{term['id']}/setup/import"))
-    assert result == {"class_rows_created": 2, "offerings_created": 4, "unresolved": []}
+    assert result == {
+        "class_rows_created": 2,
+        "offerings_created": 4,
+        "unresolved": [],
+        "rooms_created": 5,
+        "departments_created": 2,
+    }
     again = ok(client.post(f"/api/terms/{term['id']}/setup/import"))
     assert again["class_rows_created"] == 0  # idempotent: nothing duplicated
 

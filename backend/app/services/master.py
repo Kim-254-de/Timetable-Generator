@@ -54,9 +54,12 @@ def room_dict(room: Room, in_use: int = 0) -> dict[str, Any]:
 
 
 def list_rooms(db: Session) -> list[dict[str, Any]]:
-    usage = dict(
-        db.execute(select(DraftSession.smarttt_room_id, func.count()).group_by(DraftSession.smarttt_room_id)).all()
-    )
+    usage: dict[str, int] = {
+        room_id: count
+        for room_id, count in db.execute(
+            select(DraftSession.smarttt_room_id, func.count()).group_by(DraftSession.smarttt_room_id)
+        ).tuples()
+    }
     rooms = db.scalars(select(Room).order_by(Room.building, Room.code))
     return [room_dict(r, int(usage.get(r.id, 0))) for r in rooms]
 
