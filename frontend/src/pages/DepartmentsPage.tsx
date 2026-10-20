@@ -26,34 +26,34 @@ export function DepartmentsPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Departments</h1>
-          <p className="text-sm text-slate-600">Each unit belongs to one department. Used by every term.</p>
+          <p className="text-sm text-muted">Each unit belongs to one department. Used by every term.</p>
         </div>
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-slate-300 bg-white px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setEditing('new')} className="rounded-md bg-emerald-700 px-3 py-2 text-white">+ Add a department</button>
+          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
+          <button onClick={() => setEditing('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a department</button>
         </div>
       </div>
-      {(departments.isError || remove.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(departments.error ?? remove.error)}</p>}
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      {(departments.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(departments.error ?? remove.error)}</p>}
+      <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">School</th><th className="px-3 py-2">Lecturers</th><th /></tr>
           </thead>
           <tbody>
             {(departments.data ?? []).map((d) => (
-              <tr key={d.id} className="border-t border-slate-100">
+              <tr key={d.id} className="border-t border-line">
                 <td className="px-3 py-2 font-medium">{d.code}</td>
                 <td className="px-3 py-2">{d.name}</td>
-                <td className="px-3 py-2 text-slate-600">{d.school}</td>
-                <td className="px-3 py-2">{d.lecturer_count ?? <span className="text-slate-400">no limit</span>}</td>
+                <td className="px-3 py-2 text-muted">{d.school}</td>
+                <td className="px-3 py-2">{d.lecturer_count ?? <span className="text-muted">no limit</span>}</td>
                 <td className="space-x-3 px-3 py-2 text-right">
-                  <button onClick={() => setEditing(d)} className="text-emerald-700">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${d.code}?`)) remove.mutate(d.id) }} className="text-red-700">Delete</button>
+                  <button onClick={() => setEditing(d)} className="text-brand-ink">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${d.code}?`)) remove.mutate(d.id) }} className="text-danger">Delete</button>
                 </td>
               </tr>
             ))}
             {departments.data?.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">No departments yet.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No departments yet.</td></tr>
             )}
           </tbody>
         </table>
@@ -95,10 +95,10 @@ function DepartmentForm({ department, onClose }: { department: Department | null
           <input type="number" min={1} value={form.lecturer_count ?? ''}
             onChange={(e) => setForm({ ...form, lecturer_count: e.target.value === '' ? null : Number(e.target.value) })} className={inputClass} />
         </Field>
-        {save.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(save.error)}</p>}
+        {save.isError && <p role="alert" className="text-sm text-danger">{errorMessage(save.error)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={save.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
+          <button type="submit" disabled={save.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
         </div>
       </form>
     </Dialog>

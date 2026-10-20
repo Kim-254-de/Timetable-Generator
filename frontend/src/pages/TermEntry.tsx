@@ -50,14 +50,14 @@ export function TermDetails({ termId }: { termId: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <TermDetailsForm term={term.data} key={term.data.id} />
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <section className="space-y-3 rounded-lg border border-line bg-card p-4 text-sm">
         <h2 className="font-semibold">What the Generator needs</h2>
         <ol className="list-decimal space-y-1 pl-5">
-          <li><Link to="/rooms" className="text-emerald-700">Lecture halls</Link>: {rooms.data?.length ?? 0} entered (shared by every term)</li>
-          <li><Link to="/departments" className="text-emerald-700">Departments</Link>: {departments.data?.length ?? 0} entered (shared by every term)</li>
-          <li><Link to={`/terms/${termId}?tab=rows`} className="text-emerald-700">Class rows</Link>: the cohorts printed on the timetable, with student numbers</li>
-          <li><Link to={`/terms/${termId}?tab=units`} className="text-emerald-700">Units and groups</Link>: each unit, the class rows that take it, and how it is split into groups</li>
-          <li><Link to={`/terms/${termId}?tab=runs`} className="text-emerald-700">Generate</Link>, review, approve and download</li>
+          <li><Link to="/rooms" className="text-brand-ink">Lecture halls</Link>: {rooms.data?.length ?? 0} entered (shared by every term)</li>
+          <li><Link to="/departments" className="text-brand-ink">Departments</Link>: {departments.data?.length ?? 0} entered (shared by every term)</li>
+          <li><Link to={`/terms/${termId}?tab=rows`} className="text-brand-ink">Class rows</Link>: the cohorts printed on the timetable, with student numbers</li>
+          <li><Link to={`/terms/${termId}?tab=units`} className="text-brand-ink">Units and groups</Link>: each unit, the class rows that take it, and how it is split into groups</li>
+          <li><Link to={`/terms/${termId}?tab=runs`} className="text-brand-ink">Generate</Link>, review, approve and download</li>
         </ol>
         <CopyFromTerm termId={termId} />
       </section>
@@ -89,9 +89,9 @@ function TermDetailsForm({ term }: { term: Term }) {
     })
   }
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-      <h2 className="font-semibold">Term details <span className="font-normal text-slate-500">· {termText(term)}</span></h2>
-      <p className="text-sm text-slate-600">Printed on the downloaded timetable.</p>
+    <form onSubmit={submit} className="space-y-3 rounded-lg border border-line bg-card p-4">
+      <h2 className="font-semibold">Term details <span className="font-normal text-muted">· {termText(term)}</span></h2>
+      <p className="text-sm text-muted">Printed on the downloaded timetable.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Name" hint="e.g. September-December 2026"><input value={form.name} onChange={set('name')} className={inputClass} /></Field>
         <Field label="Class length (hours)" hint="Used for units without their own">
@@ -104,9 +104,9 @@ function TermDetailsForm({ term }: { term: Term }) {
         <Field label="Prepared by"><input value={form.prepared_by} onChange={set('prepared_by')} placeholder="Dr. …" className={inputClass} /></Field>
         <Field label="Title"><input value={form.prepared_by_title} onChange={set('prepared_by_title')} className={inputClass} /></Field>
       </div>
-      {patch.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error)}</p>}
-      {patch.isSuccess && <p className="text-sm text-emerald-800">Saved.</p>}
-      <button type="submit" disabled={patch.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">Save details</button>
+      {patch.isError && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error)}</p>}
+      {patch.isSuccess && <p className="text-sm text-success">Saved.</p>}
+      <button type="submit" disabled={patch.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save details</button>
     </form>
   )
 }
@@ -118,19 +118,19 @@ function CopyFromTerm({ termId }: { termId: string }) {
   const others = (terms.data ?? []).filter((t) => t.id !== termId)
   if (!others.length) return null
   return (
-    <div className="border-t border-slate-100 pt-3">
+    <div className="border-t border-line pt-3">
       <p className="font-medium">Start from a previous term</p>
-      <p className="text-slate-600">Copies its class rows, units and groups. Anything already here is kept.</p>
+      <p className="text-muted">Copies its class rows, units and groups. Anything already here is kept.</p>
       <div className="mt-2 flex gap-2">
-        <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-md border border-slate-300 px-2 py-1">
+        <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-md border border-line px-2 py-1">
           <option value="">Choose a term…</option>
           {others.map((t) => <option key={t.id} value={t.id}>{t.name || termText(t)}</option>)}
         </select>
         <button disabled={!source || copy.isPending} onClick={() => copy.mutate(source)}
-          className="rounded-md border border-slate-300 px-3 py-1 disabled:opacity-50">Copy</button>
+          className="rounded-md border border-line px-3 py-1 disabled:opacity-50">Copy</button>
       </div>
-      {copy.isSuccess && <p className="mt-1 text-emerald-800">Copied {copy.data.class_rows_copied} class rows and {copy.data.units_copied} units.</p>}
-      {copy.isError && <p role="alert" className="mt-1 text-red-700">{errorMessage(copy.error)}</p>}
+      {copy.isSuccess && <p className="mt-1 text-success">Copied {copy.data.class_rows_copied} class rows and {copy.data.units_copied} units.</p>}
+      {copy.isError && <p role="alert" className="mt-1 text-danger">{errorMessage(copy.error)}</p>}
     </div>
   )
 }
@@ -173,7 +173,7 @@ export function ClassRowForm({ termId, row, onClose }: { termId: string; row: Cl
   return (
     <Dialog title={row ? `Edit ${row.label}` : 'Add a class row'} onClose={onClose}>
       <form onSubmit={submit} className="mt-3 space-y-3">
-        <p className="text-sm text-slate-600">Shown on the timetable as <b>{label}</b>.</p>
+        <p className="text-sm text-muted">Shown on the timetable as <b>{label}</b>.</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <Field label="Programme" hint="As printed on the timetable, e.g. BED.BIO/AGR or B.LAW">
@@ -198,10 +198,10 @@ export function ClassRowForm({ termId, row, onClose }: { termId: string; row: Cl
             </Field>
           </div>
         </div>
-        {failure && <p role="alert" className="text-sm text-red-700">{errorMessage(failure)}</p>}
+        {failure && <p role="alert" className="text-sm text-danger">{errorMessage(failure)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={create.isPending || edit.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
+          <button type="submit" disabled={create.isPending || edit.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
         </div>
       </form>
     </Dialog>
@@ -274,26 +274,26 @@ export function OfferingForm({
         </div>
         <div>
           <div className="flex flex-wrap items-end justify-between gap-2">
-            <p className="text-sm font-medium text-slate-700">Class rows taking this unit · {chosen.size} chosen, {students} students</p>
+            <p className="text-sm font-medium text-ink">Class rows taking this unit · {chosen.size} chosen, {students} students</p>
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search class rows"
-              className="w-60 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+              className="w-60 rounded-md border border-line px-2 py-1 text-sm" />
           </div>
-          <div className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-md border border-slate-200 p-2 text-sm sm:grid-cols-2">
+          <div className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-md border border-line p-2 text-sm sm:grid-cols-2">
             {shown.map((r) => (
               <label key={r.id} className="flex items-center gap-2">
                 <input type="checkbox" checked={chosen.has(r.id)} onChange={() => toggle(r.id)} />
                 <span className="flex-1">{r.label}</span>
-                <span className="text-slate-500">{r.student_count ?? '?'}</span>
+                <span className="text-muted">{r.student_count ?? '?'}</span>
               </label>
             ))}
-            {rows.length === 0 && <p className="text-slate-500">Add class rows first (Class rows tab).</p>}
+            {rows.length === 0 && <p className="text-muted">Add class rows first (Class rows tab).</p>}
           </div>
-          <p className="mt-1 text-xs text-slate-500">A new unit starts as one whole class. Split it into groups (GR A, GR B…) from the Groups column.</p>
+          <p className="mt-1 text-xs text-muted">A new unit starts as one whole class. Split it into groups (GR A, GR B…) from the Groups column.</p>
         </div>
-        {failure && <p role="alert" className="text-sm text-red-700">{errorMessage(failure)}</p>}
+        {failure && <p role="alert" className="text-sm text-danger">{errorMessage(failure)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={create.isPending || edit.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
+          <button type="submit" disabled={create.isPending || edit.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
         </div>
       </form>
     </Dialog>

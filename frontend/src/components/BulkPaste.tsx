@@ -102,46 +102,46 @@ export function BulkPaste({
 
   return (
     <Dialog title={title} onClose={onClose} wide>
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-muted">
         Copy the cells from Excel <b>including the header row</b> and paste them below, or open a CSV file. Existing items
         (same code) are updated; new ones are added.
       </p>
-      <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+      <div className="mt-2 overflow-x-auto rounded-md border border-line">
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-50 text-slate-500">
+          <thead className="bg-surface text-muted">
             <tr>{columns.map((c) => <th key={c.key} className="px-2 py-1 font-medium">{c.label}{c.required ? ' *' : ''}</th>)}</tr>
           </thead>
           <tbody>
-            <tr>{columns.map((c) => <td key={c.key} className="px-2 py-1 text-slate-600">{c.example}</td>)}</tr>
+            <tr>{columns.map((c) => <td key={c.key} className="px-2 py-1 text-muted">{c.example}</td>)}</tr>
           </tbody>
         </table>
       </div>
       {columns.some((c) => c.hint) && (
-        <ul className="mt-2 list-disc pl-5 text-xs text-slate-600">
+        <ul className="mt-2 list-disc pl-5 text-xs text-muted">
           {columns.filter((c) => c.hint).map((c) => <li key={c.key}><b>{c.label}:</b> {c.hint}</li>)}
         </ul>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <button type="button" onClick={() => downloadText(templateName, templateCsv(columns))} className="text-emerald-700">
+        <button type="button" onClick={() => downloadText(templateName, templateCsv(columns))} className="text-brand-ink">
           Download the template (CSV)
         </button>
-        <label className="cursor-pointer text-emerald-700">
+        <label className="cursor-pointer text-brand-ink">
           Open a CSV file
           <input type="file" accept=".csv,text/csv,text/plain" className="sr-only" onChange={(e) => void readFile(e.target.files?.[0])} />
         </label>
       </div>
       <textarea value={text} onChange={(e) => { setText(e.target.value); setResult(null) }} rows={10} aria-label="Pasted rows"
         placeholder={columns.map((c) => c.label).join('\t')}
-        className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1 font-mono text-xs" />
-      <p className="text-xs text-slate-500">{rows.length} rows read.</p>
-      {failure && <p role="alert" className="text-sm text-red-700">{failure}</p>}
+        className="mt-2 w-full rounded-md border border-line px-2 py-1 font-mono text-xs" />
+      <p className="text-xs text-muted">{rows.length} rows read.</p>
+      {failure && <p role="alert" className="text-sm text-danger">{failure}</p>}
       {result && (
-        <div className="mt-2 rounded-md bg-slate-50 p-2 text-sm">
-          <p className="text-emerald-800">{result.created} added, {result.updated} updated.</p>
+        <div className="mt-2 rounded-md bg-surface p-2 text-sm">
+          <p className="text-success">{result.created} added, {result.updated} updated.</p>
           {result.error_count > 0 && (
             <>
-              <p className="text-red-700">{result.error_count} rows skipped:</p>
-              <ul className="max-h-40 list-disc overflow-y-auto pl-5 text-red-700">
+              <p className="text-danger">{result.error_count} rows skipped:</p>
+              <ul className="max-h-40 list-disc overflow-y-auto pl-5 text-danger">
                 {result.errors.map((e) => <li key={e.line}>Row {e.line}: {e.message}</li>)}
               </ul>
             </>
@@ -149,9 +149,9 @@ export function BulkPaste({
         </div>
       )}
       <div className="mt-4 flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Close</button>
+        <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Close</button>
         <button type="button" onClick={() => void send()} disabled={!rows.length || busy}
-          className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">
+          className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">
           {busy ? 'Saving…' : `Save ${rows.length} rows`}
         </button>
       </div>

@@ -1,5 +1,95 @@
 @import 'tailwindcss';
 
+/*
+ * Tharaka University palette, shared with the attendance portals and taken from the SMARTTT
+ * student portal (SMARTTT_fronted lib/core/theme/app_theme.dart), so every system reads as one.
+ *
+ * `brand-*` and `gold-*` are fixed scales for surfaces that look the same in both modes
+ * (the top bar). Everything else uses the semantic names below, which dark mode redefines.
+ */
 @theme {
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand-100: #dce4f6;
+  --color-brand-200: #b7c6ee;
+  --color-brand-600: #2952c4; /* SMARTTT secondary */
+  --color-brand-800: #1a3a8f; /* SMARTTT primary — royal blue */
+  --color-brand-950: #0d1321;
+  --color-gold-500: #f5a623; /* SMARTTT accent — golden yellow */
+
+  /* Semantic — light values; dark values are below. */
+  --color-surface: #f7f8fa; /* page background */
+  --color-card: #ffffff;
+  --color-ink: #1a1f2e;
+  --color-muted: #5c6478;
+  --color-line: #e2e8f0;
+  --color-brand: #1a3a8f; /* solid fills behind white text */
+  --color-brand-strong: #142c6b; /* hover/pressed fill */
+  --color-brand-ink: #1a3a8f; /* brand-coloured text and links */
+  --color-brand-soft: #e8edf8; /* tinted chips, selected rows */
+  --color-topbar: #1a3a8f;
+  --color-danger: #c62828;
+  --color-danger-solid: #dc2626;
+  --color-danger-soft: #fdecec;
+  --color-success: #1e7e34;
+  --color-success-soft: #e7f5ea;
+  --color-warning: #b45309;
+  --color-warning-soft: #fff4e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: #0d1321;
+    --color-card: #162040;
+    --color-ink: #f7f8fa;
+    --color-muted: #94a3b8;
+    --color-line: #243564;
+    --color-brand: #2952c4;
+    --color-brand-strong: #3561d6;
+    --color-brand-ink: #9db4f5;
+    --color-brand-soft: #22346b;
+    --color-topbar: #111a33;
+    --color-danger: #fca5a5;
+    --color-danger-soft: #3a1c2a;
+    --color-success: #6edc8c;
+    --color-success-soft: #14322a;
+    --color-warning: #fbbf24;
+    --color-warning-soft: #3a2e14;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background: var(--color-surface);
+    color: var(--color-ink);
+  }
+
+  /* Fields are written without a background, so give them the card colour in both modes. */
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    background-color: var(--color-card);
+    color: var(--color-ink);
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    border-color: var(--color-brand-ink);
+    outline: 2px solid color-mix(in oklab, var(--color-brand-ink) 30%, transparent);
+    outline-offset: 0;
+  }
+
+  :focus-visible {
+    outline-color: var(--color-brand-ink);
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-brand);
+  }
 }

@@ -38,19 +38,19 @@ export function TimetableGrid({ entities, view, editable, highlight, onMove, onS
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-300 bg-white text-[11px]" role="grid" aria-label="Timetable">
+    <div className="overflow-x-auto rounded-lg border border-line bg-card text-[11px]" role="grid" aria-label="Timetable">
       <div className="grid min-w-[110rem]" style={{ gridTemplateColumns: columns }}>
-        <div className="sticky left-0 z-10 border-b border-r border-slate-300 bg-slate-100" />
+        <div className="sticky left-0 z-10 border-b border-r border-line bg-surface" />
         {DAYS.map((d) => (
-          <div key={d} className="border-b border-r border-slate-300 bg-slate-100 py-1 text-center font-semibold"
+          <div key={d} className="border-b border-r border-line bg-surface py-1 text-center font-semibold"
             style={{ gridColumn: `span ${HOURS}` }}>
             {DAY_NAMES[d]}
           </div>
         ))}
-        <div className="sticky left-0 z-10 border-b border-r border-slate-300 bg-slate-100" />
+        <div className="sticky left-0 z-10 border-b border-r border-line bg-surface" />
         {DAYS.flatMap((d) =>
           Array.from({ length: HOURS }, (_, h) => (
-            <div key={`${d}${h}`} className="border-b border-r border-slate-200 bg-slate-50 text-center text-slate-500">
+            <div key={`${d}${h}`} className="border-b border-r border-line bg-surface text-center text-muted">
               {FIRST_HOUR + h}-{FIRST_HOUR + h + 1}
             </div>
           )),
@@ -60,17 +60,17 @@ export function TimetableGrid({ entities, view, editable, highlight, onMove, onS
       {entities.map((entity) =>
         lines(entity.cells).map((line, n) => (
           <div key={`${entity.id}-${n}`} className="grid min-w-[110rem]" style={{ gridTemplateColumns: columns }}>
-            <div className={clsx('sticky left-0 z-10 border-b border-r border-slate-300 bg-white px-2 py-1 font-medium', n > 0 && 'text-transparent')}
+            <div className={clsx('sticky left-0 z-10 border-b border-r border-line bg-card px-2 py-1 font-medium', n > 0 && 'text-transparent')}
               style={{ gridRow: 1 }} role="rowheader">
               {entity.label}
               {view === 'room' && entity.capacity != null && n === 0 && (
-                <span className="block font-normal text-slate-500">{entity.capacity} seats</span>
+                <span className="block font-normal text-muted">{entity.capacity} seats</span>
               )}
             </div>
             {Array.from({ length: DAYS.length * HOURS }, (_, slot) => (
               <div key={slot} style={{ gridColumn: slot + 2, gridRow: 1 }}
-                className={clsx('min-h-12 border-b border-r border-slate-100', slot % HOURS === 0 && 'border-l border-l-slate-300',
-                  over === `${entity.id}-${n}-${slot}` && 'bg-emerald-100')}
+                className={clsx('min-h-12 border-b border-r border-line', slot % HOURS === 0 && 'border-l border-l-slate-300',
+                  over === `${entity.id}-${n}-${slot}` && 'bg-brand-soft')}
                 onDragOver={editable ? (e) => { e.preventDefault(); setOver(`${entity.id}-${n}-${slot}`) } : undefined}
                 onDragLeave={editable ? () => setOver(null) : undefined}
                 onDrop={editable ? (e) => drop(e, slot) : undefined}
@@ -83,20 +83,20 @@ export function TimetableGrid({ entities, view, editable, highlight, onMove, onS
                 onClick={() => onSelect(cell)}
                 style={{ gridColumn: `${cell.start_slot + 2} / span ${cell.length}`, gridRow: 1 }}
                 className={clsx('relative z-0 m-0.5 rounded border px-1 py-0.5 text-left leading-tight shadow-sm',
-                  cell.pinned ? 'border-amber-400 bg-amber-50' : 'border-emerald-300 bg-emerald-50',
-                  highlight?.has(cell.key) && 'ring-2 ring-red-500',
+                  cell.pinned ? 'border-warning/40 bg-warning-soft' : 'border-brand-ink/25 bg-brand-soft',
+                  highlight?.has(cell.key) && 'ring-2 ring-danger',
                   editable && 'cursor-grab active:cursor-grabbing')}
                 title={`${cell.unit_code} ${cell.group} ${cell.room} ${cell.day} ${cell.start_time}-${cell.end_time}`}>
                 <span className="block font-semibold">{cell.unit_code}</span>
                 {cell.group && <span className="block">{cell.group}</span>}
-                {view !== 'room' && <span className="block text-slate-600">{cell.room}</span>}
-                {cell.pinned && <Pin size={10} className="absolute right-0.5 top-0.5 text-amber-600" aria-label="pinned" />}
+                {view !== 'room' && <span className="block text-muted">{cell.room}</span>}
+                {cell.pinned && <Pin size={10} className="absolute right-0.5 top-0.5 text-warning" aria-label="pinned" />}
               </button>
             ))}
           </div>
         )),
       )}
-      {entities.length === 0 && <p className="p-4 text-slate-500">Nothing to show.</p>}
+      {entities.length === 0 && <p className="p-4 text-muted">Nothing to show.</p>}
     </div>
   )
 }

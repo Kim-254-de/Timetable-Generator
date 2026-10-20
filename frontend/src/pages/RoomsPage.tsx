@@ -39,22 +39,22 @@ export function RoomsPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Lecture halls</h1>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-muted">
             {rooms.data?.length ?? 0} rooms · {seats.toLocaleString()} seats available. Used by every term.
           </p>
         </div>
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-slate-300 bg-white px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setEditing('new')} className="rounded-md bg-emerald-700 px-3 py-2 text-white">+ Add a lecture hall</button>
+          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
+          <button onClick={() => setEditing('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a lecture hall</button>
         </div>
       </div>
       <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search code or building"
-        className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
-      {rooms.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(rooms.error)}</p>}
-      {remove.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(remove.error)}</p>}
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
+      {rooms.isError && <p role="alert" className="text-sm text-danger">{errorMessage(rooms.error)}</p>}
+      {remove.isError && <p role="alert" className="text-sm text-danger">{errorMessage(remove.error)}</p>}
+      <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <thead className="bg-surface text-xs uppercase text-muted">
             <tr>
               <th className="px-3 py-2">Code</th><th className="px-3 py-2">Building</th><th className="px-3 py-2">Capacity</th>
               <th className="px-3 py-2">Type</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">Blocked hours</th><th />
@@ -62,24 +62,24 @@ export function RoomsPage() {
           </thead>
           <tbody>
             {shown.map((r) => (
-              <tr key={r.id} className={clsx('border-t border-slate-100', !r.active && 'text-slate-400')}>
+              <tr key={r.id} className={clsx('border-t border-line', !r.active && 'text-muted')}>
                 <td className="px-3 py-2 font-medium">{r.code}</td>
                 <td className="px-3 py-2">{r.building}</td>
                 <td className="px-3 py-2">{r.capacity}</td>
                 <td className="px-3 py-2">{ROOM_TYPE_NAMES[r.room_type]}</td>
                 <td className="px-3 py-2">{r.active ? 'Yes' : 'Closed'}</td>
                 <td className="px-3 py-2">
-                  <button onClick={() => setHours(r)} className="text-emerald-700">{r.unavailable.length ? `${r.unavailable.length} hours` : 'None'}</button>
+                  <button onClick={() => setHours(r)} className="text-brand-ink">{r.unavailable.length ? `${r.unavailable.length} hours` : 'None'}</button>
                 </td>
                 <td className="space-x-3 px-3 py-2 text-right">
-                  <button onClick={() => setEditing(r)} className="text-emerald-700">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${r.code}?`)) remove.mutate(r.id) }} className="text-red-700"
+                  <button onClick={() => setEditing(r)} className="text-brand-ink">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${r.code}?`)) remove.mutate(r.id) }} className="text-danger"
                     title={r.in_use ? `Used by ${r.in_use} classes in saved timetables` : undefined}>Delete</button>
                 </td>
               </tr>
             ))}
             {rooms.data?.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-500">No lecture halls yet. Add them one by one, or paste the list from Excel.</td></tr>
+              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted">No lecture halls yet. Add them one by one, or paste the list from Excel.</td></tr>
             )}
           </tbody>
         </table>
@@ -131,10 +131,10 @@ function RoomForm({ room, onClose }: { room: RoomRecord | null; onClose: () => v
           <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
           Available for teaching
         </label>
-        {save.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(save.error)}</p>}
+        {save.isError && <p role="alert" className="text-sm text-danger">{errorMessage(save.error)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={save.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
+          <button type="submit" disabled={save.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
         </div>
       </form>
     </Dialog>

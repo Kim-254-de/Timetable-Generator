@@ -46,19 +46,19 @@ export function TermPage() {
   // The app opens on this term next time (Home).
   useEffect(() => { if (term.isSuccess) rememberTerm(termId) }, [term.isSuccess, termId])
 
-  if (term.isPending) return <p className="text-sm text-slate-500">Loading the term…</p>
-  if (term.isError) return <p role="alert" className="text-sm text-red-700">{errorMessage(term.error)}</p>
+  if (term.isPending) return <p className="text-sm text-muted">Loading the term…</p>
+  if (term.isError) return <p role="alert" className="text-sm text-danger">{errorMessage(term.error)}</p>
 
   return (
     <div className="space-y-4">
       <div>
-        <Link to="/terms" className="text-sm text-emerald-700">Switch term</Link>
+        <Link to="/terms" className="text-sm text-brand-ink">Switch term</Link>
         <h1 className="text-xl font-semibold">{term.data.name || termText(term.data)}</h1>
       </div>
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+      <div className="flex flex-wrap gap-1 border-b border-line">
         {TABS.map(([t, label]) => (
           <button key={t} onClick={() => setSearch({ tab: t })}
-            className={clsx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === t ? 'border-emerald-700 text-emerald-800' : 'border-transparent text-slate-600')}>
+            className={clsx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === t ? 'border-brand-ink text-brand-ink' : 'border-transparent text-muted')}>
             {label}
           </button>
         ))}
@@ -88,57 +88,57 @@ function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolea
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {fromSmarttt && (<>
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+      <section className="space-y-3 rounded-lg border border-line bg-card p-4">
         <h2 className="font-semibold">Optional: import from SMARTTT</h2>
-        <p className="text-sm text-slate-600">Copies rooms, programmes, units, curricula, class sizes, lecturer counts and the current published timetable.</p>
+        <p className="text-sm text-muted">Copies rooms, programmes, units, curricula, class sizes, lecturer counts and the current published timetable.</p>
         {snap ? (
           <p className="text-sm">Taken {dateTime(snap.taken_at)} by {snap.taken_by}: {snap.counts.rooms} rooms, {snap.counts.units} units,{' '}
             {snap.counts.programs} programmes; published version {snap.published_version ?? 'none'}.</p>
-        ) : <p className="text-sm text-amber-800">No snapshot yet.</p>}
+        ) : <p className="text-sm text-warning">No snapshot yet.</p>}
         <button onClick={() => snapshot.mutate(undefined)} disabled={snapshot.isPending}
-          className="rounded-md bg-emerald-700 px-3 py-2 text-sm text-white disabled:opacity-50">
+          className="rounded-md bg-brand px-3 py-2 text-sm text-white disabled:opacity-50">
           {snapshot.isPending ? 'Reading SMARTTT…' : 'Take a new snapshot'}
         </button>
-        {snapshot.isError && <p role="alert" className="text-sm text-red-700">{errorMessage(snapshot.error)}</p>}
+        {snapshot.isError && <p role="alert" className="text-sm text-danger">{errorMessage(snapshot.error)}</p>}
         {snap && snap.warnings.length > 0 && (
           <details className="text-sm">
-            <summary className="cursor-pointer text-amber-800">{snap.warnings.length} data warnings from SMARTTT</summary>
-            <ul className="mt-2 max-h-48 list-disc overflow-y-auto pl-5 text-slate-700">
+            <summary className="cursor-pointer text-warning">{snap.warnings.length} data warnings from SMARTTT</summary>
+            <ul className="mt-2 max-h-48 list-disc overflow-y-auto pl-5 text-ink">
               {snap.warnings.map((w) => <li key={w.detail}>{w.detail}</li>)}
             </ul>
           </details>
         )}
       </section>
 
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+      <section className="space-y-3 rounded-lg border border-line bg-card p-4">
         <h2 className="font-semibold">Add class rows, units, halls and departments from the snapshot</h2>
-        <p className="text-sm text-slate-600">Adds what is missing. Anything entered here is never overwritten.</p>
+        <p className="text-sm text-muted">Adds what is missing. Anything entered here is never overwritten.</p>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => importSetup.mutate(undefined)} disabled={importSetup.isPending || !snap}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Import from the snapshot</button>
+            className="rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">Import from the snapshot</button>
           <button onClick={() => propose.mutate(false)} disabled={propose.isPending || !snap}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Propose groups for new units</button>
+            className="rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">Propose groups for new units</button>
         </div>
         {importSetup.isSuccess && (
-          <p className="text-sm text-emerald-800">Added {importSetup.data.class_rows_created} class rows and {importSetup.data.offerings_created} units.
+          <p className="text-sm text-success">Added {importSetup.data.class_rows_created} class rows and {importSetup.data.offerings_created} units.
             {importSetup.data.unresolved.length > 0 && ` ${importSetup.data.unresolved.length} items need attention.`}</p>
         )}
         {propose.isSuccess && (
-          <p className="text-sm text-emerald-800">Proposed groups for {propose.data.proposed} units.
+          <p className="text-sm text-success">Proposed groups for {propose.data.proposed} units.
             {propose.data.skipped.length > 0 && ` Skipped ${propose.data.skipped.length}: ${propose.data.skipped.slice(0, 5).map((s) => `${s.unit_code} (${s.reason})`).join('; ')}`}</p>
         )}
-        {(importSetup.isError || propose.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(importSetup.error ?? propose.error)}</p>}
+        {(importSetup.isError || propose.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(importSetup.error ?? propose.error)}</p>}
       </section>
       </>)}
 
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 lg:col-span-2">
+      <section className="space-y-2 rounded-lg border border-line bg-card p-4 lg:col-span-2">
         <h2 className="font-semibold">Ready to generate?</h2>
         {readiness?.ready
-          ? <p className="text-sm text-emerald-800">Everything is set. Generate the timetable on the Generate tab.</p>
+          ? <p className="text-sm text-success">Everything is set. Generate the timetable on the Generate tab.</p>
           : (
             <>
-              <p className="text-sm text-amber-800">{readiness?.problem_count ?? readiness?.problems.length} things to fix first:</p>
-              <ul className="max-h-64 list-disc overflow-y-auto pl-5 text-sm text-slate-700">
+              <p className="text-sm text-warning">{readiness?.problem_count ?? readiness?.problems.length} things to fix first:</p>
+              <ul className="max-h-64 list-disc overflow-y-auto pl-5 text-sm text-ink">
                 {readiness?.problems.map((p, i) => <li key={`${p.code}${i}`}>{p.message}</li>)}
               </ul>
             </>
@@ -165,39 +165,39 @@ function RowsTab({ termId }: { termId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter class rows"
-          className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
+          className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-slate-300 bg-white px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setForm('new')} className="rounded-md bg-emerald-700 px-3 py-2 text-white">+ Add a class row</button>
+          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
+          <button onClick={() => setForm('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a class row</button>
         </div>
       </div>
-      {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error ?? remove.error)}</p>}
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
+      <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Class row</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Students</th><th className="px-3 py-2">Unavailable hours</th><th /></tr>
           </thead>
           <tbody>
             {rows.data?.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">No class rows yet. Add them one by one or paste them from Excel.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No class rows yet. Add them one by one or paste them from Excel.</td></tr>
             )}
             {shown.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
+              <tr key={r.id} className="border-t border-line">
                 <td className="px-3 py-2 font-medium">{r.label}</td>
-                <td className="px-3 py-2 text-slate-600">{r.department_id != null ? deptCode.get(r.department_id) ?? '?' : '—'}</td>
+                <td className="px-3 py-2 text-muted">{r.department_id != null ? deptCode.get(r.department_id) ?? '?' : '—'}</td>
                 <td className="px-3 py-2">
                   <input type="number" min={0} defaultValue={r.student_count ?? ''} aria-label={`Students in ${r.label}`}
                     onBlur={(e) => {
                       const v = e.target.value === '' ? null : Number(e.target.value)
                       if (v !== null && v !== r.student_count) patch.mutate({ id: r.id, body: { student_count: v } })
                     }}
-                    className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-amber-400' : 'border-slate-300')} />
+                    className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />
                 </td>
-                <td className="px-3 py-2 text-slate-600">{r.unavailable.length ? `${r.unavailable.length} hours` : '—'}</td>
+                <td className="px-3 py-2 text-muted">{r.unavailable.length ? `${r.unavailable.length} hours` : '—'}</td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
-                  <button onClick={() => setEditing(r)} className="text-emerald-700">Unavailable hours</button>
-                  <button onClick={() => setForm(r)} className="text-emerald-700">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${r.label}?`)) remove.mutate(r.id) }} className="text-red-700">Delete</button>
+                  <button onClick={() => setEditing(r)} className="text-brand-ink">Unavailable hours</button>
+                  <button onClick={() => setForm(r)} className="text-brand-ink">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${r.label}?`)) remove.mutate(r.id) }} className="text-danger">Delete</button>
                 </td>
               </tr>
             ))}
@@ -219,10 +219,10 @@ function UnavailableEditor({ row, onClose, onSave }: { row: ClassRow; onClose: (
   const [slots, setSlots] = useState(new Set(row.unavailable))
   const toggle = (s: number) => setSlots((prev) => { const next = new Set(prev); if (next.has(s)) next.delete(s); else next.add(s); return next })
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Unavailable hours of ${row.label}`} className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 px-4">
-      <div className="w-full max-w-3xl rounded-xl bg-white p-5 shadow-xl">
+    <div role="dialog" aria-modal="true" aria-label={`Unavailable hours of ${row.label}`} className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-3xl rounded-xl bg-card p-5 shadow-xl">
         <h2 className="text-lg font-semibold">{row.label}</h2>
-        <p className="text-sm text-slate-600">Click the hours when this class row cannot be taught (e.g. teaching practice).</p>
+        <p className="text-sm text-muted">Click the hours when this class row cannot be taught (e.g. teaching practice).</p>
         <table className="mt-3 text-xs">
           <thead><tr><th />{Array.from({ length: HOURS }, (_, h) => <th key={h} className="px-1">{FIRST_HOUR + h}</th>)}</tr></thead>
           <tbody>
@@ -232,15 +232,15 @@ function UnavailableEditor({ row, onClose, onSave }: { row: ClassRow; onClose: (
                 {Array.from({ length: HOURS }, (_, h) => {
                   const s = di * HOURS + h
                   return <td key={h}><button aria-pressed={slots.has(s)} aria-label={`${d} ${FIRST_HOUR + h}:00`} onClick={() => toggle(s)}
-                    className={clsx('h-6 w-8 rounded border', slots.has(s) ? 'border-red-400 bg-red-200' : 'border-slate-200 bg-slate-50')} /></td>
+                    className={clsx('h-6 w-8 rounded border', slots.has(s) ? 'border-danger/40 bg-danger-soft' : 'border-line bg-surface')} /></td>
                 })}
               </tr>
             ))}
           </tbody>
         </table>
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Cancel</button>
-          <button onClick={() => onSave([...slots].sort((a, b) => a - b))} className="rounded-md bg-emerald-700 px-4 py-2 text-sm text-white">Save</button>
+          <button onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
+          <button onClick={() => onSave([...slots].sort((a, b) => a - b))} className="rounded-md bg-brand px-4 py-2 text-sm text-white">Save</button>
         </div>
       </div>
     </div>
@@ -269,53 +269,53 @@ function UnitsTab({ termId }: { termId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter units"
-          className="w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
+          className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-slate-300 bg-white px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setForm('new')} className="rounded-md bg-emerald-700 px-3 py-2 text-white">+ Add a unit</button>
+          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
+          <button onClick={() => setForm('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a unit</button>
         </div>
       </div>
-      {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-red-700">{errorMessage(patch.error ?? remove.error)}</p>}
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
+      <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Class rows</th><th className="px-3 py-2">Hours / week</th>
               <th className="px-3 py-2">Session</th><th className="px-3 py-2">Room type</th><th className="px-3 py-2">Groups</th><th /></tr>
           </thead>
           <tbody>
             {offerings.data?.length === 0 && (
-              <tr><td colSpan={8} className="px-3 py-6 text-center text-slate-500">No units yet. Add them one by one or paste them from Excel.</td></tr>
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-muted">No units yet. Add them one by one or paste them from Excel.</td></tr>
             )}
             {shown.map((o) => (
-              <tr key={o.id} className="border-t border-slate-100">
-                <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span><span className="block text-slate-600">{o.unit_name}</span></td>
-                <td className="px-3 py-2 text-slate-600">{deptCode.get(o.department_id) ?? '?'}</td>
-                <td className="px-3 py-2 text-slate-600">{o.class_rows.join(', ')}</td>
+              <tr key={o.id} className="border-t border-line">
+                <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span><span className="block text-muted">{o.unit_name}</span></td>
+                <td className="px-3 py-2 text-muted">{deptCode.get(o.department_id) ?? '?'}</td>
+                <td className="px-3 py-2 text-muted">{o.class_rows.join(', ')}</td>
                 <td className="px-3 py-2">
                   <input type="number" min={1} max={20} defaultValue={o.weekly_hours ?? ''} aria-label={`Weekly hours of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.weekly_hours && patch.mutate({ id: o.id, body: { weekly_hours: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-md border px-2 py-1', o.weekly_hours == null ? 'border-amber-400' : 'border-slate-300')} />
+                    className={clsx('w-16 rounded-md border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />
                 </td>
                 <td className="px-3 py-2">
                   <input type="number" min={1} max={6} defaultValue={o.session_length ?? ''} aria-label={`Session length of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.session_length && patch.mutate({ id: o.id, body: { session_length: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-md border px-2 py-1', o.session_length == null ? 'border-amber-400' : 'border-slate-300')} />
+                    className={clsx('w-16 rounded-md border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />
                 </td>
                 <td className="px-3 py-2">
                   <select value={o.room_type} aria-label={`Room type of ${o.unit_code}`}
                     onChange={(e) => patch.mutate({ id: o.id, body: { room_type: e.target.value as RoomType } })}
-                    className="rounded-md border border-slate-300 px-2 py-1">
+                    className="rounded-md border border-line px-2 py-1">
                     <option value="lecture_hall">Lecture hall</option><option value="lab">Lab</option><option value="seminar">Seminar</option>
                   </select>
                 </td>
                 <td className="px-3 py-2">
-                  <button onClick={() => setOpen(o)} className={clsx(o.groups.length ? 'text-emerald-700' : 'text-amber-800')}>
+                  <button onClick={() => setOpen(o)} className={clsx(o.groups.length ? 'text-brand-ink' : 'text-warning')}>
                     {o.groups.length ? o.groups.map((g) => g.label || 'Whole class').join(', ') : 'Set groups'}
                   </button>
                 </td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
-                  <button onClick={() => setForm(o)} className="text-emerald-700">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${o.unit_code}?`)) remove.mutate(o.id) }} className="text-red-700">Delete</button>
+                  <button onClick={() => setForm(o)} className="text-brand-ink">Edit</button>
+                  <button onClick={() => { if (window.confirm(`Delete ${o.unit_code}?`)) remove.mutate(o.id) }} className="text-danger">Delete</button>
                 </td>
               </tr>
             ))}
@@ -341,29 +341,29 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
   const failure = errorBody(save.error)
 
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Groups of ${offering.unit_code}`} className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 px-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
+    <div role="dialog" aria-modal="true" aria-label={`Groups of ${offering.unit_code}`} className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 px-4">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-card p-5 shadow-xl">
         <h2 className="text-lg font-semibold">{offering.unit_code} groups</h2>
-        <p className="text-sm text-slate-600">You decide the split. Each group is one class with its own room and lecturer.</p>
+        <p className="text-sm text-muted">You decide the split. Each group is one class with its own room and lecturer.</p>
         <ul className="mt-3 space-y-2">
           {offering.groups.map((g) => (
-            <li key={g.id} className="flex items-start justify-between rounded-md border border-slate-200 p-2 text-sm">
+            <li key={g.id} className="flex items-start justify-between rounded-md border border-line p-2 text-sm">
               <span><b>{g.label || 'Whole class'}</b> · {g.student_count} students
-                <span className="block text-slate-600">{g.members.map((m) => `${m.label} (${m.students})`).join(', ')}</span></span>
+                <span className="block text-muted">{g.members.map((m) => `${m.label} (${m.students})`).join(', ')}</span></span>
               <span className="flex gap-2">
-                <button onClick={() => setDraft(g)} className="text-emerald-700">Edit</button>
-                <button onClick={() => remove.mutate(g.id)} className="text-red-700">Remove</button>
+                <button onClick={() => setDraft(g)} className="text-brand-ink">Edit</button>
+                <button onClick={() => remove.mutate(g.id)} className="text-danger">Remove</button>
               </span>
             </li>
           ))}
         </ul>
-        <button onClick={() => setDraft(blank())} className="mt-2 text-sm text-emerald-700">+ Add a group</button>
+        <button onClick={() => setDraft(blank())} className="mt-2 text-sm text-brand-ink">+ Add a group</button>
 
         {draft && (
-          <div className="mt-4 space-y-2 rounded-md border border-slate-300 p-3 text-sm">
+          <div className="mt-4 space-y-2 rounded-md border border-line p-3 text-sm">
             <label className="block">Label (blank for the whole class)
               <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="GR A"
-                className="mt-1 w-40 rounded-md border border-slate-300 px-2 py-1" />
+                className="mt-1 w-40 rounded-md border border-line px-2 py-1" />
             </label>
             {eligible.map((r) => {
               const member = draft.members.find((m) => m.class_row_id === r.id)
@@ -378,22 +378,22 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
                   <span className="flex-1">{r.label}</span>
                   {member && <input type="number" min={1} value={member.students} aria-label={`Students from ${r.label}`}
                     onChange={(e) => setDraft({ ...draft, members: draft.members.map((m) => m.class_row_id === r.id ? { ...m, students: Number(e.target.value) } : m) })}
-                    className="w-20 rounded-md border border-slate-300 px-2 py-1" />}
+                    className="w-20 rounded-md border border-line px-2 py-1" />}
                 </label>
               )
             })}
-            {failure && <p role="alert" className="text-red-700">{failure.message}</p>}
+            {failure && <p role="alert" className="text-danger">{failure.message}</p>}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setDraft(null)} className="rounded-md border border-slate-300 px-3 py-1">Cancel</button>
+              <button onClick={() => setDraft(null)} className="rounded-md border border-line px-3 py-1">Cancel</button>
               <button disabled={!draft.members.length || save.isPending}
                 onClick={() => save.mutate({ offeringId: offering.id, groupId: draft.id || undefined,
                   body: { label: draft.label, members: draft.members.map((m) => ({ class_row_id: m.class_row_id, students: m.students })) } },
                 { onSuccess: () => setDraft(null) })}
-                className="rounded-md bg-emerald-700 px-3 py-1 text-white disabled:opacity-50">Save group</button>
+                className="rounded-md bg-brand px-3 py-1 text-white disabled:opacity-50">Save group</button>
             </div>
           </div>
         )}
-        <div className="mt-4 flex justify-end"><button onClick={onClose} className="rounded-md border border-slate-300 px-3 py-2 text-sm">Done</button></div>
+        <div className="mt-4 flex justify-end"><button onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Done</button></div>
       </div>
     </div>
   )
@@ -409,45 +409,45 @@ function RunsTab({ termId }: { termId: string }) {
 
   return (
     <div className="space-y-4">
-      <section className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <section className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-card p-4 text-sm">
         <label>Run
-          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} className="mt-1 block rounded-md border border-slate-300 px-2 py-1">
+          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} className="mt-1 block rounded-md border border-line px-2 py-1">
             <option value="full">Full solve</option>
             <option value="repair">Repair the published timetable (mid-term change)</option>
           </select>
         </label>
         <label>Time limit (minutes)
           <input type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}
-            className="mt-1 block w-24 rounded-md border border-slate-300 px-2 py-1" />
+            className="mt-1 block w-24 rounded-md border border-line px-2 py-1" />
         </label>
         <button onClick={() => start.mutate({ mode, time_limit_s: minutes * 60 })} disabled={start.isPending}
-          className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white disabled:opacity-50">Start</button>
-        {failure && <p role="alert" className="w-full text-red-700">{failure.message}
+          className="rounded-md bg-brand px-4 py-2 font-medium text-white disabled:opacity-50">Start</button>
+        {failure && <p role="alert" className="w-full text-danger">{failure.message}
           {problems && <span className="block">{problems.slice(0, 5).map((p) => p.message).join('; ')}</span>}</p>}
       </section>
       <ul className="space-y-2">
         {(runs.data ?? []).map((r) => (
-          <li key={r.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <li key={r.id} className="rounded-lg border border-line bg-card p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span><b className="capitalize">{r.mode}</b> run · started {dateTime(r.created_at)} by {r.created_by}</span>
               <span className={clsx('rounded px-2 py-0.5 text-xs font-medium',
-                r.status === 'succeeded' ? 'bg-emerald-100 text-emerald-800' : r.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-sky-100 text-sky-900')}>
+                r.status === 'succeeded' ? 'bg-success-soft text-success' : r.status === 'failed' ? 'bg-danger-soft text-danger' : 'bg-brand-soft text-brand-ink')}>
                 {r.status}{(r.status === 'running' && r.progress.seconds != null) ? ` · ${r.progress.phase} ${r.progress.seconds}s` : ''}
               </span>
             </div>
             {r.status === 'succeeded' && r.draft_id && (
               <p className="mt-1">{SCORE_LABELS.slice(0, 5).map(([k, l]) => `${l}: ${r.soft_scores[k] ?? 0}`).join(' · ')}{' '}
-                <Link to={`/terms/${termId}/drafts/${r.draft_id}`} className="text-emerald-700">Review the draft →</Link></p>
+                <Link to={`/terms/${termId}/drafts/${r.draft_id}`} className="text-brand-ink">Review the draft →</Link></p>
             )}
             {r.failure && (
-              <ul className="mt-1 list-disc pl-5 text-red-800">
+              <ul className="mt-1 list-disc pl-5 text-danger">
                 {r.failure.reasons.slice(0, 10).map((x, i) => <li key={i}>{x.message}</li>)}
                 {r.failure.count > 10 && <li>…and {r.failure.count - 10} more</li>}
               </ul>
             )}
           </li>
         ))}
-        {runs.data?.length === 0 && <li className="text-sm text-slate-500">No runs yet.</li>}
+        {runs.data?.length === 0 && <li className="text-sm text-muted">No runs yet.</li>}
       </ul>
     </div>
   )
@@ -458,42 +458,42 @@ function DraftsTab({ termId }: { termId: string }) {
   const send = useSendPublication(termId)
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <section className="rounded-lg border border-line bg-card p-4">
         <h2 className="mb-2 font-semibold">Drafts</h2>
         <ul className="space-y-1 text-sm">
           {term.data?.drafts.map((d) => (
             <li key={d.id} className="flex justify-between">
-              <Link to={`/terms/${termId}/drafts/${d.id}`} className="text-emerald-700">{d.name}</Link>
-              <span className="text-slate-500">{d.status} · {dateTime(d.created_at)}</span>
+              <Link to={`/terms/${termId}/drafts/${d.id}`} className="text-brand-ink">{d.name}</Link>
+              <span className="text-muted">{d.status} · {dateTime(d.created_at)}</span>
             </li>
           ))}
-          {term.data?.drafts.length === 0 && <li className="text-slate-500">None yet.</li>}
+          {term.data?.drafts.length === 0 && <li className="text-muted">None yet.</li>}
         </ul>
       </section>
-      <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <section className="rounded-lg border border-line bg-card p-4">
         <h2 className="mb-2 font-semibold">Published versions</h2>
         <ul className="space-y-1 text-sm">
           {term.data?.publications.map((p) => (
             <li key={p.version} className="space-y-0.5">
               <b>Version {p.version}</b> · {dateTime(p.published_at)} by {p.published_by}
-              {p.changes && <span className="block text-slate-600">{p.changes.added?.length ?? 0} added, {p.changes.moved?.length ?? 0} moved, {p.changes.removed?.length ?? 0} removed</span>}
-              {!p.sent_to_smarttt && <span className="block text-amber-800">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
+              {p.changes && <span className="block text-muted">{p.changes.added?.length ?? 0} added, {p.changes.moved?.length ?? 0} moved, {p.changes.removed?.length ?? 0} removed</span>}
+              {!p.sent_to_smarttt && <span className="block text-warning">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
               {p.can_send && (
                 <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
-                  className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-amber-900 disabled:opacity-50">
+                  className="rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-warning disabled:opacity-50">
                   {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
                 </button>
               )}
               <span className="flex gap-3">
-                Download: <a href={exportUrl(p.draft_id, 'row', 'pdf')} className="text-emerald-700">PDF</a>
-                <a href={exportUrl(p.draft_id, 'row', 'docx')} className="text-emerald-700">Word</a>
-                <a href={exportUrl(p.draft_id, 'row', 'xlsx')} className="text-emerald-700">Excel</a>
+                Download: <a href={exportUrl(p.draft_id, 'row', 'pdf')} className="text-brand-ink">PDF</a>
+                <a href={exportUrl(p.draft_id, 'row', 'docx')} className="text-brand-ink">Word</a>
+                <a href={exportUrl(p.draft_id, 'row', 'xlsx')} className="text-brand-ink">Excel</a>
               </span>
             </li>
           ))}
-          {term.data?.publications.length === 0 && <li className="text-slate-500">Nothing published yet.</li>}
+          {term.data?.publications.length === 0 && <li className="text-muted">Nothing published yet.</li>}
         </ul>
-        {send.isError && <p role="alert" className="mt-2 text-sm text-red-700">{errorMessage(send.error)}</p>}
+        {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
       </section>
     </div>
   )

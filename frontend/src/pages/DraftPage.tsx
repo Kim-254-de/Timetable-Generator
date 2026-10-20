@@ -31,8 +31,8 @@ export function DraftPage() {
     return all.filter((e) => e.label.toLowerCase().includes(q) || e.cells.some((c) => c.unit_code.toLowerCase().includes(q)))
   }, [grid.data, search])
 
-  if (grid.isPending) return <p className="text-sm text-slate-500">Loading the draft…</p>
-  if (grid.isError) return <p role="alert" className="text-sm text-red-700">{errorMessage(grid.error)}</p>
+  if (grid.isPending) return <p className="text-sm text-muted">Loading the draft…</p>
+  if (grid.isError) return <p role="alert" className="text-sm text-danger">{errorMessage(grid.error)}</p>
   const draft = grid.data.draft
   const editable = draft.status === 'draft'
   const highlight = new Set(draft.violations.flatMap((v) => v.session_keys))
@@ -46,24 +46,24 @@ export function DraftPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link to={`/terms/${termId}`} className="text-sm text-emerald-700">← Back to the term</Link>
+          <Link to={`/terms/${termId}`} className="text-sm text-brand-ink">← Back to the term</Link>
           <h1 className="text-xl font-semibold">{draft.name}</h1>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-muted">
             {draft.session_count} sessions · {draft.pinned} pinned · <span className="capitalize">{draft.status}</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-slate-600">Download:</span>
+          <span className="text-muted">Download:</span>
           {([['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']] as const).map(([format, label]) => (
             <a key={format} href={exportUrl(draftId, view, format)}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-2">
+              className="inline-flex items-center gap-1 rounded-md border border-line bg-card px-3 py-2">
               <Download size={16} /> {label}
             </a>
           ))}
           {editable ? (
             <>
               <button onClick={() => resolve.mutate(600, { onSuccess: () => navigate(`/terms/${termId}?tab=runs`) })}
-                disabled={resolve.isPending} className="rounded-md border border-slate-300 bg-white px-3 py-2">
+                disabled={resolve.isPending} className="rounded-md border border-line bg-card px-3 py-2">
                 Re-solve around pins
               </button>
               {needsReplace && (
@@ -73,46 +73,46 @@ export function DraftPage() {
                 </label>
               )}
               <button onClick={() => publish.mutate(replaceUploaded)} disabled={!draft.publishable || publish.isPending}
-                className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white disabled:opacity-50"
+                className="rounded-md bg-brand px-4 py-2 font-medium text-white disabled:opacity-50"
                 title={draft.publishable ? 'Approve this timetable and publish it (sent to SMARTTT when connected)' : 'Fix the hard-rule problems first'}>
                 {publish.isPending ? 'Publishing…' : 'Approve and publish'}
               </button>
             </>
           ) : (
             <button onClick={() => copy.mutate(undefined, { onSuccess: (d) => navigate(`/terms/${termId}/drafts/${d.id}`) })}
-              className="rounded-md border border-slate-300 bg-white px-3 py-2">Copy to a new draft</button>
+              className="rounded-md border border-line bg-card px-3 py-2">Copy to a new draft</button>
           )}
         </div>
       </div>
 
       {publish.isSuccess && (
-        <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">
           Approved as version {publish.data.version}. Departments can now allocate lecturers and download it.{' '}
           {publish.data.smarttt.sent === false
             ? `Not yet sent to SMARTTT: ${publish.data.smarttt.reason ?? 'SMARTTT is not connected'}.`
             : 'Students now see it in SMARTTT.'}
         </p>
       )}
-      {publish.isError && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage(publish.error)}</p>}
-      {resolve.isError && <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage(resolve.error)}</p>}
+      {publish.isError && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{errorMessage(publish.error)}</p>}
+      {resolve.isError && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{errorMessage(resolve.error)}</p>}
 
       <section className="grid gap-3 md:grid-cols-[1fr_auto]">
-        <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+        <div className="flex flex-wrap gap-2 rounded-lg border border-line bg-card p-3 text-xs">
           {SCORE_LABELS.map(([k, label]) => (
-            <span key={k} className="rounded bg-slate-100 px-2 py-1">{label}: <b>{draft.soft_scores[k] ?? 0}</b></span>
+            <span key={k} className="rounded bg-surface px-2 py-1">{label}: <b>{draft.soft_scores[k] ?? 0}</b></span>
           ))}
         </div>
-        <div className={clsx('rounded-lg border p-3 text-xs', draft.violation_count ? 'border-red-300 bg-red-50' : 'border-emerald-300 bg-emerald-50')}>
+        <div className={clsx('rounded-lg border p-3 text-xs', draft.violation_count ? 'border-danger/40 bg-danger-soft' : 'border-success/40 bg-success-soft')}>
           {draft.violation_count
             ? <>{draft.violation_count} hard-rule problems (outlined in red)</>
             : 'No hard-rule problems'}
           {(draft.stale.missing.length > 0 || draft.stale.extra.length > 0) && (
-            <span className="block text-amber-800">Groups or hours changed since this draft was made; run again.</span>
+            <span className="block text-warning">Groups or hours changed since this draft was made; run again.</span>
           )}
         </div>
       </section>
       {draft.violations.length > 0 && (
-        <ul className="max-h-32 overflow-y-auto rounded-lg border border-red-200 bg-white p-3 text-xs text-red-800">
+        <ul className="max-h-32 overflow-y-auto rounded-lg border border-danger/40 bg-card p-3 text-xs text-danger">
           {draft.violations.map((v) => <li key={v.message}><b>{RULES[v.rule] ?? v.rule}:</b> {v.message}</li>)}
         </ul>
       )}
@@ -120,16 +120,16 @@ export function DraftPage() {
       <div className="flex flex-wrap items-center gap-2">
         {VIEWS.map(([v, label]) => (
           <button key={v} onClick={() => setView(v)}
-            className={clsx('rounded-full px-3 py-1 text-sm', view === v ? 'bg-emerald-700 text-white' : 'border border-slate-200 bg-white')}>
+            className={clsx('rounded-full px-3 py-1 text-sm', view === v ? 'bg-brand text-white' : 'border border-line bg-card')}>
             {label}
           </button>
         ))}
         <input type="search" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter by class row, room or unit" className="ml-auto w-72 rounded-md border border-slate-300 px-3 py-1.5 text-sm" />
+          placeholder="Filter by class row, room or unit" className="ml-auto w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
       </div>
-      {editable && <p className="text-xs text-slate-500">Drag a class to another hour to move it; moved classes are pinned. Click a class to change its room.</p>}
+      {editable && <p className="text-xs text-muted">Drag a class to another hour to move it; moved classes are pinned. Click a class to change its room.</p>}
       {moveFailure && (
-        <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
           Not moved: {moveFailure.message}
         </p>
       )}
@@ -162,43 +162,43 @@ function CellPanel({ cell, termId, editable, saving, onClose, onSave }: CellPane
   const fitting = (rooms.data ?? []).filter((r) => cell.students == null || r.capacity >= cell.students)
 
   return (
-    <aside aria-label={`${cell.unit_code} ${cell.group}`} className="fixed inset-y-0 right-0 z-30 w-full max-w-sm space-y-4 border-l border-slate-200 bg-white p-5 shadow-xl">
+    <aside aria-label={`${cell.unit_code} ${cell.group}`} className="fixed inset-y-0 right-0 z-30 w-full max-w-sm space-y-4 border-l border-line bg-card p-5 shadow-xl">
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-lg font-semibold">{cell.unit_code} {cell.group}</h2>
-          <p className="text-sm text-slate-600">{cell.day} {cell.start_time}–{cell.end_time} · {cell.room}{cell.students != null && ` · ${cell.students} students`}</p>
+          <p className="text-sm text-muted">{cell.day} {cell.start_time}–{cell.end_time} · {cell.room}{cell.students != null && ` · ${cell.students} students`}</p>
         </div>
-        <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-slate-100"><X size={18} /></button>
+        <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-surface"><X size={18} /></button>
       </div>
       {editable ? (
         <>
           <label className="block text-sm">Day
-            <select value={day} onChange={(e) => setDay(e.target.value as typeof day)} className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1">
+            <select value={day} onChange={(e) => setDay(e.target.value as typeof day)} className="mt-1 w-full rounded-md border border-line px-2 py-1">
               {DAYS.map((d) => <option key={d} value={d}>{DAY_NAMES[d]}</option>)}
             </select>
           </label>
           <label className="block text-sm">Starts at
-            <select value={hour} onChange={(e) => setHour(Number(e.target.value))} className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1">
+            <select value={hour} onChange={(e) => setHour(Number(e.target.value))} className="mt-1 w-full rounded-md border border-line px-2 py-1">
               {Array.from({ length: HOURS - cell.length + 1 }, (_, i) => FIRST_HOUR + i).map((h) => <option key={h} value={h}>{hh(h)}</option>)}
             </select>
           </label>
           <label className="block text-sm">Room
-            <select value={room} onChange={(e) => setRoom(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1">
+            <select value={room} onChange={(e) => setRoom(e.target.value)} className="mt-1 w-full rounded-md border border-line px-2 py-1">
               {fitting.map((r) => <option key={r.id} value={r.id}>{r.code} ({r.capacity}, {r.room_type.replace('_', ' ')})</option>)}
             </select>
           </label>
           <div className="flex justify-between gap-2">
-            <button onClick={() => onSave({ pinned: !cell.pinned })} disabled={saving} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+            <button onClick={() => onSave({ pinned: !cell.pinned })} disabled={saving} className="rounded-md border border-line px-3 py-2 text-sm">
               {cell.pinned ? 'Unpin' : 'Pin here'}
             </button>
             <button onClick={() => onSave({ day, start_time: hh(hour), room_id: room })} disabled={saving}
-              className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+              className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
               {saving ? 'Checking…' : 'Move'}
             </button>
           </div>
         </>
       ) : (
-        <p className="text-sm text-slate-600">This draft is an approved version. It shows exactly as approved, whatever has changed since. Copy it to a new draft to change it.</p>
+        <p className="text-sm text-muted">This draft is an approved version. It shows exactly as approved, whatever has changed since. Copy it to a new draft to change it.</p>
       )}
     </aside>
   )
