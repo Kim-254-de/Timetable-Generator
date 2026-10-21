@@ -382,3 +382,41 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
         json={"label": "", "members": [{"class_row_id": row_id, "students": 90}]},
     )
     assert again.status_code == 409 and again.json()["error"]["code"] == "UNIT_SPLIT"
+
+
+def test_a_file_naming_something_twice_is_refused_on_the_second_row(client, smarttt):
+    sign_in(client)
+    term = enter_term(client)
+    rooms = ok(
+        client.post(
+            "/api/rooms/bulk",
+            json={"rows": [{"code": "LAB 7", "capacity": "40"}, {"code": "lab7", "capacity": "400"}]},
+        )
+    )
+    assert rooms["created"] == 1
+    assert rooms["errors"] == [{"line": 2, "message": "Lecture hall lab7 is also on row 1"}]
+    assert next(r for r in ok(client.get("/api/rooms")) if r["code"] == "LAB 7")["capacity"] == 40
+
+    departments = ok(
+        client.post(
+            "/api/departments/bulk",
+            json={
+                "rows": [
+                    {"code": "DPHY", "name": "Department of Physics"},
+                    {"code": "DPHYS", "name": "department of  physics"},
+                    {"code": "dphy", "name": "Department of Chemistry"},
+                ]
+            },
+        )
+    )
+    assert departments["created"] == 1 and departments["error_count"] == 2
+
+    unit = {"unit_title": "Data Structures", "department": "DCOMP", "class_rows": "BSC.COMP SCI Y1S1"}
+    units = ok(
+        client.post(
+            f"/api/terms/{term['id']}/offerings/bulk",
+            json={"rows": [{"unit_code": "COSC 210", **unit}, {"unit_code": "COSC210", **unit}]},
+        )
+    )
+    assert units["created"] == 1
+    assert units["errors"][0]["message"] == "Unit COSC210 is also on row 1"

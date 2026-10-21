@@ -491,14 +491,26 @@ def _validated(model: type[BaseModel], data: dict[str, Any], exclude_unset: bool
 
 
 def _bulk(db: Session, rows: list[dict[str, Any]], one: Any) -> dict[str, Any]:
-    """Applies `one(cleaned_row) -> 'created' | 'updated'` per row; a bad row is reported and skipped."""
+    """
+    Applies `one(cleaned_row, claim) -> 'created' | 'updated'` per row; a bad
+    row is reported and skipped. Before changing anything, `one` calls
+    `claim(key, what)` with the item the row is about: an item a file names
+    twice is refused on the second row instead of overwriting the first.
+    """
     created = updated = 0
     errors: list[dict[str, Any]] = []
+    claimed: dict[str, int] = {}
     for line, raw in enumerate(rows, start=1):
+
+        def claim(key: str, what: str, line: int = line) -> None:
+            if key in claimed:
+                raise ValueError(f"{what} is also on row {claimed[key]}")
+            claimed[key] = line
+
         # Each row is fully checked before it changes anything, so a refused
         # row leaves nothing half-written behind.
         try:
-            outcome = one(_clean(raw))
+            outcome = one(_clean(raw), claim)
             db.flush()
         except (ValueError, ApiError) as exc:
             errors.append({"line": line, "message": getattr(exc, "message", None) or str(exc)})
@@ -517,7 +529,7 @@ def _given(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def bulk_rooms(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    def one(r: dict[str, Any]) -> str:
+    def one(r: dict[str, Any], claim: Any) -> str:
         kind = r.get("room_type") or r.get("type")
         available = r.get("available", r.get("active"))
         given = _given(
@@ -529,6 +541,8 @@ def bulk_rooms(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> d
                 "active": _yes(available) if available is not None else None,
             }
         )
+        if given.get("code"):
+            claim(compact(str(given["code"])), f"Lecture hall {given['code']}")
         existing = _room_by_code(db, str(given.get("code") or ""))
         if existing is not None:
             update_room(db, identity, existing, _validated(RoomPatch, given, exclude_unset=True), commit=False)
@@ -540,7 +554,7 @@ def bulk_rooms(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> d
 
 
 def bulk_departments(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    def one(r: dict[str, Any]) -> str:
+    def one(r: dict[str, Any], claim: Any) -> str:
         given = _given(
             {
                 "code": r.get("code"),
@@ -549,6 +563,10 @@ def bulk_departments(db: Session, identity: Identity, rows: list[dict[str, Any]]
                 "lecturer_count": r.get("lecturer_count") or r.get("lecturers"),
             }
         )
+        if given.get("code"):
+            claim("code:" + compact(str(given["code"])), f"Department code {given['code']}")
+        if given.get("name"):
+            claim("name:" + compact(str(given["name"])), f"Department {given['name']}")
         existing = _department_by_code(db, str(given.get("code") or ""))
         if existing is not None:
             fields = _validated(DepartmentPatch, given, exclude_unset=True)
@@ -561,7 +579,7 @@ def bulk_departments(db: Session, identity: Identity, rows: list[dict[str, Any]]
 
 
 def bulk_class_rows(db: Session, identity: Identity, term: Term, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    def one(r: dict[str, Any]) -> str:
+    def one(r: dict[str, Any], claim: Any) -> str:
         fields = _validated(
             ClassRowBody,
             {
@@ -574,6 +592,7 @@ def bulk_class_rows(db: Session, identity: Identity, term: Term, rows: list[dict
             },
         )
         label = row_label(fields["program_code"], fields["study_year"], fields["study_semester"], fields["sub_class"])
+        claim(compact(label), f"Class row {label}")
         existing = next(
             (
                 x
@@ -603,7 +622,7 @@ def bulk_offerings(db: Session, identity: Identity, term: Term, rows: list[dict[
     """
     labels = {compact(r.label): r.id for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
 
-    def one(r: dict[str, Any]) -> str:
+    def one(r: dict[str, Any], claim: Any) -> str:
         names = [x.strip() for x in str(r.get("class_rows") or "").split(";") if x.strip()]
         missing = [n for n in names if compact(n) not in labels]
         if missing:
@@ -623,6 +642,7 @@ def bulk_offerings(db: Session, identity: Identity, term: Term, rows: list[dict[
             }
         )
         fields = _validated(OfferingBody, given)
+        claim(compact(fields["unit_code"]), f"Unit {fields['unit_code']}")
         existing = next(
             (
                 o
