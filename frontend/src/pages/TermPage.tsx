@@ -153,13 +153,31 @@ function RowsTab({ termId }: { termId: string }) {
   const patch = usePatchRow(termId)
   const remove = useDeleteClassRow(termId)
   const bulk = useBulkClassRows(termId)
+  const offerings = useOfferings(termId)
   const departments = useDepartments()
   const deptCode = new Map((departments.data ?? []).map((d) => [d.id, d.code]))
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<ClassRow | null>(null)
   const [form, setForm] = useState<ClassRow | 'new' | null>(null)
   const [pasting, setPasting] = useState(false)
+  const [deleted, setDeleted] = useState<string | null>(null)
   const shown = (rows.data ?? []).filter((r) => r.label.toLowerCase().includes(query.trim().toLowerCase()))
+
+  const confirmDelete = (r: ClassRow) => {
+    const taken = (offerings.data ?? []).filter((o) => o.class_row_ids.includes(r.id))
+    const only = taken.filter((o) => o.class_row_ids.length === 1).map((o) => o.unit_code)
+    const shared = taken.filter((o) => o.class_row_ids.length > 1).map((o) => o.unit_code)
+    const lines = [`Delete ${r.label}?`]
+    if (only.length) lines.push(`This also deletes ${only.length === 1 ? 'its unit' : `its ${only.length} units`}: ${only.join(', ')}.`)
+    if (shared.length) lines.push(`It is taken off ${shared.join(', ')}, which other class rows keep.`)
+    if (taken.length) lines.push('Draft timetables lose these classes; approved versions do not change.')
+    if (!window.confirm(lines.join('\n\n'))) return
+    setDeleted(null)
+    remove.mutate(r.id, {
+      onSuccess: (result) => setDeleted(`Deleted ${r.label}${result.units_deleted.length
+        ? ` and ${result.units_deleted.length === 1 ? 'its unit' : `${result.units_deleted.length} units`} (${result.units_deleted.join(', ')})` : ''}.`),
+    })
+  }
 
   return (
     <div className="space-y-3">
@@ -172,6 +190,7 @@ function RowsTab({ termId }: { termId: string }) {
         </div>
       </div>
       {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
+      {deleted && <p role="status" className="text-sm text-success">{deleted}</p>}
       <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
@@ -197,7 +216,7 @@ function RowsTab({ termId }: { termId: string }) {
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
                   <button onClick={() => setEditing(r)} className="text-brand-ink">Unavailable hours</button>
                   <button onClick={() => setForm(r)} className="text-brand-ink">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${r.label}?`)) remove.mutate(r.id) }} className="text-danger">Delete</button>
+                  <button onClick={() => confirmDelete(r)} disabled={remove.isPending} className="text-danger disabled:opacity-50">Delete</button>
                 </td>
               </tr>
             ))}
@@ -315,7 +334,9 @@ function UnitsTab({ termId }: { termId: string }) {
                 </td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
                   <button onClick={() => setForm(o)} className="text-brand-ink">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${o.unit_code}?`)) remove.mutate(o.id) }} className="text-danger">Delete</button>
+                  <button onClick={() => {
+                    if (window.confirm(`Delete ${o.unit_code}?\n\nDraft timetables lose its classes; approved versions do not change.`)) remove.mutate(o.id)
+                  }} disabled={remove.isPending} className="text-danger disabled:opacity-50">Delete</button>
                 </td>
               </tr>
             ))}

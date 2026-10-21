@@ -267,8 +267,7 @@ def patch_class_row(row_id: str, body: ClassRowPatch, identity: Me, db: Db) -> d
 
 @router.delete("/class-rows/{row_id}")
 def delete_class_row(row_id: str, identity: Me, db: Db) -> dict[str, Any]:
-    master.delete_class_row(db, identity, _get(db, ClassRow, row_id, "class row"))
-    return ok(None)
+    return ok(master.delete_class_row(db, identity, _get(db, ClassRow, row_id, "class row")))
 
 
 @router.get("/terms/{term_id}/offerings")

@@ -204,13 +204,44 @@ def test_allocator_reads_units_groups_and_meetings(client, smarttt):
     assert int(meeting["end_time"][:2]) - int(meeting["start_time"][:2]) == 3
 
 
+def test_deleting_a_class_row_deletes_the_units_only_it_takes(client, smarttt):
+    sign_in(client)
+    term = enter_term(client)
+    draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
+    ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
+    rows = {r["label"]: r["id"] for r in ok(client.get(f"/api/terms/{term['id']}/class-rows"))}
+
+    # COSC 100 is taken by BSC.COMP SCI alone, so it goes with the row and out of the draft.
+    gone = ok(client.delete(f"/api/class-rows/{rows['BSC.COMP SCI Y1S1']}"))
+    assert gone == {"units_deleted": ["COSC 100"], "units_kept": []}
+    # COSC 103 is shared: BED.MATH/BIO leaves it and its GR C goes; GR A and GR B stay.
+    left = ok(client.delete(f"/api/class-rows/{rows['BED.MATH/BIO Y1S1']}"))
+    assert left == {"units_deleted": [], "units_kept": ["COSC 103"]}
+
+    units = ok(client.get(f"/api/terms/{term['id']}/offerings"))
+    assert [u["unit_code"] for u in units] == ["COSC 103"]
+    assert [g["label"] for g in units[0]["groups"]] == ["GR A", "GR B"]
+    assert "BED.MATH/BIO Y1S1" not in units[0]["class_rows"]
+    # The approved version still shows what was approved.
+    grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
+    assert grid["as_approved"] is True
+    assert {c["unit_code"] for e in grid["entities"] for c in e["cells"]} == {"COSC 100", "COSC 103"}
+
+
+def test_deleting_a_unit_takes_it_out_of_the_drafts(client, smarttt):
+    sign_in(client)
+    term = enter_term(client)
+    draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
+    cosc103 = next(u for u in ok(client.get(f"/api/terms/{term['id']}/offerings")) if u["unit_code"] == "COSC 103")
+    ok(client.delete(f"/api/offerings/{cosc103['id']}"))
+    grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
+    assert {c["unit_code"] for e in grid["entities"] for c in e["cells"]} == {"COSC 100"}
+    assert len(ok(client.get(f"/api/terms/{term['id']}/class-rows"))) == 4  # the class rows stay
+
+
 def test_deleting_what_is_in_use_is_refused(client, smarttt):
     sign_in(client)
     term = enter_term(client)
-    rows = ok(client.get(f"/api/terms/{term['id']}/class-rows"))
-    in_use = next(r for r in rows if r["label"] == "BSC.COMP SCI Y1S1")
-    refused = client.delete(f"/api/class-rows/{in_use['id']}")
-    assert refused.status_code == 409 and refused.json()["error"]["code"] == "IN_USE"
 
     departments = {d["code"]: d for d in ok(client.get("/api/departments"))}
     assert client.delete(f"/api/departments/{departments['DCOMP']['id']}").status_code == 409

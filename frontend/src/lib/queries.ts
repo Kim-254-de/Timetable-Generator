@@ -170,8 +170,10 @@ export interface ClassRowInput {
 }
 export const useCreateClassRow = (termId: string) =>
   useTermMutation(termId, (body: ClassRowInput) => post<ClassRow>(`/terms/${termId}/class-rows`, body))
+/** What deleting a class row did: units only it took are deleted, shared units just lose the row. */
+export interface ClassRowDeleted { units_deleted: string[]; units_kept: string[] }
 export const useDeleteClassRow = (termId: string) =>
-  useTermMutation(termId, (id: string) => api.delete(`/class-rows/${id}`))
+  useTermMutation(termId, async (id: string) => (await api.delete<ClassRowDeleted>(`/class-rows/${id}`)).data)
 export const useBulkClassRows = (termId: string) =>
   useTermMutation(termId, (rows: Record<string, string>[]) => post<BulkResult>(`/terms/${termId}/class-rows/bulk`, { rows }))
 
