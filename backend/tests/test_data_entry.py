@@ -420,3 +420,51 @@ def test_a_file_naming_something_twice_is_refused_on_the_second_row(client, smar
     )
     assert units["created"] == 1
     assert units["errors"][0]["message"] == "Unit COSC210 is also on row 1"
+
+
+def test_cosc_units_go_to_a_lab_when_one_seats_the_group(client, smarttt):
+    sign_in(client)
+    term = enter_term(client)  # LAB 1 seats 40; COSC 100 has 90 students, COSC 103's groups 100+
+    departments = {d["code"]: d for d in ok(client.get("/api/departments"))}
+    ok(
+        client.post(
+            f"/api/terms/{term['id']}/class-rows/bulk",
+            json={
+                "rows": [{"programme": "BSC.IT", "year": "1", "semester": "1", "department": "DCOMP", "students": "35"}]
+            },
+        )
+    )
+    labels = {r["label"]: r["id"] for r in ok(client.get(f"/api/terms/{term['id']}/class-rows"))}
+    for code, name in (("COSC 110", "Programming"), ("MATH 110", "Calculus")):
+        ok(
+            client.post(
+                f"/api/terms/{term['id']}/offerings",
+                json={
+                    "unit_code": code,
+                    "unit_name": name,
+                    "department_id": departments["DCOMP"]["id"],
+                    "class_row_ids": [labels["BSC.IT Y1S1"]],
+                    "room_type": "lecture_hall",
+                },
+            )
+        )
+    run = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))
+    assert run["status"] == "succeeded", run["failure"]
+    grid = ok(client.get(f"/api/drafts/{run['draft_id']}?view=row"))
+    assert grid["draft"]["violation_count"] == 0
+    rooms = {c["unit_code"]: c["room"] for e in grid["entities"] for c in e["cells"]}
+    assert rooms["COSC 110"] == "LAB 1"  # 35 students: the lab, though the unit says lecture hall
+    assert rooms["MATH 110"] != "LAB 1"  # not a computing unit
+    assert rooms["COSC 100"] != "LAB 1"  # 90 students: too many for the lab
+
+
+def test_room_type_for_computing_units():
+    from app.services.problem import room_type_for
+
+    largest = {"lab": 40, "lecture_hall": 200}
+    assert room_type_for("COSC 110", "lecture_hall", 35, largest) == "lab"
+    assert room_type_for("cosc110", "seminar", 40, largest) == "lab"
+    assert room_type_for("COSC 100", "lecture_hall", 90, largest) == "lecture_hall"
+    assert room_type_for("COSC 100", "lab", 90, largest) == "lecture_hall"  # too big for every lab
+    assert room_type_for("MATH 110", "lecture_hall", 35, largest) == "lecture_hall"
+    assert room_type_for("COSC 110", "lecture_hall", 35, {"lecture_hall": 200}) == "lecture_hall"  # no labs

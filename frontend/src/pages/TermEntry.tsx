@@ -36,7 +36,7 @@ export const UNIT_COLUMNS: BulkColumn[] = [
   { key: 'department', label: 'Department', example: 'Computer Science', required: true, hint: 'The name or code of the department that owns the unit. A new name is added to Departments.' },
   { key: 'hours_per_week', label: 'Hours per week', example: '3', hint: "Blank = the term's class length" },
   { key: 'class_length', label: 'Class length', example: '3', hint: 'Hours per meeting' },
-  { key: 'room_type', label: 'Room type', example: 'Lecture hall', hint: 'Lecture hall, Lab or Seminar room' },
+  { key: 'room_type', label: 'Room type', example: 'Lecture hall', hint: 'Lecture hall, Lab or Seminar room. COSC units go to a lab whenever one seats the group' },
   { key: 'class_rows', label: 'Class rows', example: 'BED.BIO/AGR Y1S1 (2); BED.MATH/BIO Y1S1',
     hint: 'The class rows that take the unit, separated by ";" (exactly as on the Class rows tab)' },
 ]
@@ -266,7 +266,7 @@ export function OfferingForm({
           <Field label="Class length (hours)">
             <input type="number" min={1} max={6} value={form.session_length} onChange={(e) => setForm({ ...form, session_length: Number(e.target.value) })} className={inputClass} />
           </Field>
-          <Field label="Room type">
+          <Field label="Room type" hint={/^\s*cosc/i.test(form.unit_code ?? '') ? 'COSC units go to a lab whenever one seats the group; only a group too big for every lab uses this type.' : undefined}>
             <select value={form.room_type} onChange={(e) => setForm({ ...form, room_type: e.target.value as RoomType })} className={inputClass}>
               {Object.entries(ROOM_TYPE_NAMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>

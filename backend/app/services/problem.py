@@ -31,6 +31,22 @@ from app.solver.model import (
     Session as SolverSession,
 )
 
+# Units taught in the computer labs: each group goes to a lab when one seats
+# it, and only a group too big for every lab goes to the unit's other room type.
+LAB_FIRST_PREFIXES = ("COSC",)
+
+
+def room_type_for(unit_code: str, own_type: str, students: int, largest: dict[str, int]) -> str:
+    """
+    The room type a group of this unit is placed in, given the largest active
+    room of each type; the solver then picks the best-fitting free room.
+    """
+    if not re.sub(r"[^A-Za-z0-9]", "", unit_code).upper().startswith(LAB_FIRST_PREFIXES):
+        return own_type
+    if largest.get("lab", 0) >= students:
+        return "lab"
+    return own_type if own_type != "lab" else "lecture_hall"
+
 
 def session_key(unit_code: str, group_label: str, index: int) -> str:
     """Stable across drafts and versions: 'COSC 103', 'GR A', 0 -> 'COSC103-GRA-1'."""
@@ -74,6 +90,9 @@ def build_problem(
         for r in data["rooms"]
         if r["status"] == "active"
     ]
+    largest: dict[str, int] = {}
+    for room in solver_rooms:
+        largest[room.room_type] = max(largest.get(room.room_type, 0), room.capacity)
     # A department with no lecturer count (entered in the Generator but left
     # empty) has no cap: H9 is skipped for it rather than forbidding every class.
     capacity = {
@@ -129,7 +148,7 @@ def build_problem(
                         class_row_ids=tuple(str(m.class_row_id) for m in group.members),
                         students=group.student_count,
                         length=length,
-                        room_type=offering.room_type,
+                        room_type=room_type_for(offering.unit_code, offering.room_type, group.student_count, largest),
                         pinned=pinned,
                         previous=previous,
                         lecturer_id=lecturer,

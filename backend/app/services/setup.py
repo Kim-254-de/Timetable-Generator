@@ -41,6 +41,7 @@ from app.models import (
     Term,
     UnitOffering,
 )
+from app.services.problem import room_type_for
 
 ROOM_TYPES = ("lecture_hall", "lab", "seminar")
 
@@ -612,14 +613,15 @@ def readiness(db: Session, term: Term) -> dict[str, Any]:
                         "message": f"{o.unit_code} {g.label or '(whole class)'} has no class rows.",
                     }
                 )
-            if g.student_count > biggest.get(o.room_type, 0):
+            kind = room_type_for(o.unit_code, o.room_type, g.student_count, biggest)
+            if g.student_count > biggest.get(kind, 0):
                 problems.append(
                     {
                         "code": "group_too_big",
                         "entity": o.unit_code,
                         "message": f"{o.unit_code} {g.label or ''} has {g.student_count} students; the "
-                        f"largest {o.room_type.replace('_', ' ')} seats "
-                        f"{biggest.get(o.room_type, 0)}.",
+                        f"largest {kind.replace('_', ' ')} seats "
+                        f"{biggest.get(kind, 0)}.",
                     }
                 )
     known_departments = {int(d["id"]) for d in snapshot.data.get("departments") or []}
