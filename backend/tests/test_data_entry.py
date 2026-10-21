@@ -10,7 +10,9 @@ from io import BytesIO
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.models import UnitOffering
 from tests.conftest import departments, sign_in
 from tests.fake_smarttt import CS, EDU
 
@@ -142,7 +144,7 @@ def enter_term(client: TestClient) -> dict[str, Any]:
     return term
 
 
-def test_director_enters_everything_and_downloads(client, smarttt):
+def test_director_enters_everything_and_downloads(client, smarttt, db):
     sign_in(client)
     term = enter_term(client)
     overview = ok(client.get(f"/api/terms/{term['id']}"))
@@ -160,7 +162,26 @@ def test_director_enters_everything_and_downloads(client, smarttt):
     published = ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
     assert published["version"] == 1 and published["smarttt"]["sent"] is False
     assert smarttt.payloads == []
-    assert ok(client.get(f"/api/terms/{term['id']}"))["publications"][0]["sent_to_smarttt"] is False
+    version = ok(client.get(f"/api/terms/{term['id']}"))["publications"][0]
+    assert version["sent_to_smarttt"] is False and version["can_send"] is False
+    assert "start and end dates" in version["not_sent_reason"]
+
+    # With its dates, SMARTTT can create the term: the version is sent and the
+    # term (and the units SMARTTT matched or created) linked to SMARTTT's ids.
+    ok(client.patch(f"/api/terms/{term['id']}", json={"start_date": "2026-09-21", "end_date": "2026-12-18"}))
+    sent = ok(client.post(f"/api/terms/{term['id']}/publications/1/send"))
+    assert sent["sent_to_smarttt"] is True
+    payload = smarttt.payloads[-1]
+    assert payload["term_id"] is None and (payload["term_start"], payload["term_end"]) == ("2026-09-21", "2026-12-18")
+    assert payload["based_on_version"] is None
+    cosc = next(s for s in payload["sessions"] if s["unit_code"] == "COSC 103")
+    assert cosc["department"] == {"smarttt_id": CS, "code": "DCOMP", "name": "Computer Science"}
+    assert cosc["room"]["code"] in {"UTC 1", "STB 1", "STB 2", "STB 3"} and cosc["room"]["capacity"] > 0
+    assert all(r["label"] and r["program_code"] for r in cosc["class_rows"])
+    assert {r["department_smarttt_id"] for r in cosc["class_rows"]} <= {CS, EDU}
+    assert ok(client.get(f"/api/terms/{term['id']}"))["smarttt_term_id"]
+    db.expire_all()
+    assert all(o.smarttt_unit_id for o in db.scalars(select(UnitOffering)))
 
     pdf = client.get(f"/api/drafts/{draft_id}/export.pdf?view=row")
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")

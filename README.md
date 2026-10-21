@@ -44,9 +44,16 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    every move is checked against the hard rules and refused with the reason if
    it breaks one. Moved classes are pinned. **Re-solve** around the pins.
 6. **Approve and publish**: the draft becomes the term's next numbered version.
-   It is sent to SMARTTT when SMARTTT is connected (students see room and
-   time; lecturers come from the Allocator); otherwise it is marked "not yet in
-   SMARTTT" and still counts as approved for downloads and the Allocator.
+   It is sent to SMARTTT as the term's master timetable (SMARTTT's
+   `POST /api/v1/integrations/generator/publish/`, replacing the PDF upload):
+   students see room and time, lecturer allocations are re-applied, and Smart
+   Attendance is told which classes moved. A version updates SMARTTT's slots
+   in place, so allocated lecturers stay. A term entered here is created in
+   SMARTTT from its year, semester and dates, then linked. When SMARTTT can't
+   be reached (or the term has no dates yet) the version is marked "not yet in
+   SMARTTT", still counts as approved for downloads and the Allocator, and can
+   be sent later. SMARTTT refusing it (a room clash, a department it doesn't
+   have yet, someone else published first) is reported and nothing is approved.
 7. **Download** any draft or version as **PDF**, **Word (.docx)** or
    **Excel (.xlsx)**, by class row, lecture hall or department, in the
    Directorate's layout (header, Mon–Fri × 07:00–19:00 grid, "UNIT / GR / ROOM"

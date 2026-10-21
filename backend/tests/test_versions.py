@@ -110,3 +110,19 @@ def test_the_allocator_learns_each_class_s_smarttt_key(client, smarttt):
     assert sent["in_smarttt"] is True
     terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
     assert terms[0]["in_smarttt"] is True and terms[0]["smarttt_term_id"] == sent["term"]["smarttt_term_id"]
+
+
+def test_a_version_is_sent_on_top_of_what_smarttt_has(client, smarttt):
+    sign_in(client)
+    term_id = setup_term(client)
+    first = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))["draft_id"]
+    smarttt.down = True
+    ok(client.post(f"/api/drafts/{first}/publish", json={}))  # SMARTTT never gets version 1
+    smarttt.down = False
+
+    copy = ok(client.post(f"/api/drafts/{first}/copy"))
+    second = ok(client.post(f"/api/drafts/{copy['id']}/publish", json={}))
+    assert second["version"] == 2 and second["smarttt"]["sent"] is True
+    assert smarttt.payloads[-1]["based_on_version"] is None  # SMARTTT's latest, not the Generator's
+    third = ok(client.post(f"/api/drafts/{ok(client.post(f'/api/drafts/{copy["id"]}/copy'))['id']}/publish", json={}))
+    assert third["smarttt"]["sent"] is True and smarttt.payloads[-1]["based_on_version"] == 2
