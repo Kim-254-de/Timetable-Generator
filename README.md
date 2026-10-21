@@ -132,6 +132,26 @@ refused in production). Frontend: `cd frontend && npm install && npm run dev`
 (proxies `/api` to port 8002). Everything in containers: `docker compose up --build`,
 then http://localhost:8081.
 
+## Deploying with Docker
+
+On a Linux server with Docker and the Compose plugin:
+
+```bash
+cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ALLOCATOR_API_KEY;
+                         # SOLVER_WORKERS = the server's cores
+docker compose up -d --build
+```
+
+This runs PostgreSQL, Redis, the API (migrations run as it starts), the solver
+worker and the web app on port 8081, all restarting on their own. Then:
+
+- Put an HTTPS proxy (Caddy, nginx, Traefik, or the host's) in front of port 8081;
+  sign-in cookies are `Secure` and need HTTPS. Add `Strict-Transport-Security` there.
+- Back up the `db-data` volume (or `pg_dump`) on a schedule.
+- The Allocator reaches the Generator through this web address
+  (`GENERATOR_BASE_URL` there), so the URL must be reachable from its server.
+- Update: `git pull && docker compose up -d --build`.
+
 ## Checks
 
 ```bash

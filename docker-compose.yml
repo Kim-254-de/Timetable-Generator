@@ -1,8 +1,11 @@
-# Local stack: PostgreSQL, Redis, the API, the solver worker and the web app
-# (http://localhost:8081). Reads secrets from .env (copy .env.example). SMARTTT runs separately.
+# The whole Generator: PostgreSQL, Redis, the API, the solver worker and the web
+# app (http://localhost:8081). Reads secrets from .env (copy .env.example).
+# SMARTTT runs separately. In production put an HTTPS proxy in front of `web`
+# (COOKIE_SECURE=true needs HTTPS) and back up the db-data volume.
 services:
   db:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: generator
       POSTGRES_USER: generator
@@ -16,10 +19,16 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
 
   api:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
     environment: &backend-env
       DATABASE_URL: postgresql+psycopg://generator:${POSTGRES_PASSWORD}@db:5432/generator
@@ -29,29 +38,32 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
 
   worker:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
     environment: *backend-env
+    # CP-SAT uses SOLVER_WORKERS threads: set it to the server's core count.
     command: ["rq", "worker", "generator-runs", "--url", "redis://redis:6379/0"]
+    # The image's health check calls the API's port, which the worker doesn't open.
+    healthcheck:
+      disable: true
     depends_on:
-      - api
-    # CP-SAT uses every core it is given (SOLVER_WORKERS); give it the machine.
-    deploy:
-      resources:
-        reservations:
-          cpus: "4"
+      api:
+        condition: service_healthy
 
   web:
     build: ./frontend
+    restart: unless-stopped
     environment:
       API_UPSTREAM: http://api:8000
     ports:
       - "8081:8080"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   db-data:
