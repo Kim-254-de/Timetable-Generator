@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { errorMessage } from '@/lib/api'
+import { api, errorMessage } from '@/lib/api'
 import type { BulkResult } from '@/lib/types'
 import { Dialog } from './Dialog'
 
@@ -10,6 +10,51 @@ export interface BulkColumn {
   required?: boolean
   hint?: string
 }
+
+/** "Staff number" and "staff_number" both name the staff_number column. */
+const headerKey = (h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+
+/** One sheet of a workbook, as text cells, read by the API (browsers can't read .xlsx). */
+export interface Sheet {
+  name: string
+  rows: string[][]
+}
+
+/**
+ * The header row of a prepared sheet: the row naming the most of our columns,
+ * so title rows above it ("DEPARTMENT OF …") are skipped. -1 when none does.
+ */
+export function headerRow(rows: string[][], columns: BulkColumn[]): number {
+  let best = -1
+  let bestScore = 0
+  rows.forEach((row, i) => {
+    const score = namedColumns(row, columns)
+    if (score > bestScore) { best = i; bestScore = score }
+  })
+  return best
+}
+
+function namedColumns(row: string[], columns: BulkColumn[]): number {
+  const names = new Set(columns.flatMap((c) => [c.key, headerKey(c.label)]))
+  return new Set(row.map(headerKey).filter((h) => names.has(h))).size
+}
+
+/** The sheet from its header row on, as the same tab-separated text a paste gives. */
+export function sheetText(sheet: Sheet, columns: BulkColumn[]): string {
+  const start = headerRow(sheet.rows, columns)
+  return sheet.rows.slice(Math.max(start, 0)).map((r) => r.join('\t')).join('\n')
+}
+
+/** The sheet most like our columns, to open first. */
+export function bestSheet(sheets: Sheet[], columns: BulkColumn[]): number {
+  const score = (s: Sheet) => {
+    const i = headerRow(s.rows, columns)
+    return i < 0 ? 0 : namedColumns(s.rows[i], columns)
+  }
+  return sheets.reduce((best, s, i) => (score(s) > score(sheets[best]) ? i : best), 0)
+}
+
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 /**
  * Splits text pasted from Excel (tab-separated) or a CSV file (comma-separated,
@@ -37,7 +82,7 @@ export function parseTable(text: string): Record<string, string>[] {
     out.push(cell)
     return out
   }
-  const header = split(lines[0]).map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''))
+  const header = split(lines[0]).map(headerKey)
   return lines.slice(1).map((line) => {
     const cells = split(line)
     const row: Record<string, string> = {}
@@ -52,7 +97,8 @@ export function templateCsv(columns: BulkColumn[]): string {
 }
 
 function downloadText(filename: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  // The byte-order mark makes Excel read the file as UTF-8.
+  const url = URL.createObjectURL(new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' }))
   const a = document.createElement('a')
   a.href = url
   a.download = filename
@@ -61,9 +107,9 @@ function downloadText(filename: string, text: string) {
 }
 
 /**
- * "Paste from Excel": the Director copies a block of cells (with its header
- * row) from Excel or opens a CSV, pastes it here, and every line is added or
- * updated. Bad lines are listed by number and skipped.
+ * "Paste from Excel": open a prepared Excel workbook or a CSV, or copy a block
+ * of cells (with its header row) from Excel and paste it here,
+ * and every line is added or updated. Bad lines are listed by number and skipped.
  */
 export function BulkPaste({
   title,
@@ -96,15 +142,51 @@ export function BulkPaste({
     }
   }
 
-  const readFile = async (file: File | undefined) => {
-    if (file) setText(await file.text())
+  const [sheets, setSheets] = useState<Sheet[]>([])
+  const [sheetIndex, setSheetIndex] = useState(0)
+  const [reading, setReading] = useState(false)
+
+  const showSheet = (all: Sheet[], index: number) => {
+    setSheetIndex(index)
+    setText(sheetText(all[index], columns))
+    setResult(null)
   }
+
+  const readFile = async (file: File | undefined) => {
+    if (!file) return
+    setFailure(null)
+    setResult(null)
+    setSheets([])
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.xls')) {
+      setFailure('This is an old Excel file (.xls). In Excel, use File > Save As > Excel Workbook (.xlsx), then open that.')
+      return
+    }
+    if (!name.endsWith('.xlsx') && file.type !== XLSX_TYPE) {
+      setText(await file.text())
+      return
+    }
+    setReading(true)
+    try {
+      const { data } = await api.post<{ sheets: Sheet[] }>('/spreadsheets/read', file, {
+        headers: { 'Content-Type': XLSX_TYPE },
+        timeout: 60_000,
+      })
+      setSheets(data.sheets)
+      showSheet(data.sheets, bestSheet(data.sheets, columns))
+    } catch (err) {
+      setFailure(errorMessage(err))
+    } finally {
+      setReading(false)
+    }
+  }
+  const header = headerRow(sheets[sheetIndex]?.rows ?? [], columns)
 
   return (
     <Dialog title={title} onClose={onClose} wide>
       <p className="text-sm text-muted">
-        Copy the cells from Excel <b>including the header row</b> and paste them below, or open a CSV file. Existing items
-        (same code) are updated; new ones are added.
+        Open a prepared Excel workbook (.xlsx) or CSV file, or copy the cells from Excel <b>including the header row</b>{' '}
+        and paste them below. Existing items (same code) are updated; new ones are added.
       </p>
       <div className="mt-2 overflow-x-auto rounded-md border border-line">
         <table className="w-full text-left text-xs">
@@ -123,13 +205,37 @@ export function BulkPaste({
       )}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         <button type="button" onClick={() => downloadText(templateName, templateCsv(columns))} className="text-brand-ink">
-          Download the template (CSV)
+          Download the template (opens in Excel)
         </button>
-        <label className="cursor-pointer text-brand-ink">
-          Open a CSV file
-          <input type="file" accept=".csv,text/csv,text/plain" className="sr-only" onChange={(e) => void readFile(e.target.files?.[0])} />
+        <label className="cursor-pointer rounded-md border border-brand px-3 py-1.5 text-brand-ink">
+          {reading ? 'Reading…' : 'Open an Excel or CSV file'}
+          <input type="file" accept={`.xlsx,.csv,${XLSX_TYPE},text/csv,text/plain`} className="sr-only" disabled={reading}
+            onChange={(e) => { void readFile(e.target.files?.[0]); e.target.value = '' }} />
         </label>
       </div>
+      {sheets.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+          {sheets.length > 1 && (
+            <label>
+              Sheet{' '}
+              <select value={sheetIndex} onChange={(e) => showSheet(sheets, Number(e.target.value))}
+                className="rounded-md border border-line px-2 py-1">
+                {sheets.map((s, i) => <option key={s.name} value={i}>{s.name}</option>)}
+              </select>
+            </label>
+          )}
+          {header < 0 ? (
+            <span className="text-warning">
+              No row in this sheet has our column headings. Rename the header cells to match the table above, then open it again.
+            </span>
+          ) : (
+            <span className="text-muted">
+              {header > 0 ? `Started at the heading row; ${header} title row${header > 1 ? 's' : ''} above it left out. ` : ''}
+              Check the rows below, then save.
+            </span>
+          )}
+        </div>
+      )}
       <textarea value={text} onChange={(e) => { setText(e.target.value); setResult(null) }} rows={10} aria-label="Pasted rows"
         placeholder={columns.map((c) => c.label).join('\t')}
         className="mt-2 w-full rounded-md border border-line px-2 py-1 font-mono text-xs" />

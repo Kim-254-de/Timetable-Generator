@@ -1,4 +1,4 @@
-import { parseTable, templateCsv } from './BulkPaste'
+import { bestSheet, headerRow, parseTable, sheetText, templateCsv } from './BulkPaste'
 
 describe('parseTable', () => {
   it('reads cells pasted from Excel (tabs) by their header names', () => {
@@ -21,5 +21,33 @@ describe('parseTable', () => {
   it('round-trips its own template', () => {
     const csv = templateCsv([{ key: 'code', label: 'Code', example: 'TC 7' }, { key: 'name', label: 'Name', example: 'A, B' }])
     expect(parseTable(csv)).toEqual([{ code: 'TC 7', name: 'A, B' }])
+  })
+})
+
+describe('a prepared Excel sheet', () => {
+  const columns = [
+    { key: 'unit_code', label: 'Unit code', example: 'COSC 103' },
+    { key: 'lecturer', label: 'Lecturer', example: 'Dr. Jane Mwangi' },
+  ]
+  const prepared = {
+    name: 'Allocation',
+    rows: [
+      ['TEACHING TIMETABLE MAY-AUGUST 2026'],
+      ['Unit code', 'Lecturer', 'Notes'],
+      ['COSC 103', 'Dr. Jane Mwangi'],
+    ],
+  }
+
+  it('starts at the heading row, below any title rows', () => {
+    expect(headerRow(prepared.rows, columns)).toBe(1)
+    expect(parseTable(sheetText(prepared, columns))).toEqual([{ unit_code: 'COSC 103', lecturer: 'Dr. Jane Mwangi', notes: '' }])
+  })
+
+  it('finds no heading row in an unrelated sheet', () => {
+    expect(headerRow([['Name', 'Phone'], ['A', '1']], columns)).toBe(-1)
+  })
+
+  it('opens the sheet that has our headings', () => {
+    expect(bestSheet([{ name: 'Notes', rows: [['Read me first']] }, prepared], columns)).toBe(1)
   })
 })

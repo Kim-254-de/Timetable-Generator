@@ -6,6 +6,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,7 @@ from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError, ok
 from app.models import ClassRow, Group, Room, Run, RunMode, Term, UnitOffering
-from app.services import drafts, export, grouping, integration, master, runs, setup
+from app.services import drafts, export, grouping, integration, master, runs, setup, spreadsheet
 
 router = APIRouter()
 
@@ -60,6 +61,20 @@ def _get(db: Session, model: type[Any], object_id: str, what: str) -> Any:
 def health(db: Db) -> dict[str, Any]:
     db.execute(text("SELECT 1"))
     return ok({"status": "ok"})
+
+
+# -- Excel files -------------------------------------------------------------------------
+
+
+@router.post("/spreadsheets/read")
+async def read_spreadsheet(request: Request, identity: Me) -> dict[str, Any]:
+    """The cells of a prepared .xlsx, sent as the raw request body, for the "Paste from Excel" dialogs."""
+    content = bytearray()
+    async for chunk in request.stream():
+        content += chunk
+        if len(content) > spreadsheet.MAX_FILE_BYTES:
+            raise ApiError(413, "FILE_TOO_LARGE", spreadsheet.TOO_BIG)
+    return ok(await run_in_threadpool(spreadsheet.read_workbook, bytes(content)))
 
 
 # -- sign-in ----------------------------------------------------------------------
