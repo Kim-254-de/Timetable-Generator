@@ -87,9 +87,13 @@ class Term(Base):
 
 class Department(Base):
     """
-    A department that owns units. `lecturer_count` caps how many of its
-    classes may run at once (rule H9); left empty, no cap is applied. The id
-    is SMARTTT's department id when imported, else a number from 100000 up.
+    A department that owns units. Departments are created in Smart Attendance
+    (by faculty officers; Attendance creates them in SMARTTT first) and read
+    from there (app.services.departments): name and school are Attendance's.
+    `code` and `lecturer_count` are the Generator's own: `lecturer_count` caps
+    how many of its classes may run at once (rule H9); left empty, no cap is
+    applied. The id is SMARTTT's department id when known, else a number from
+    100000 up.
     """
 
     __tablename__ = "departments"
@@ -100,6 +104,11 @@ class Department(Base):
     school: Mapped[str] = mapped_column(String(255), default="")
     lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     smarttt_department_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
+    # Attendance's id for the department; None for one entered here before
+    # departments came from Attendance (it can't own new units).
+    attendance_department_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    # Active lecturers Attendance has placed in it: a guide for lecturer_count.
+    attendance_lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Room(Base):

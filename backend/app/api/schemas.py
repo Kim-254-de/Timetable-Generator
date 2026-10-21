@@ -78,17 +78,10 @@ class RoomPatch(_Strict):
 DepartmentText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
 
 
-class DepartmentBody(_Strict):
-    code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
-    school: Text = ""
-    lecturer_count: Annotated[int, Field(ge=1, le=2000)] | None = None
-
-
 class DepartmentPatch(_Strict):
+    """The Generator's own fields; a department's name and school come from Smart Attendance."""
+
     code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)] | None = None
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
-    school: Text | None = None
     lecturer_count: Annotated[int, Field(ge=0, le=2000)] | None = None  # 0 clears the count
 
 

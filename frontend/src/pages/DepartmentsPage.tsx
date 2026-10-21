@@ -2,96 +2,121 @@ import { useState, type FormEvent } from 'react'
 import { BulkPaste, type BulkColumn } from '@/components/BulkPaste'
 import { Dialog, Field, inputClass } from '@/components/Dialog'
 import { errorMessage } from '@/lib/api'
-import { useBulkDepartments, useDeleteDepartment, useDepartments, useSaveDepartment, type DepartmentInput } from '@/lib/queries'
+import { useBulkDepartments, useDeleteDepartment, useDepartmentList, useSaveDepartment, useSyncDepartments, type DepartmentInput } from '@/lib/queries'
 import type { Department } from '@/lib/types'
 
 const COLUMNS: BulkColumn[] = [
-  { key: 'code', label: 'Code', example: 'DCOMP', required: true },
-  { key: 'name', label: 'Name', example: 'Department of Computer Science and ICT', required: true },
-  { key: 'school', label: 'School', example: 'School of Science and Technology' },
+  { key: 'department', label: 'Department', example: 'Computer Science', required: true,
+    hint: 'Its name or code, as on the Departments list.' },
+  { key: 'code', label: 'Code', example: 'DCOMP', hint: 'Optional: the code printed on the timetable.' },
   { key: 'lecturer_count', label: 'Lecturers', example: '24',
-    hint: 'How many lecturers the department has. The Generator never runs more of its classes at once. Leave blank for no limit.' },
+    hint: 'How many lecturers the department has. The Generator never runs more of its classes at once. Leave blank to keep the current number.' },
 ]
 
-/** Departments own units; the department that owns a unit allocates its lecturer in the Allocator. */
+/**
+ * Departments own units; the department that owns a unit allocates its
+ * lecturer in the Allocator. Faculty officers create departments in Smart
+ * Attendance; they are read from there. The Generator keeps its own code and
+ * lecturer count for each.
+ */
 export function DepartmentsPage() {
-  const departments = useDepartments()
+  const list = useDepartmentList()
+  const sync = useSyncDepartments()
   const remove = useDeleteDepartment()
   const bulk = useBulkDepartments()
-  const [editing, setEditing] = useState<Department | 'new' | null>(null)
+  const [editing, setEditing] = useState<Department | null>(null)
   const [pasting, setPasting] = useState(false)
+  const report = sync.data?.report
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Departments</h1>
-          <p className="text-sm text-muted">Each unit belongs to one department. Used by every term.</p>
+          <p className="text-sm text-muted">
+            From Smart Attendance, where faculty officers add them. Set each one’s code and number of lecturers here. Used by every term.
+          </p>
         </div>
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setEditing('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a department</button>
+          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste lecturer numbers</button>
+          {list.data?.attendance_connected && (
+            <button onClick={() => sync.mutate()} disabled={sync.isPending} className="rounded-md bg-brand px-3 py-2 text-white disabled:opacity-50">
+              {sync.isPending ? 'Refreshing…' : 'Refresh from Attendance'}
+            </button>
+          )}
         </div>
       </div>
-      {(departments.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(departments.error ?? remove.error)}</p>}
+      {list.data && !list.data.attendance_connected && (
+        <p role="status" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+          Smart Attendance is not connected (ATTENDANCE_BASE_URL), so these are the departments as last read.
+        </p>
+      )}
+      {report && (
+        <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">
+          Up to date with Attendance: {report.created} added, {report.linked} linked, {report.updated} updated.
+          {report.skipped.length > 0 && ` ${report.skipped.join(' ')}`}
+        </p>
+      )}
+      {(list.isError || remove.isError || sync.isError) && (
+        <p role="alert" className="text-sm text-danger">{errorMessage(list.error ?? remove.error ?? sync.error)}</p>
+      )}
       <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">School</th><th className="px-3 py-2">Lecturers</th><th /></tr>
           </thead>
           <tbody>
-            {(departments.data ?? []).map((d) => (
+            {(list.data?.departments ?? []).map((d) => (
               <tr key={d.id} className="border-t border-line">
                 <td className="px-3 py-2 font-medium">{d.code}</td>
-                <td className="px-3 py-2">{d.name}</td>
+                <td className="px-3 py-2">
+                  {d.name}
+                  {!d.from_attendance && <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">not in Attendance</span>}
+                </td>
                 <td className="px-3 py-2 text-muted">{d.school}</td>
-                <td className="px-3 py-2">{d.lecturer_count ?? <span className="text-muted">no limit</span>}</td>
+                <td className="px-3 py-2">
+                  {d.lecturer_count ?? <span className="text-muted">no limit</span>}
+                  {d.attendance_lecturer_count != null && <span className="ml-2 text-xs text-muted">({d.attendance_lecturer_count} in Attendance)</span>}
+                </td>
                 <td className="space-x-3 px-3 py-2 text-right">
                   <button onClick={() => setEditing(d)} className="text-brand-ink">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${d.code}?`)) remove.mutate(d.id) }} className="text-danger">Delete</button>
+                  {!d.from_attendance && (
+                    <button onClick={() => { if (window.confirm(`Delete ${d.code}?`)) remove.mutate(d.id) }} className="text-danger">Delete</button>
+                  )}
                 </td>
               </tr>
             ))}
-            {departments.data?.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No departments yet.</td></tr>
+            {list.data?.departments.length === 0 && (
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No departments yet. Faculty officers add them in Smart Attendance.</td></tr>
             )}
           </tbody>
         </table>
       </div>
-      {editing && <DepartmentForm department={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {editing && <DepartmentForm department={editing} onClose={() => setEditing(null)} />}
       {pasting && (
-        <BulkPaste title="Paste departments" columns={COLUMNS} templateName="departments.csv"
+        <BulkPaste title="Paste lecturer numbers" columns={COLUMNS} templateName="department-lecturers.csv"
           submit={(rows) => bulk.mutateAsync(rows)} onClose={() => setPasting(false)} />
       )}
     </div>
   )
 }
 
-function DepartmentForm({ department, onClose }: { department: Department | null; onClose: () => void }) {
+function DepartmentForm({ department, onClose }: { department: Department; onClose: () => void }) {
   const save = useSaveDepartment()
-  const [form, setForm] = useState<DepartmentInput>({
-    code: department?.code ?? '',
-    name: department?.name ?? '',
-    school: department?.school ?? '',
-    lecturer_count: department?.lecturer_count ?? null,
-  })
+  const [form, setForm] = useState<DepartmentInput>({ code: department.code, lecturer_count: department.lecturer_count })
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    // Editing: an empty count is sent as 0, which clears it.
-    const body = { ...form, lecturer_count: form.lecturer_count ?? (department ? 0 : null) }
-    save.mutate({ id: department?.id, body }, { onSuccess: onClose })
+    // An empty count is sent as 0, which clears it.
+    save.mutate({ id: department.id, body: { ...form, lecturer_count: form.lecturer_count ?? 0 } }, { onSuccess: onClose })
   }
   return (
-    <Dialog title={department ? `Edit ${department.code}` : 'Add a department'} onClose={onClose}>
+    <Dialog title={`Edit ${department.name}`} onClose={onClose}>
       <form onSubmit={submit} className="mt-3 space-y-3">
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Code"><input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="DCOMP" className={inputClass} /></Field>
-          <div className="col-span-2">
-            <Field label="Name"><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} /></Field>
-          </div>
-        </div>
-        <Field label="School"><input value={form.school} onChange={(e) => setForm({ ...form, school: e.target.value })} className={inputClass} /></Field>
-        <Field label="Number of lecturers" hint="The Generator never runs more of this department's classes at the same hour. Leave blank for no limit.">
+        <p className="text-sm text-muted">The name and school come from Smart Attendance and are changed there.</p>
+        <Field label="Code" hint="Printed on the timetable and used by the Allocator.">
+          <input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="DCOMP" className={inputClass} />
+        </Field>
+        <Field label="Number of lecturers" hint={`The Generator never runs more of this department's classes at the same hour. Leave blank for no limit.${department.attendance_lecturer_count != null ? ` Attendance lists ${department.attendance_lecturer_count}.` : ''}`}>
           <input type="number" min={1} value={form.lecturer_count ?? ''}
             onChange={(e) => setForm({ ...form, lecturer_count: e.target.value === '' ? null : Number(e.target.value) })} className={inputClass} />
         </Field>

@@ -15,7 +15,6 @@ from app.api.schemas import (
     ClassRowBody,
     ClassRowPatch,
     CopyTermBody,
-    DepartmentBody,
     DepartmentPatch,
     GroupBody,
     LoginBody,
@@ -32,17 +31,19 @@ from app.api.schemas import (
     TermPatch,
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
+from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
 from app.clients.smarttt import SmartttClient, get_smarttt
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError, ok
 from app.models import ClassRow, Group, Room, Run, RunMode, Term, UnitOffering
-from app.services import drafts, export, grouping, integration, master, runs, setup, spreadsheet
+from app.services import departments, drafts, export, grouping, integration, master, runs, setup, spreadsheet
 
 router = APIRouter()
 
 Db = Annotated[Session, Depends(get_db)]
 Smarttt = Annotated[SmartttClient, Depends(get_smarttt)]
+Attendance = Annotated[AttendanceClient, Depends(get_attendance)]
 Me = Annotated[Identity, Depends(current_identity)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
@@ -189,13 +190,23 @@ def delete_room(room_id: str, identity: Me, db: Db) -> dict[str, Any]:
 
 
 @router.get("/departments")
-def list_departments(_me: Me, db: Db) -> dict[str, Any]:
-    return ok(master.list_departments(db))
+def list_departments(identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    """Departments come from Smart Attendance: read from there first (at most every DEPARTMENT_SYNC_SECONDS)."""
+    return ok(departments.list_departments(db, attendance, identity))
 
 
-@router.post("/departments")
-def create_department(body: DepartmentBody, identity: Me, db: Db) -> dict[str, Any]:
-    return ok(master.department_dict(master.create_department(db, identity, body.model_dump())))
+@router.post("/departments/sync")
+def sync_departments(identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    """Reads the departments from Smart Attendance now. 503 when it can't be reached."""
+    if not attendance.enabled:
+        raise ApiError(
+            409, "ATTENDANCE_NOT_CONNECTED", "Smart Attendance is not connected (ATTENDANCE_BASE_URL is unset)."
+        )
+    try:
+        report = departments.sync_departments(db, attendance, identity, force=True)
+    except AttendanceError as exc:
+        raise ApiError(503, "ATTENDANCE_UNAVAILABLE", exc.message) from exc
+    return ok({"report": report, **departments.list_departments(db, attendance, identity)})
 
 
 @router.post("/departments/bulk")
@@ -223,7 +234,9 @@ def take_snapshot(term_id: str, identity: Me, db: Db, smarttt: Smarttt) -> dict[
 
 
 @router.post("/terms/{term_id}/setup/import")
-def import_setup(term_id: str, identity: Me, db: Db) -> dict[str, Any]:
+def import_setup(term_id: str, identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    # The units SMARTTT names belong to departments, which come from Attendance: read them in first.
+    departments.sync_departments(db, attendance, identity)
     return ok(setup.import_setup(db, identity, setup.get_term(db, term_id)))
 
 

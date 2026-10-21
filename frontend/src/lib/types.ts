@@ -45,6 +45,10 @@ export interface RoomRecord {
   in_use: number
 }
 
+/**
+ * A department, read from Smart Attendance (where faculty officers create
+ * them). `code` and `lecturer_count` are the Generator's own.
+ */
 export interface Department {
   id: number
   code: string
@@ -52,6 +56,19 @@ export interface Department {
   school: string
   lecturer_count: number | null
   smarttt_department_id: number | null
+  /** False for one entered here before departments came from Attendance. */
+  from_attendance: boolean
+  /** Active lecturers Attendance has placed in it: a guide for lecturer_count. */
+  attendance_lecturer_count: number | null
+}
+
+export interface DepartmentList {
+  attendance_connected: boolean
+  departments: Department[]
+}
+
+export interface DepartmentSync extends DepartmentList {
+  report: { linked: number; created: number; updated: number; skipped: string[] } | null
 }
 
 export interface BulkResult {

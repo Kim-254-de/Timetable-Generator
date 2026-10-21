@@ -4,6 +4,8 @@ import type {
   BulkResult,
   ClassRow,
   Department,
+  DepartmentList,
+  DepartmentSync,
   DraftSummary,
   Grid,
   Group,
@@ -85,7 +87,6 @@ function useTermMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
   return useMutation({
     mutationFn: fn,
     onSettled: () => {
-      // Typing a new department on a class row or unit adds it to Departments.
       for (const k of [keys.term(termId), keys.rows(termId), keys.offerings(termId), keys.rooms(termId), keys.runs(termId), keys.departments]) {
         void qc.invalidateQueries({ queryKey: k })
       }
@@ -141,17 +142,23 @@ export const useDeleteRoom = () => useMasterMutation(keys.roomList, (id: string)
 export const useBulkRooms = () =>
   useMasterMutation(keys.roomList, (rows: Record<string, string>[]) => post<BulkResult>('/rooms/bulk', { rows }))
 
+/** The Generator's own fields; a department's name and school come from Smart Attendance. */
 export interface DepartmentInput {
   code?: string
-  name?: string
-  school?: string
   lecturer_count?: number | null
 }
-export const useDepartments = () => useQuery({ queryKey: keys.departments, queryFn: () => get<Department[]>('/departments') })
+const fetchDepartments = () => get<DepartmentList>('/departments')
+/** Departments, read from Smart Attendance (at most once a minute) and kept here. */
+export const useDepartmentList = () => useQuery({ queryKey: keys.departments, queryFn: fetchDepartments })
+export const useDepartments = () =>
+  useQuery({ queryKey: keys.departments, queryFn: fetchDepartments, select: (d) => d.departments })
 export const useSaveDepartment = () =>
-  useMasterMutation(keys.departments, ({ id, body }: { id?: number; body: DepartmentInput }) =>
-    id ? patch<Department>(`/departments/${id}`, body) : post<Department>('/departments', body),
+  useMasterMutation(keys.departments, ({ id, body }: { id: number; body: DepartmentInput }) =>
+    patch<Department>(`/departments/${id}`, body),
   )
+/** Reads the departments from Smart Attendance now. */
+export const useSyncDepartments = () =>
+  useMasterMutation(keys.departments, () => post<DepartmentSync>('/departments/sync'))
 export const useDeleteDepartment = () =>
   useMasterMutation(keys.departments, (id: number) => api.delete(`/departments/${id}`))
 export const useBulkDepartments = () =>
@@ -164,7 +171,7 @@ export interface ClassRowInput {
   study_year?: number
   study_semester?: number
   sub_class?: string
-  /** A department's name or code; a new name is added to the Departments list. */
+  /** A department's name or code, from the Departments list (Smart Attendance's). */
   department?: string
   student_count?: number | null
 }
@@ -178,7 +185,7 @@ export const useBulkClassRows = (termId: string) =>
 export interface OfferingInput {
   unit_code?: string
   unit_name?: string
-  /** A department's name or code; a new name is added to the Departments list. */
+  /** A department's name or code, from the Departments list (Smart Attendance's). */
   department?: string
   weekly_hours?: number
   session_length?: number

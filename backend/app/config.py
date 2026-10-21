@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     smarttt_api_key: str = ""
     smarttt_timeout_seconds: float = 60.0  # a publish writes the whole term
 
+    # Smart Attendance, where faculty officers create the departments the
+    # Generator plans against (GET /api/v1/integrations/generator/departments).
+    # The key must equal GENERATOR_API_KEY there. Unset URL = departments stay
+    # as last read.
+    attendance_base_url: str = ""
+    attendance_api_key: str = ""
+    attendance_timeout_seconds: float = 15.0
+    # Departments are re-read from Attendance at most this often when listed.
+    department_sync_seconds: int = 60
+
     # The Timetable Allocator reads units, groups and published meetings with
     # this key (X-API-Key); it must equal GENERATOR_API_KEY in the Allocator.
     # Unset = the Allocator can't connect.

@@ -1,6 +1,6 @@
 """
-The data the Directorate enters in the Generator: lecture halls, departments,
-class rows and units (with the class rows that take each unit), entered one
+The data the Directorate enters in the Generator: lecture halls, class rows
+and units (with the class rows that take each unit), entered one
 at a time or pasted in bulk from Excel, and copying a previous term's class
 rows, units and groups into a new term.
 
@@ -18,7 +18,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import ClassRowBody, DepartmentBody, DepartmentPatch, OfferingBody, RoomBody, RoomPatch
+from app.api.schemas import ClassRowBody, DepartmentPatch, OfferingBody, RoomBody, RoomPatch
 from app.auth import Identity
 from app.errors import ApiError
 from app.models import (
@@ -117,6 +117,10 @@ def delete_room(db: Session, identity: Identity, room: Room) -> None:
 # -- departments ---------------------------------------------------------------------------
 
 
+# Departments come from Smart Attendance (app.services.departments); here they
+# are found, and their Generator-only fields (code, lecturer count) edited.
+
+
 def department_dict(d: Department) -> dict[str, Any]:
     return {
         "id": d.id,
@@ -125,11 +129,9 @@ def department_dict(d: Department) -> dict[str, Any]:
         "school": d.school,
         "lecturer_count": d.lecturer_count,
         "smarttt_department_id": d.smarttt_department_id,
+        "from_attendance": d.attendance_department_id is not None,
+        "attendance_lecturer_count": d.attendance_lecturer_count,
     }
-
-
-def list_departments(db: Session) -> list[dict[str, Any]]:
-    return [department_dict(d) for d in db.scalars(select(Department).order_by(Department.name))]
 
 
 def get_department(db: Session, department_id: int) -> Department:
@@ -144,27 +146,14 @@ def _department_by_code(db: Session, code: str) -> Department | None:
 
 
 def _apply_department(db: Session, d: Department, fields: dict[str, Any]) -> None:
+    """The Generator's own fields; name and school are Attendance's."""
     if fields.get("code") is not None:
         clash = _department_by_code(db, fields["code"])
         if clash is not None and clash.id != d.id:
             raise ApiError(409, "CODE_TAKEN", f"There is already a department {clash.code}.")
-    for key in ("code", "name", "school"):
-        if fields.get(key) is not None:
-            setattr(d, key, fields[key])
+        d.code = fields["code"]
     if "lecturer_count" in fields and fields["lecturer_count"] is not None:
         d.lecturer_count = fields["lecturer_count"] or None
-
-
-def create_department(db: Session, identity: Identity, fields: dict[str, Any], commit: bool = True) -> Department:
-    next_id = max(int(db.scalar(select(func.max(Department.id))) or 0) + 1, FIRST_LOCAL_DEPARTMENT_ID)
-    d = Department(id=next_id, code="", name="", school="")
-    _apply_department(db, d, fields)
-    db.add(d)
-    db.flush()
-    audit(db, identity, "department.create", "department", str(d.id), None, department_dict(d))
-    if commit:
-        db.commit()
-    return d
 
 
 def update_department(
@@ -180,6 +169,9 @@ def update_department(
 
 
 def delete_department(db: Session, identity: Identity, d: Department) -> None:
+    """Only one entered here before departments came from Attendance, and only when nothing uses it."""
+    if d.attendance_department_id is not None:
+        raise ApiError(409, "FROM_ATTENDANCE", f"{d.name} comes from Smart Attendance; it can't be deleted here.")
     units = db.scalar(select(func.count()).select_from(UnitOffering).where(UnitOffering.owning_department_id == d.id))
     rows = db.scalar(select(func.count()).select_from(ClassRow).where(ClassRow.department_id == d.id))
     if units or rows:
@@ -193,7 +185,7 @@ _NAME_PREFIX = re.compile(r"^(department|dept\.?)(\s+of)?\s+", re.IGNORECASE)
 _CODE_FILLER = {"OF", "AND", "THE", "FOR", "IN"}
 
 
-def _name_key(name: str) -> str:
+def name_key(name: str) -> str:
     """'Department of  Computer Science' and 'computer science' are the same department."""
     return _NAME_PREFIX.sub("", " ".join(name.split())).casefold()
 
@@ -203,11 +195,11 @@ def find_department(db: Session, text: str) -> Department | None:
     found = _department_by_code(db, text)
     if found is not None:
         return found
-    key = _name_key(text)
-    return next((d for d in db.scalars(select(Department)) if _name_key(d.name) == key), None)
+    key = name_key(text)
+    return next((d for d in db.scalars(select(Department)) if name_key(d.name) == key), None)
 
 
-def _new_department_code(db: Session, name: str) -> str:
+def new_department_code(db: Session, name: str) -> str:
     """A short unused code from the name: 'Computer Science' -> 'CS', 'Education' -> 'EDUCATIO'."""
     words = [w for w in re.findall(r"[A-Za-z0-9]+", _NAME_PREFIX.sub("", name).upper()) if w not in _CODE_FILLER]
     base = (words[0][:8] if len(words) == 1 else "".join(w[0] for w in words)[:8]) if words else "DEPT"
@@ -219,15 +211,18 @@ def _new_department_code(db: Session, name: str) -> str:
 
 def department_for(db: Session, identity: Identity, text: str) -> Department:
     """
-    The department typed on a class row or unit. A name not yet in the
-    Departments list is added there, with a code made from the name that the
-    Director can change on the Departments page.
+    The department typed on a class row or unit, by code or name. Departments
+    are created in Smart Attendance by faculty officers, never here.
     """
     found = find_department(db, text)
     if found is not None:
         return found
-    name = " ".join(text.split())
-    return create_department(db, identity, {"code": _new_department_code(db, name), "name": name}, commit=False)
+    raise ApiError(
+        422,
+        "UNKNOWN_DEPARTMENT",
+        f"{' '.join(text.split())} is not a department. Departments are added in Smart Attendance by the faculty "
+        "officer; once it is there, refresh the Departments page.",
+    )
 
 
 def _resolved_department_id(db: Session, identity: Identity, fields: dict[str, Any]) -> int | None:
@@ -554,26 +549,24 @@ def bulk_rooms(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> d
 
 
 def bulk_departments(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sets codes and lecturer counts of departments already here (they come from Attendance)."""
+
     def one(r: dict[str, Any], claim: Any) -> str:
+        text = str(r.get("department") or r.get("name") or r.get("code") or "")
+        if not text:
+            raise ValueError("name the department (its code or name)")
+        found = find_department(db, text)
+        if found is None:
+            raise ValueError(f"{text} is not a department; departments are added in Smart Attendance")
+        claim(f"id:{found.id}", f"Department {found.code}")
         given = _given(
             {
-                "code": r.get("code"),
-                "name": r.get("name") or r.get("department"),
-                "school": r.get("school", r.get("faculty")),
+                "code": r.get("code") if r.get("code") and r.get("department") else None,
                 "lecturer_count": r.get("lecturer_count") or r.get("lecturers"),
             }
         )
-        if given.get("code"):
-            claim("code:" + compact(str(given["code"])), f"Department code {given['code']}")
-        if given.get("name"):
-            claim("name:" + compact(str(given["name"])), f"Department {given['name']}")
-        existing = _department_by_code(db, str(given.get("code") or ""))
-        if existing is not None:
-            fields = _validated(DepartmentPatch, given, exclude_unset=True)
-            update_department(db, identity, existing, fields, commit=False)
-            return "updated"
-        create_department(db, identity, _validated(DepartmentBody, given), commit=False)
-        return "created"
+        update_department(db, identity, found, _validated(DepartmentPatch, given, exclude_unset=True), commit=False)
+        return "updated"
 
     return _bulk(db, rows, one)
 
