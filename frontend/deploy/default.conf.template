@@ -1,8 +1,16 @@
+# Behind an HTTPS proxy, pass on the scheme it saw; on its own, our own.
+map $http_x_forwarded_proto $forwarded_proto {
+  default $http_x_forwarded_proto;
+  ''      $scheme;
+}
+
 server {
   listen 8080;
   root /usr/share/nginx/html;
   index index.html;
   server_tokens off;
+  # Excel workbooks are read up to 5 MB, and a pasted file is a few MB of JSON.
+  client_max_body_size 8m;
   gzip on;
   gzip_types text/css application/javascript application/json image/svg+xml;
 
@@ -24,7 +32,9 @@ server {
     proxy_pass $api_upstream;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    # Reading a big workbook or exporting a full timetable can take a while.
+    proxy_read_timeout 120s;
   }
 
   # Source maps are for the error tracker, not for public download.
