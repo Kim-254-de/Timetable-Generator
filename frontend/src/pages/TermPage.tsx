@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
+import { Download, Printer } from 'lucide-react'
 import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, FIRST_HOUR, HOURS, SCORE_LABELS, dateTime, termText } from '@/lib/format'
 import { BulkPaste } from '@/components/BulkPaste'
 import { rememberTerm } from '@/lib/lastTerm'
+import { printPdf } from '@/lib/print'
 import {
   exportUrl,
   useBulkClassRows,
@@ -505,10 +507,14 @@ function DraftsTab({ termId }: { termId: string }) {
                   {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
                 </button>
               )}
-              <span className="flex gap-3">
-                Download: <a href={exportUrl(p.draft_id, 'row', 'pdf')} className="text-brand-ink">PDF</a>
-                <a href={exportUrl(p.draft_id, 'row', 'docx')} className="text-brand-ink">Word</a>
-                <a href={exportUrl(p.draft_id, 'row', 'xlsx')} className="text-brand-ink">Excel</a>
+              <span className="flex flex-wrap items-center gap-3">
+                Download:
+                {([['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']] as const).map(([format, label]) => (
+                  <a key={format} href={exportUrl(p.draft_id, 'row', format)} className="inline-flex items-center gap-1 text-brand-ink">
+                    <Download size={14} aria-hidden /> {label}
+                  </a>
+                ))}
+                <PrintButton draftId={p.draft_id} />
               </span>
             </li>
           ))}
@@ -517,5 +523,24 @@ function DraftsTab({ termId }: { termId: string }) {
         {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
       </section>
     </div>
+  )
+}
+
+
+/** Prints the approved version as the PDF download lays it out (by class row). */
+function PrintButton({ draftId }: { draftId: string }) {
+  const [state, setState] = useState<'idle' | 'preparing' | 'failed'>('idle')
+  const print = () => {
+    setState('preparing')
+    printPdf(`/drafts/${draftId}/export.pdf?view=row`).then(() => setState('idle'), () => setState('failed'))
+  }
+  return (
+    <>
+      <button type="button" onClick={print} disabled={state === 'preparing'}
+        className="inline-flex items-center gap-1 text-brand-ink disabled:opacity-60">
+        <Printer size={14} aria-hidden /> {state === 'preparing' ? 'Preparing…' : 'Print'}
+      </button>
+      {state === 'failed' && <span role="alert" className="text-danger">Couldn't prepare the timetable to print. Try again, or download the PDF.</span>}
+    </>
   )
 }
