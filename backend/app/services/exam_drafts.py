@@ -44,6 +44,31 @@ from app.services.exam_setup import practicals_of
 from app.services.setup import audit
 
 SMARTTT_NOT_READY = "SMARTTT can't take exam timetables yet; this version is approved here."
+MAIN = ""  # the invigilators' key for the paper's main invigilator
+
+
+def main_room(seating: list[dict[str, Any]]) -> str | None:
+    """The room with most of the paper's students (ties: by code); its main invigilator sits there."""
+    totals: dict[str, int] = defaultdict(int)
+    for s in seating:
+        totals[s["room"]] += s["students"]
+    return min(totals, key=lambda r: (-totals[r], r)) if totals else None
+
+
+def room_invigilator(paper: dict[str, Any], room: str) -> dict[str, Any]:
+    """Who invigilates the paper in a room: the main invigilator in its main room, else that room's extra one."""
+    key = MAIN if room == paper["main_room"] else room
+    return dict(paper["invigilators"].get(key) or {})
+
+
+def missing_invigilators(papers: list[dict[str, Any]]) -> list[str]:
+    """Each paper without its main invigilator, and each extra room without its own."""
+    out = []
+    for p in papers:
+        if not p["invigilators"].get(MAIN):
+            out.append(f"{p['codes']} (main)")
+        out.extend(f"{p['codes']} in {room}" for room in p["extra_rooms"] if not p["invigilators"].get(room))
+    return out
 
 
 def get_draft(db: Session, draft_id: str) -> ExamDraft:
@@ -147,6 +172,9 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                 "invigilators": (invigilators or {}).get(p.allocator_ref, {}),
             }
         )
+        seating = out[-1]["seating"]
+        out[-1]["main_room"] = main_room(seating)
+        out[-1]["extra_rooms"] = sorted({s["room"] for s in seating} - {out[-1]["main_room"]})
     return {
         "days": [{"date": d.isoformat(), "label": d.strftime("%a %d/%m/%Y").upper()} for d in built.problem.days],
         "sessions": list(term.exam_sessions or []),
@@ -156,7 +184,7 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
 
 
 def room_sheets(rec: dict[str, Any]) -> list[dict[str, Any]]:
-    """Per date and session, each room with its papers, class rows, students and invigilator."""
+    """Per date and session, each room with its papers, class rows, students, and the invigilator there."""
     by_slot: dict[tuple[str, int], dict[str, dict[str, Any]]] = defaultdict(dict)
     for p in rec["papers"]:
         if p["day"] is None:
@@ -172,7 +200,9 @@ def room_sheets(rec: dict[str, Any]) -> list[dict[str, Any]]:
                     "codes": p["codes"],
                     "title": p["title"],
                     "rows": [],
-                    "invigilator": (p["invigilators"].get(s["room"]) or p["invigilators"].get("") or {}).get("name"),
+                    "invigilator": room_invigilator(p, s["room"]).get("name"),
+                    "main": s["room"] == p["main_room"],
+                    "main_invigilator": (p["invigilators"].get(MAIN) or {}).get("name"),
                 },
             )
             part = f" (part {s['part']} of {s['parts']})" if s["parts"] > 1 else ""
@@ -326,13 +356,13 @@ def publish(db: Session, allocator: AllocatorClient, identity: Identity, draft: 
         raise ApiError(409, "NOT_SHARED", "Share the draft with departments first, so they name the invigilators.")
     invigilators = allocator.invigilators(str(draft.term_id))
     rec = record(db, draft, invigilators)
-    missing = [p["codes"] for p in rec["papers"] if not p["invigilators"].get("")]
+    missing = missing_invigilators(rec["papers"])
     if missing:
         raise ApiError(
             409,
             "NO_INVIGILATOR",
-            f"{len(missing)} papers have no invigilator yet: {', '.join(missing[:10])}.",
-            {"papers": missing},
+            f"{len(missing)} invigilators are still to be named: {', '.join(missing[:10])}.",
+            {"missing": missing},
         )
     term = db.get(Term, draft.term_id)
     assert term is not None
@@ -360,6 +390,9 @@ def publish(db: Session, allocator: AllocatorClient, identity: Identity, draft: 
                 "start_time": sessions[p["session"]]["start"],
                 "end_time": sessions[p["session"]]["end"],
                 "examiner_staff_number": p["examiner_staff_number"],
+                "main_room": p["main_room"],
+                # Administers the paper and collects the scripts from every room.
+                "main_invigilator_staff_number": (p["invigilators"].get(MAIN) or {}).get("staff_number"),
                 "seating": [
                     {
                         "room_code": s["room"],
@@ -367,9 +400,7 @@ def publish(db: Session, allocator: AllocatorClient, identity: Identity, draft: 
                         "part": s["part"],
                         "parts": s["parts"],
                         "students": s["students"],
-                        "invigilator_staff_number": (
-                            p["invigilators"].get(s["room"]) or p["invigilators"].get("") or {}
-                        ).get("staff_number"),
+                        "invigilator_staff_number": room_invigilator(p, s["room"]).get("staff_number"),
                     }
                     for s in p["seating"]
                 ],
@@ -471,6 +502,9 @@ def allocator_draft(db: Session, term: Term) -> dict[str, Any]:
                 "start_time": sessions[p["session"]]["start"] if p["session"] is not None else None,
                 "end_time": sessions[p["session"]]["end"] if p["session"] is not None else None,
                 "rooms": sorted({s["room"] for s in p["seating"]}),
+                # The main invigilator sits in the main room; each extra room needs one of its own.
+                "main_room": p["main_room"],
+                "extra_rooms": p["extra_rooms"],
             }
             for p in rec["papers"]
         ],

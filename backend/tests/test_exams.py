@@ -26,10 +26,13 @@ def ok(response: Any) -> Any:
     return response.json()["data"]
 
 
-def setup_exams(client: TestClient, allocator: FakeAllocator) -> str:
-    term = ok(
-        client.post("/api/terms", json={"academic_year": "2026/2027", "semester": 1, "name": "Semester I 2026/2027"})
+def setup_exams(client: TestClient, allocator: FakeAllocator, smarttt_term_id: str | None = None) -> str:
+    body = (
+        {"smarttt_term_id": smarttt_term_id}
+        if smarttt_term_id
+        else {"academic_year": "2026/2027", "semester": 1, "name": "Semester I 2026/2027"}
     )
+    term = ok(client.post("/api/terms", json=body))
     rows = [
         {"code": "ADM 1", "building": "ADM", "capacity": "100", "room_type": "Lecture hall"},
         {"code": "STB 1", "building": "STB", "capacity": "200", "room_type": "Lecture hall"},
@@ -95,6 +98,22 @@ def test_the_exam_period_and_exam_seats(client, allocator):
     assert rooms["UTC 1"]["block"] == "UTC"
 
 
+def test_exam_seats_are_090_of_capacity_in_every_room(client, allocator):
+    sign_in(client)
+    term_id = setup_exams(client, allocator)
+    ok(client.post("/api/rooms", json={"code": "TC 7", "building": "TC", "capacity": 110}))
+    assert ok(client.get(f"/api/terms/{term_id}/exams"))["period"]["exam_seats"] == 90 + 180 + 180 + 270 + 99
+    # The Director's factor applies to every room, big halls included.
+    period = ok(client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_spacing": 0.8}))
+    assert period["exam_seats"] == 80 + 160 + 160 + 240 + 88
+    # A room that can't be used at that share (fixed benches) gets its own number, never above its capacity.
+    rooms = {r["code"]: r for r in ok(client.get("/api/rooms"))}
+    ok(client.patch(f"/api/rooms/{rooms['TC 7']['id']}", json={"exam_seats": 60}))
+    assert ok(client.get(f"/api/terms/{term_id}/exams"))["period"]["exam_seats"] == 80 + 160 + 160 + 240 + 60
+    too_many = client.patch(f"/api/rooms/{rooms['TC 7']['id']}", json={"exam_seats": 111})
+    assert too_many.status_code == 422
+
+
 def test_import_generate_share_and_publish(client, allocator, db: Session):
     sign_in(client)
     term_id = setup_exams(client, allocator)
@@ -156,10 +175,18 @@ def test_import_generate_share_and_publish(client, allocator, db: Session):
     assert all(p["rooms"] and p["start_time"] for p in shared_view["papers"])
     refused = client.post(f"/api/exam-drafts/{draft_id}/publish")
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "NO_INVIGILATOR"
+    # Each paper's main invigilator is not enough: every extra room needs one of its own.
     allocator.invigilators = {
         ref: {"": {"staff_number": f"STF/{n}", "name": f"Dr. Invigilator {n}"}}
         for n, ref in enumerate(["p-shared", "p-200", "p-301", "p-epsc"])
     }
+    extras = {p["paper_ref"]: p["extra_rooms"] for p in shared_view["papers"]}
+    assert len(extras["p-epsc"]) == 1  # the big paper sits in two rooms
+    still = client.post(f"/api/exam-drafts/{draft_id}/publish")
+    assert still.status_code == 409 and f"EPSC 121 in {extras['p-epsc'][0]}" in still.json()["error"]["message"]
+    for ref, rooms in extras.items():
+        for i, room in enumerate(rooms):
+            allocator.invigilators[ref][room] = {"staff_number": f"STF/X{i}{ref}", "name": f"Dr. Extra {ref} {room}"}
     published = ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))
     assert published["version"] == 1 and published["smarttt"]["sent"] is False
 
@@ -168,6 +195,10 @@ def test_import_generate_share_and_publish(client, allocator, db: Session):
     by_key = {p["key"]: p for p in publication.payload["papers"]}
     seat = by_key["p-200"]["seating"][0]
     assert seat["room_code"] and seat["students"] == 120 and seat["invigilator_staff_number"] == "STF/1"
+    epsc = by_key["p-epsc"]
+    assert epsc["main_invigilator_staff_number"] == "STF/3"
+    in_rooms = {s["room_code"]: s["invigilator_staff_number"] for s in epsc["seating"]}
+    assert in_rooms[epsc["main_room"]] == "STF/3" and in_rooms[extras["p-epsc"][0]].startswith("STF/X")
     assert by_key["p-shared"]["codes"] == ["BITE 131", "COSC 130"] and by_key["p-shared"]["start_time"]
 
     # Downloads: the timetable, room sheets and roster.
@@ -181,7 +212,9 @@ def test_import_generate_share_and_publish(client, allocator, db: Session):
     for kind in ("timetable", "rooms", "roster"):
         assert client.get(f"/api/exam-drafts/{draft_id}/export/{kind}.pdf").content[:4] == b"%PDF"
     roster = Document(BytesIO(client.get(f"/api/exam-drafts/{draft_id}/export/roster.docx").content))
-    assert "Dr. Invigilator 1" in " ".join(c.text for t in roster.tables for row in t.rows for c in row.cells)
+    roster_text = " ".join(c.text for t in roster.tables for row in t.rows for c in row.cells)
+    assert "Dr. Invigilator 1" in roster_text and "Main" in roster_text
+    assert f"Dr. Extra p-epsc {extras['p-epsc'][0]}" in roster_text and "Extra" in roster_text
 
 
 def test_generating_needs_the_period_rooms_and_papers(client, allocator):

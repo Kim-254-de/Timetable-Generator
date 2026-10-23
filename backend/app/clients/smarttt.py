@@ -116,6 +116,18 @@ class SmartttClient:
     def publication(self, term_id: str, version: int) -> dict[str, Any]:
         return dict(self._json(self._request("GET", f"/publish/{int(version)}/", params={"term": term_id})))
 
+    def exam_mode(self, term_id: str) -> dict[str, Any]:
+        """The term's mode (teaching | exams), and the switch and close as SMARTTT has them."""
+        return dict(self._json(self._request("GET", "/exam-mode/", params={"term": term_id})))
+
+    def set_exam_mode(self, term_id: str, action: str, at: str | None, by: str) -> dict[str, Any]:
+        """
+        Schedules, moves or cancels the switch to exams, or switches now; or
+        schedules, cancels or does the close of the exam period. Returns the new state.
+        """
+        body = {"term_id": term_id, "action": action, "at": at, "by": by}
+        return dict(self._json(self._request("POST", "/exam-mode/", json=body)))
+
 
 def _body(response: httpx.Response) -> dict[str, Any]:
     try:

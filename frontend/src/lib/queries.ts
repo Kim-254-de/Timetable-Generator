@@ -9,6 +9,8 @@ import type {
   ExamGrid,
   ExamOverview,
   ExamPeriod,
+  ExamSwitchAction,
+  ExamSwitchState,
   DraftSummary,
   Grid,
   Group,
@@ -366,3 +368,14 @@ export const useExamDraftAction = (termId: string, draftId: string) =>
 
 export const examExportUrl = (draftId: string, kind: 'timetable' | 'rooms' | 'roster', format: 'docx' | 'pdf') =>
   `${import.meta.env.VITE_API_URL ?? '/api'}/exam-drafts/${draftId}/export/${kind}.${format}`
+
+export const useExamSwitch = (termId: string) =>
+  useQuery({ queryKey: ['exam-switch', termId], queryFn: () => get<ExamSwitchState>(`/terms/${termId}/exam-switch`) })
+
+export function useExamSwitchAction(termId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { action: ExamSwitchAction; at?: string }) => post<ExamSwitchState>(`/terms/${termId}/exam-switch`, body),
+    onSuccess: (state) => qc.setQueryData(['exam-switch', termId], state),
+  })
+}

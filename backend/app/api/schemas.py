@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -74,7 +74,7 @@ class RoomPatch(_Strict):
     room_type: RoomType | None = None
     active: bool | None = None
     unavailable: Slots | None = None
-    # Seats for exams; 0 or empty: the capacity x the term's spacing.
+    # Only for a room that can't be used at the term's spacing (fixed benches); 0 or empty: capacity x spacing.
     exam_seats: Annotated[int, Field(ge=0, le=5000)] | None = None
     for_exams: bool | None = None
 
@@ -223,3 +223,13 @@ class ExamMoveBody(_Strict):
     day: date
     session: Annotated[int, Field(ge=0, le=5)]
     pinned: bool = True
+
+
+class ExamSwitchBody(_Strict):
+    """
+    schedule_switch / schedule_close take `at` (default: the first exam day at
+    00:00 / the day after the last); the others act now or cancel.
+    """
+
+    action: Literal["schedule_switch", "cancel_switch", "switch_now", "schedule_close", "cancel_close", "close_now"]
+    at: datetime | None = None

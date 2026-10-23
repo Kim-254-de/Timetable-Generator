@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { errorBody, errorMessage } from '@/lib/api'
+import { ExamSwitch } from '@/components/ExamSwitch'
 import { dateTime } from '@/lib/format'
 import {
   useExamDepartments,
@@ -122,6 +123,8 @@ export function ExamsTab({ termId }: { termId: string }) {
           ))}
         </ul>
       </section>
+
+      {data.publications.length > 0 && <ExamSwitch termId={termId} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-lg border border-line bg-card p-4">

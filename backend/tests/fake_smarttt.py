@@ -154,6 +154,17 @@ class FakeSmarttt:
         self.payloads: list[dict[str, Any]] = []
         self.refuse_publish: dict[str, Any] | None = None
         self.down = False  # True: SMARTTT can't be reached
+        # Exam mode per term, as the proposed /exam-mode/ endpoint keeps it.
+        self.exam_mode: dict[str, Any] = {
+            "mode": "teaching",
+            "exam_switch_at": None,
+            "switched_at": None,
+            "switched_by": None,
+            "exam_close_at": None,
+            "exam_closed_at": None,
+            "closed_by": None,
+        }
+        self.exam_mode_calls: list[dict[str, Any]] = []
 
     def identity(self, account: str, office: bool) -> dict[str, Any]:
         return {
@@ -210,4 +221,31 @@ class FakeSmarttt:
             }
             self.publications[body["version"]] = publication
             return httpx.Response(201, json=publication)
+        if route == "/exam-mode/":
+            if request.method == "GET":
+                return httpx.Response(200, json=self.exam_mode)
+            return self._exam_mode_action(body)
         return httpx.Response(404, json={"detail": f"No route {route}"})
+
+    def _exam_mode_action(self, body: dict[str, Any]) -> httpx.Response:
+        from datetime import UTC, datetime
+
+        self.exam_mode_calls.append(body)
+        state, action, now = self.exam_mode, body["action"], datetime.now(UTC).isoformat()
+        if action == "schedule_switch":
+            state["exam_switch_at"] = body["at"]
+        elif action == "cancel_switch":
+            if state["switched_at"]:
+                return httpx.Response(
+                    409, json={"code": "already_switched", "detail": "The term is already in exam mode."}
+                )
+            state["exam_switch_at"] = None
+        elif action == "switch_now":
+            state.update(mode="exams", exam_switch_at=now, switched_at=now, switched_by=body["by"])
+        elif action == "schedule_close":
+            state["exam_close_at"] = body["at"]
+        elif action == "cancel_close":
+            state["exam_close_at"] = None
+        elif action == "close_now":
+            state.update(mode="teaching", exam_close_at=now, exam_closed_at=now, closed_by=body["by"])
+        return httpx.Response(200, json=state)

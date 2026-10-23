@@ -21,6 +21,7 @@ from app.api.schemas import (
     ExamPeriodBody,
     ExamResolveBody,
     ExamRunBody,
+    ExamSwitchBody,
     GroupBody,
     LoginBody,
     MoveBody,
@@ -49,6 +50,7 @@ from app.services import (
     exam_export,
     exam_runs,
     exam_setup,
+    exam_switch,
     export,
     grouping,
     integration,
@@ -581,6 +583,19 @@ def export_exam_draft(draft_id: str, kind: str, fmt: str, identity: Me, db: Db, 
         media_type=exam_export.MEDIA[fmt],
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/terms/{term_id}/exam-switch")
+def exam_switch_state(term_id: str, _me: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Whether SMARTTT shows teaching or exams: scheduled, switched, closed."""
+    return ok(exam_switch.state(db, smarttt, setup.get_term(db, term_id)))
+
+
+@router.post("/terms/{term_id}/exam-switch")
+def exam_switch_act(term_id: str, body: ExamSwitchBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Schedule, move, cancel or do the switch to exams, or the close of the exam period."""
+    term = setup.get_term(db, term_id)
+    return ok(exam_switch.act(db, smarttt, identity, term, body.action, body.at))
 
 
 # -- for the Timetable Allocator (shared key, no user session) ------------------------------
