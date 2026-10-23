@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -61,7 +62,10 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     cookie_domain: str | None = None
 
-    cors_origins: list[str] = Field(default_factory=list)
+    # NoDecode: the raw string reaches _split_origins, which takes a comma-separated
+    # list (or JSON). Without it pydantic-settings parses the value as JSON first,
+    # and a plain origin, or CORS_ORIGINS= left empty, stops the app starting.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     login_max_attempts: int = 10
     login_window_seconds: int = 900
@@ -72,6 +76,8 @@ class Settings(BaseSettings):
     @classmethod
     def _split_origins(cls, value: object) -> object:
         if isinstance(value, str):
+            if value.strip().startswith("["):
+                return json.loads(value)
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
