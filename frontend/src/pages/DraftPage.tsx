@@ -17,6 +17,7 @@ export function DraftPage() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Cell | null>(null)
   const [replaceUploaded, setReplaceUploaded] = useState(false)
+  const [keepPublished, setKeepPublished] = useState(false)
   const grid = useGrid(draftId, view)
   const term = useTerm(termId)
   const move = useMoveSession(draftId)
@@ -62,9 +63,15 @@ export function DraftPage() {
           ))}
           {editable ? (
             <>
-              <button onClick={() => resolve.mutate(600, { onSuccess: () => navigate(`/terms/${termId}?tab=runs`) })}
+              {(term.data?.publications.length ?? 0) > 0 && (
+                <label className="flex items-center gap-1" title="For a department imported after publishing: its classes are added around the published ones.">
+                  <input type="checkbox" checked={keepPublished} onChange={(e) => setKeepPublished(e.target.checked)} />
+                  Keep the published classes
+                </label>
+              )}
+              <button onClick={() => resolve.mutate({ time_limit_s: 600, keep_published: keepPublished }, { onSuccess: () => navigate(`/terms/${termId}?tab=runs`) })}
                 disabled={resolve.isPending} className="rounded-md border border-line bg-card px-3 py-2">
-                Re-solve around pins
+                {keepPublished ? 'Re-solve around the published classes' : 'Re-solve around pins'}
               </button>
               {needsReplace && (
                 <label className="flex items-center gap-1">
@@ -87,7 +94,7 @@ export function DraftPage() {
 
       {publish.isSuccess && (
         <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">
-          Approved as version {publish.data.version}. Departments can now allocate lecturers and download it.{' '}
+          Approved as version {publish.data.version}. Departments now see each class's day, time and room.{' '}
           {publish.data.smarttt.sent === false
             ? `Not yet sent to SMARTTT: ${publish.data.smarttt.reason ?? 'SMARTTT is not connected'}.`
             : 'Students now see it in SMARTTT.'}

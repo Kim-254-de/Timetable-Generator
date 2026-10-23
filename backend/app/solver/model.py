@@ -83,7 +83,10 @@ class Session:
     room_type: str
     pinned: Placement | None = None  # H10: keeps slot and room
     previous: Placement | None = None  # repair re-solves: where it was (S8), and a hint
-    lecturer_id: str | None = None  # allocated lecturer, for H13 on repair re-solves
+    # The group's lecturer (staff number), so H13 keeps them to one class at a time;
+    # a session without one counts against its department's lecturers instead (H9).
+    lecturer_id: str | None = None
+    lecturer_name: str = ""  # for messages
 
 
 @dataclass(frozen=True)

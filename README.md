@@ -4,16 +4,24 @@ Tharaka University's teaching-timetable generator, run by the Directorate of
 Examinations and Timetabling. It decides when and where every class meets
 (group splits, room, day, time) with a constraint solver (OR-Tools CP-SAT),
 lets the Director review and adjust the result, approves it, and provides the
-timetable as **PDF, Word and Excel** downloads. Departments then allocate
-lecturers in the Timetable Allocator.
+timetable as **PDF, Word and Excel** downloads.
 
-**Everything is entered here.** The Directorate types in (or pastes from Excel)
-the lecture halls, departments, class rows and units; nothing has to come from
-another system. SMARTTT is optional: its data can be imported to pre-fill the
-same screens, and an approved timetable is sent to it (over SMARTTT's
+**Departments enter their teaching first**, in the Timetable Allocator: their
+courses (class rows), units, group splits and each group's lecturer, which
+they publish to the Director. The Director **imports** what is published
+(`ALLOCATOR_BASE_URL`, `ALLOCATOR_CLIENT_KEY`), adds the lecture halls,
+generates and publishes; SMARTTT receives the timetable with the lecturers in
+it, in one publish. Imported class rows, units and groups are read-only here
+("edit this in the Allocator"); a class row's unavailable hours, the rooms and
+the term settings stay the Director's. Rows can still be entered here for
+units no department enters.
+
+SMARTTT is optional: its data can be imported to pre-fill the same screens,
+and an approved timetable is sent to it (over SMARTTT's
 `/api/v1/integrations/generator/` endpoints, `X-API-Key`) when it is connected.
-The Timetable Allocator reads each term's units, groups and published meetings
-from `/api/integrations/allocator/` here, with its own key (`ALLOCATOR_API_KEY`).
+The Timetable Allocator reads each term and, once published, each class's
+day, time and room (`/api/integrations/allocator/terms[/{id}/times]`) with its
+own key (`ALLOCATOR_API_KEY`).
 See `SYSTEM_HANDOFF.md` for the whole platform.
 
 ## Workflow
@@ -34,8 +42,13 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
      class.
    (Or, for a SMARTTT term, **import** rooms, departments, class rows and units
    from a SMARTTT snapshot; anything already entered is kept.)
-3. **Propose groups**: each unit is split so every group fits the largest room
-   of its type. The Director decides the final split.
+   **Departments** tab: **Import published departments** brings in what
+   departments published in the Allocator (class rows, units, groups with
+   lecturers); importing again updates in place and lists what changed. The
+   tab shows which departments have and haven't published; you can generate
+   without the missing ones.
+3. **Propose groups** (units entered here only): each unit is split so every
+   group fits the largest room of its type. Departments split their own units.
 4. **Run** the solver in the background (a time limit, default 10 minutes).
    Each successful run is a new draft; failures say which rule and which class
    row, room size or department made it impossible.
@@ -43,17 +56,34 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    soft-constraint scores. **Drag a class** to another hour, or change its room;
    every move is checked against the hard rules and refused with the reason if
    it breaks one. Moved classes are pinned. **Re-solve** around the pins.
+   A department imported **after** publishing: copy the published draft, tick
+   **Keep the published classes** and re-solve; its classes are added and no
+   published class moves.
 6. **Approve and publish**: the draft becomes the term's next numbered version.
-   It is sent to SMARTTT when SMARTTT is connected (students see room and
-   time; lecturers come from the Allocator); otherwise it is marked "not yet in
-   SMARTTT" and still counts as approved for downloads and the Allocator.
+   It is sent to SMARTTT when SMARTTT is connected, each session with its
+   lecturer (`lecturer_staff_number`, `lecturer_name`); otherwise it is marked
+   "not yet in SMARTTT" and still counts as approved for downloads and the
+   Allocator, where departments see each class's day, time and room.
 7. **Download** any draft or version as **PDF**, **Word (.docx)** or
    **Excel (.xlsx)**, by class row, lecture hall or department, in the
    Directorate's layout (header, Mon–Fri × 07:00–19:00 grid, "UNIT / GR / ROOM"
-   cells, version line, "Prepared by … Director Examination & Timetabling").
+   cells with the lecturer, version line, "Prepared by … Director Examination & Timetabling").
 8. **Mid-term change**: edit the data (or take a new snapshot) and run a **repair**. It keeps every
    session where it was unless a rule forces a move, and never moves a class
-   onto an hour its allocated lecturer already teaches (H13).
+   onto an hour its lecturer already teaches (H13).
+
+## Needs from SMARTTT
+
+Not built in these two repos; SMARTTT needs these for the department-first flow:
+
+- **Accept lecturers on publish**: `generator/publish/` takes
+  `lecturer_staff_number` (and `lecturer_name`) per session, and refuses the
+  publish naming the staff numbers it doesn't know.
+- **Add lecturers it doesn't know**: a way to create them (staff number, name,
+  department, FT/PT), so a department's new lecturer can be published.
+- **Match by code**: units, rooms and programmes are now typed in by
+  departments and the Director, so SMARTTT matches them by code (`unit_code`,
+  `room_code`, programme code and year/semester), not by SMARTTT ids.
 
 ## Rules
 
@@ -61,8 +91,11 @@ Hard (never broken): H1 one class per room per hour; H2 one class per class row
 per hour; H3 room big enough; H4 right room type; H5 every session scheduled
 once; H6 multi-hour sessions consecutive, same day and room; H7 Monday-Friday
 07:00-19:00 only; H8 not when the room or class row is unavailable; H9 a
-department runs at most as many classes at once as it has lecturers; H10 pinned
-sessions stay; H13 (repairs) allocated lecturers stay clash-free.
+department runs at most as many classes with no lecturer named at once as it
+has lecturers; H10 pinned sessions stay; H13 a lecturer (one staff number,
+across every department) teaches one class at a time, from the first solve.
+Before solving, the pre-check names a lecturer given more hours than the week
+has and a group larger than every room of its type.
 
 A class row split across groups of one unit (GR A, GR B ...) may have the
 groups meet together or in turn, e.g. rotating labs; each student attends only
@@ -137,7 +170,7 @@ then http://localhost:8081.
 On a Linux server with Docker and the Compose plugin:
 
 ```bash
-cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ALLOCATOR_API_KEY;
+cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ALLOCATOR_API_KEY, ALLOCATOR_BASE_URL, ALLOCATOR_CLIENT_KEY;
                          # SOLVER_WORKERS = the server's cores
 docker compose up -d --build
 ```

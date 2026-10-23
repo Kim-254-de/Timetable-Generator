@@ -35,7 +35,7 @@ from app.models import (
     UnitOffering,
 )
 from app.services.grouping import remove_group
-from app.services.setup import audit, compact, row_label
+from app.services.setup import audit, compact, require_local, row_label
 
 FIRST_LOCAL_DEPARTMENT_ID = 100_000
 
@@ -282,7 +282,13 @@ def create_class_row(
 
 
 def update_class_row(db: Session, identity: Identity, row: ClassRow, fields: dict[str, Any]) -> None:
-    """Applies a patch (the caller audits and commits). Everything is checked before anything changes."""
+    """
+    Applies a patch (the caller audits and commits). Everything is checked
+    before anything changes. A row from the Allocator takes only the hours it
+    can't be taught; the rest is its department's.
+    """
+    if any(v is not None for k, v in fields.items() if k != "unavailable"):
+        require_local(row)
     if fields.get("department_id") is not None:
         _check_department(db, fields["department_id"])
     new = {
@@ -312,6 +318,7 @@ def delete_class_row(db: Session, identity: Identity, row: ClassRow) -> dict[str
     other class rows stays for them: the row leaves the unit and its groups,
     and a group left with no class rows goes, with its classes in the drafts.
     """
+    require_local(row)
     taken = db.scalars(
         select(UnitOffering)
         .join(OfferingClassRow, OfferingClassRow.offering_id == UnitOffering.id)
@@ -421,6 +428,7 @@ def update_offering(
     db: Session, identity: Identity, term: Term, offering: UnitOffering, fields: dict[str, Any]
 ) -> None:
     """Applies a patch (the caller audits and commits). Everything is checked before anything changes."""
+    require_local(offering)
     if fields.get("unit_code") is not None and _offering_code_taken(db, term, fields["unit_code"], offering.id):
         raise ApiError(409, "CODE_TAKEN", f"{fields['unit_code']} is already a unit in this term.")
     if fields.get("department_id") is not None:
@@ -462,6 +470,7 @@ def _remove_offering(db: Session, identity: Identity, offering: UnitOffering) ->
 
 
 def delete_offering(db: Session, identity: Identity, offering: UnitOffering) -> None:
+    require_local(offering)
     _remove_offering(db, identity, offering)
     db.commit()
 

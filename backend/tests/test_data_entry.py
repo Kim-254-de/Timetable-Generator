@@ -179,7 +179,7 @@ def test_director_enters_everything_and_downloads(client, smarttt):
     assert any("COSC 103" in c.text and "GR A" in c.text for row in table.rows for c in row.cells)
 
 
-def test_allocator_reads_units_groups_and_meetings(client, smarttt):
+def test_allocator_reads_terms_and_published_times(client, smarttt):
     sign_in(client)
     term = enter_term(client)
     no_key = client.get("/api/integrations/allocator/terms")
@@ -188,18 +188,15 @@ def test_allocator_reads_units_groups_and_meetings(client, smarttt):
     terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
     assert terms[0]["id"] == term["id"] and terms[0]["published_version"] is None
 
-    before = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
-    keys = {s["key"]: s for s in before["sections"]}
-    assert set(keys) == {"COSC100-MAIN", "COSC103-GRA", "COSC103-GRB", "COSC103-GRC"}
-    assert keys["COSC103-GRA"]["department"]["code"] == "DCOMP"
-    assert keys["COSC103-GRA"]["class_rows"][0]["department"]["code"] == "DEDU"  # servicing
-    assert keys["COSC103-GRA"]["meetings"] == []  # nothing published yet
+    before = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/times", headers=headers))
+    assert before == {"published_version": None, "classes": {}}  # nothing published yet
 
     draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
-    after = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
+    after = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/times", headers=headers))
     assert after["published_version"] == 1
-    meeting = next(s for s in after["sections"] if s["key"] == "COSC103-GRB")["meetings"][0]
+    assert set(after["classes"]) == {"COSC100-MAIN", "COSC103-GRA", "COSC103-GRB", "COSC103-GRC"}
+    meeting = after["classes"]["COSC103-GRB"][0]
     assert meeting["room"] in {"UTC 1", "STB 1", "STB 2", "STB 3"}
     assert int(meeting["end_time"][:2]) - int(meeting["start_time"][:2]) == 3
 
@@ -378,7 +375,6 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
     """COSC 100 starts as one whole class; once split into GR A/GR B it no longer appears on its own."""
     sign_in(client)
     term = enter_term(client)
-    headers = {"X-API-Key": "test-allocator-key"}
     draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
     cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
@@ -394,8 +390,7 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
     cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
     assert [g["label"] for g in cosc100["groups"]] == ["GR A", "GR B"]
 
-    # The approved version still reads as approved; the next draft needs the groups (it is out of date),
-    # and the Allocator sees only the groups.
+    # The approved version still reads as approved; the next draft needs the groups (it is out of date).
     grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
     assert grid["as_approved"] is True
     assert any(c["unit_code"] == "COSC 100" and c["group"] == "" for e in grid["entities"] for c in e["cells"])
@@ -404,8 +399,6 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
         "COSC100-GRA-1",
         "COSC100-GRB-1",
     }
-    sections = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
-    assert {s["key"] for s in sections["sections"] if s["unit_code"] == "COSC 100"} == {"COSC100-GRA", "COSC100-GRB"}
 
     # The whole class can't come back beside its groups.
     again = client.post(

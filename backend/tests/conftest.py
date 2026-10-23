@@ -9,6 +9,7 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("SMARTTT_API_KEY", "test-generator-key")
 os.environ.setdefault("ALLOCATOR_API_KEY", "test-allocator-key")
+os.environ.setdefault("ALLOCATOR_CLIENT_KEY", "test-inbound-key")
 os.environ.setdefault("RUN_INLINE", "true")
 os.environ.setdefault("SOLVER_WORKERS", "2")
 
@@ -16,9 +17,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app import models  # noqa: F401  (registers the tables)
+from app.clients.allocator import AllocatorClient, set_allocator
 from app.clients.smarttt import SmartttClient, set_smarttt
 from app.config import get_settings
 from app.db import Base, get_engine, get_sessionmaker
+from tests.fake_allocator import FakeAllocator
 from tests.fake_smarttt import FakeSmarttt
 
 
@@ -43,6 +46,16 @@ def smarttt() -> Iterator[FakeSmarttt]:
     set_smarttt(client)
     yield fake
     set_smarttt(None)
+    client.close()
+
+
+@pytest.fixture
+def allocator() -> Iterator[FakeAllocator]:
+    fake = FakeAllocator()
+    client = AllocatorClient(get_settings(), transport=fake.transport())
+    set_allocator(client)
+    yield fake
+    set_allocator(None)
     client.close()
 
 

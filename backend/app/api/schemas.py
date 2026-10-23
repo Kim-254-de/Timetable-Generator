@@ -171,6 +171,8 @@ class RunBody(_Strict):
 class ResolveBody(_Strict):
     weights: dict[str, Annotated[int, Field(ge=0, le=100_000)]] | None = None
     time_limit_s: Annotated[int, Field(ge=10, le=3600)] | None = None
+    # Keep every class of the published timetable where it is (a late department was imported).
+    keep_published: bool = False
 
 
 class MoveBody(_Strict):

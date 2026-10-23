@@ -86,10 +86,11 @@ export function TimetableGrid({ entities, view, editable, highlight, onMove, onS
                   cell.pinned ? 'border-warning/40 bg-warning-soft' : 'border-brand-ink/25 bg-brand-soft',
                   highlight?.has(cell.key) && 'ring-2 ring-danger',
                   editable && 'cursor-grab active:cursor-grabbing')}
-                title={`${cell.unit_code} ${cell.group} ${cell.room} ${cell.day} ${cell.start_time}-${cell.end_time}`}>
+                title={`${cell.unit_code} ${cell.group} ${cell.room} ${cell.day} ${cell.start_time}-${cell.end_time}${cell.lecturer ? ` ${cell.lecturer}` : ''}`}>
                 <span className="block font-semibold">{cell.unit_code}</span>
                 {cell.group && <span className="block">{cell.group}</span>}
                 {view !== 'room' && <span className="block text-muted">{cell.room}</span>}
+                {cell.lecturer && <span className="block text-muted">{cell.lecturer}</span>}
                 {cell.pinned && <Pin size={10} className="absolute right-0.5 top-0.5 text-warning" aria-label="pinned" />}
               </button>
             ))}

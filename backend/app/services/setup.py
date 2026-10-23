@@ -320,6 +320,16 @@ def snapshot_summary(snapshot: Snapshot) -> dict[str, Any]:
     }
 
 
+def require_local(obj: Any) -> None:
+    """Class rows, units and groups imported from the Allocator are edited there, by their department."""
+    if getattr(obj, "allocator_ref", None):
+        raise ApiError(
+            409,
+            "FROM_ALLOCATOR",
+            "This comes from the department's list in the Timetable Allocator; edit it there.",
+        )
+
+
 def row_label(program_code: str, year: int, semester: int, sub_class: str) -> str:
     return f"{program_code} Y{year}S{semester}" + (f" ({sub_class})" if sub_class else "")
 
@@ -663,6 +673,7 @@ def class_row_dict(row: ClassRow) -> dict[str, Any]:
         "sub_class": row.sub_class,
         "student_count": row.student_count,
         "unavailable": row.unavailable,
+        "from_allocator": row.allocator_ref is not None,
     }
 
 
@@ -677,6 +688,7 @@ def offering_dict(o: UnitOffering, rows: dict[Any, ClassRow]) -> dict[str, Any]:
         "session_length": o.session_length,
         "room_type": o.room_type,
         "source": o.source,
+        "from_allocator": o.allocator_ref is not None,
         "class_row_ids": [str(link.class_row_id) for link in o.class_rows],
         "class_rows": sorted(rows[link.class_row_id].label for link in o.class_rows if link.class_row_id in rows),
         "groups": [group_dict(g, rows) for g in o.groups],
@@ -688,6 +700,8 @@ def group_dict(g: Group, rows: dict[Any, ClassRow]) -> dict[str, Any]:
         "id": str(g.id),
         "label": g.label,
         "student_count": g.student_count,
+        "lecturer_staff_number": g.lecturer_staff_number,
+        "lecturer_name": g.lecturer_name,
         "members": [
             {
                 "class_row_id": str(m.class_row_id),

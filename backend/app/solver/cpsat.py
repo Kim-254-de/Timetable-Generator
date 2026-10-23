@@ -12,8 +12,8 @@ starts that cover t. Hard rules:
   H1/H3/H4 per room type, size threshold and slot, the sessions needing a
       room at least that big fit in the rooms at least that big that are
       free then (a nested Hall condition, so phase 2 can seat them);
-  H9  per department and slot, running classes <= its lecturers;
-  H13 per allocated lecturer and slot, at most one class (repairs);
+  H9  per department and slot, its classes with no lecturer named <= its lecturers;
+  H13 per lecturer and slot, at most one class;
   H6/H7/H8/H10 by the start domains.
 Soft rules S1-S5 and S8 are weighted penalties.
 
@@ -234,20 +234,22 @@ def _build_phase1(problem: Problem, units: list[TimeUnit], with_families: bool) 
                     limit(terms, supply, f"H1|{room_type}|{c}")
 
     # H9: a department runs at most as many classes at once as it has lecturers.
+    # Classes whose lecturer is named are kept apart by H13 instead.
     by_dept: dict[int, list[tuple[TimeUnit, Session]]] = defaultdict(list)
     for u in units:
         for s in u.sessions:
             by_dept[s.department_id].append((u, s))
     for dept, members in by_dept.items():
         cap = problem.department_capacity.get(dept)
-        if cap is None:
+        unnamed = [(u, s) for u, s in members if not s.lecturer_id]
+        if cap is None or not unnamed:
             continue
         for t in range(SLOTS):
-            terms = [v for u, _s in members for v in _cover(m, u, t)]
+            terms = [v for u, _s in unnamed for v in _cover(m, u, t)]
             if len(terms) > cap:
                 limit(terms, cap, f"H9|{dept}")
 
-    # H13: an allocated lecturer teaches one class at a time (repair re-solves).
+    # H13: a lecturer teaches one class at a time, across every department.
     by_lecturer: dict[str, list[TimeUnit]] = defaultdict(list)
     for u in units:
         for s in u.sessions:

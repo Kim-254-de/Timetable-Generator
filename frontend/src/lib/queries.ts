@@ -4,9 +4,11 @@ import type {
   BulkResult,
   ClassRow,
   Department,
+  DepartmentStatus,
   DraftSummary,
   Grid,
   Group,
+  ImportResult,
   Me,
   Offering,
   PublicationItem,
@@ -35,6 +37,7 @@ export const keys = {
   grid: (id: string, view: View) => ['grid', id, view] as const,
   roomList: ['room-list'] as const,
   departments: ['departments'] as const,
+  submissions: (id: string) => ['submissions', id] as const,
 }
 
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
@@ -259,8 +262,29 @@ export function useMoveSession(draftId: string) {
   })
 }
 
+/** Re-solves around the pinned classes; `keep_published` also keeps every class of the published timetable. */
 export const useResolve = (termId: string, draftId: string) =>
-  useTermMutation(termId, (time_limit_s: number) => post<Run>(`/drafts/${draftId}/resolve`, { time_limit_s }))
+  useTermMutation(termId, ({ time_limit_s, keep_published }: { time_limit_s: number; keep_published: boolean }) =>
+    post<Run>(`/drafts/${draftId}/resolve`, { time_limit_s, keep_published }))
+
+// -- departments' teaching, from the Allocator ------------------------------------------------
+
+export const useDepartmentStatus = (termId: string) =>
+  useQuery({ queryKey: keys.submissions(termId), queryFn: () => get<DepartmentStatus>(`/terms/${termId}/departments`), retry: false })
+
+export function useImportDepartments(termId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => post<ImportResult>(`/terms/${termId}/departments/import`),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.term(termId) })
+      void qc.invalidateQueries({ queryKey: keys.rows(termId) })
+      void qc.invalidateQueries({ queryKey: keys.offerings(termId) })
+      void qc.invalidateQueries({ queryKey: keys.submissions(termId) })
+      void qc.invalidateQueries({ queryKey: keys.departments })
+    },
+  })
+}
 export const useCopyDraft = (termId: string, draftId: string) =>
   useTermMutation(termId, () => post<DraftSummary>(`/drafts/${draftId}/copy`))
 export const usePublish = (termId: string, draftId: string) =>

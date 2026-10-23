@@ -74,8 +74,20 @@ class Built:
 
 
 def build_problem(
-    db: Session, term: Term, snapshot: Snapshot, weights: Weights, mode: RunMode, base: Draft | None
+    db: Session,
+    term: Term,
+    snapshot: Snapshot,
+    weights: Weights,
+    mode: RunMode,
+    base: Draft | None,
+    keep_published: bool = False,
 ) -> Built:
+    """
+    The solver's problem. Every session carries its group's lecturer (staff
+    number), so no lecturer is put in two classes at once. A re-solve keeps
+    the Director's pinned sessions, and with `keep_published` every class of
+    the published timetable, where they are.
+    """
     data = snapshot.data
     rooms = {r["id"]: r for r in data["rooms"]}
     solver_rooms = [
@@ -122,8 +134,13 @@ def build_problem(
             for index, length in enumerate(lengths):
                 key = session_key(offering.unit_code, group.label, index)
                 pinned = previous = None
-                lecturer = None
-                if mode == RunMode.RESOLVE and key in base_sessions:
+                lecturer = group.lecturer_staff_number
+                if mode == RunMode.RESOLVE and keep_published and key in published:
+                    p = published[key]
+                    pinned = previous = Placement(
+                        start=start_slot(p["day_of_week"], p["start_time"]), room_id=p["room_id"]
+                    )
+                elif mode == RunMode.RESOLVE and key in base_sessions:
                     b = base_sessions[key]
                     placement = Placement(start=b.start_slot, room_id=b.smarttt_room_id)
                     if b.pinned:
@@ -132,7 +149,7 @@ def build_problem(
                 elif mode == RunMode.REPAIR and key in published:
                     p = published[key]
                     previous = Placement(start=start_slot(p["day_of_week"], p["start_time"]), room_id=p["room_id"])
-                    lecturer = p.get("lecturer_id")
+                    lecturer = lecturer or p.get("lecturer_id")
                     if key in base_sessions and base_sessions[key].pinned:
                         b = base_sessions[key]
                         pinned = Placement(start=b.start_slot, room_id=b.smarttt_room_id)
@@ -152,6 +169,7 @@ def build_problem(
                         pinned=pinned,
                         previous=previous,
                         lecturer_id=lecturer,
+                        lecturer_name=group.lecturer_name,
                     )
                 )
                 groups[key] = group

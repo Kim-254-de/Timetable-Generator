@@ -207,11 +207,17 @@ def test_validator_catches_each_rule():
     rooms = [_room("A", 30), _room("LAB", 30, kind="lab")]
     sessions = [
         _session("X", ("R1",), students=50),
+        _session("W", ("R3",)),
         _session("Y", ("R1",), lecturer_id="L"),
         _session("Z", ("R2",), lecturer_id="L", room_type="lab"),
     ]
     problem = _problem(sessions, rooms=rooms, capacity={1: 1})
-    placements = {"X": Placement(slot(0, 8), "A"), "Y": Placement(slot(0, 8), "A"), "Z": Placement(slot(0, 8), "A")}
+    placements = {
+        "X": Placement(slot(0, 8), "A"),
+        "W": Placement(slot(0, 8), "LAB"),
+        "Y": Placement(slot(0, 8), "A"),
+        "Z": Placement(slot(0, 8), "A"),
+    }
     rules = {v.rule for v in check(problem, placements)}
     assert {"H1", "H2", "H3", "H4", "H9", "H13"} <= rules
     assert {v.rule for v in check(problem, {})} == {"H5"}
