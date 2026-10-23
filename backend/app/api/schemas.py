@@ -63,6 +63,8 @@ class RoomBody(_Strict):
     room_type: RoomType = "lecture_hall"
     active: bool = True
     unavailable: Slots = []
+    exam_seats: Annotated[int, Field(ge=0, le=5000)] | None = None
+    for_exams: bool = True
 
 
 class RoomPatch(_Strict):
@@ -72,6 +74,9 @@ class RoomPatch(_Strict):
     room_type: RoomType | None = None
     active: bool | None = None
     unavailable: Slots | None = None
+    # Seats for exams; 0 or empty: the capacity x the term's spacing.
+    exam_seats: Annotated[int, Field(ge=0, le=5000)] | None = None
+    for_exams: bool | None = None
 
 
 # A department typed by name or code; a name not yet in the Departments list is added to it.
@@ -184,3 +189,37 @@ class MoveBody(_Strict):
 
 class PublishBody(_Strict):
     replace_unpublished: bool = False
+
+
+# -- exams ----------------------------------------------------------------------------------
+
+
+class ExamSession(_Strict):
+    start: Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+    end: Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
+class ExamPeriodBody(_Strict):
+    exam_start: date | None = None
+    exam_end: date | None = None
+    exam_weekdays: Annotated[list[Annotated[int, Field(ge=0, le=6)]], Field(min_length=1, max_length=7)] | None = None
+    exam_days_off: Annotated[list[date], Field(max_length=60)] | None = None
+    exam_sessions: Annotated[list[ExamSession], Field(min_length=1, max_length=6)] | None = None
+    # Exam seats as a share of each room's teaching capacity.
+    exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
+
+
+class ExamRunBody(_Strict):
+    term_id: uuid.UUID
+    time_limit_s: Annotated[int, Field(ge=10, le=3600)] | None = None
+    weights: dict[str, Annotated[int, Field(ge=0, le=100_000)]] | None = None
+
+
+class ExamResolveBody(_Strict):
+    time_limit_s: Annotated[int, Field(ge=10, le=3600)] | None = None
+
+
+class ExamMoveBody(_Strict):
+    day: date
+    session: Annotated[int, Field(ge=0, le=5)]
+    pinned: bool = True

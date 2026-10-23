@@ -197,7 +197,12 @@ def execute_run(run_id: str) -> None:
         run.progress = {"phase": "building"}
         db.commit()
         try:
-            _solve(db, run)
+            if run.mode == RunMode.EXAM:
+                from app.services.exam_runs import solve_run
+
+                solve_run(db, run)
+            else:
+                _solve(db, run)
         except Exception:
             logger.exception("Run %s crashed", run_id)
             db.rollback()

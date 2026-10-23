@@ -53,6 +53,9 @@ def room_dict(room: Room, in_use: int = 0) -> dict[str, Any]:
         "active": room.active,
         "unavailable": sorted(room.unavailable or []),
         "in_use": in_use,
+        "exam_seats": room.exam_seats,
+        "for_exams": room.for_exams,
+        "block": room.block,
     }
 
 
@@ -76,15 +79,19 @@ def _apply_room(db: Session, room: Room, fields: dict[str, Any]) -> None:
         clash = _room_by_code(db, fields["code"])
         if clash is not None and clash.id != room.id:
             raise ApiError(409, "CODE_TAKEN", f"There is already a lecture hall {clash.code}.")
-    for key in ("code", "building", "capacity", "room_type", "active"):
+    for key in ("code", "building", "capacity", "room_type", "active", "for_exams"):
         if key in fields and fields[key] is not None:
             setattr(room, key, fields[key])
+    if "exam_seats" in fields:
+        room.exam_seats = fields["exam_seats"] or None  # empty or 0: capacity x the term's spacing
     if fields.get("unavailable") is not None:
         room.unavailable = sorted(set(fields["unavailable"]))
 
 
 def create_room(db: Session, identity: Identity, fields: dict[str, Any], commit: bool = True) -> Room:
-    room = Room(id=uuid.uuid4().hex, code="", building="", capacity=1, room_type="lecture_hall", unavailable=[])
+    room = Room(
+        id=uuid.uuid4().hex, code="", building="", capacity=1, room_type="lecture_hall", unavailable=[], for_exams=True
+    )
     _apply_room(db, room, fields)
     db.add(room)
     db.flush()
@@ -576,6 +583,8 @@ def bulk_rooms(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> d
                 "capacity": r.get("capacity"),
                 "room_type": _room_type(kind) if kind is not None else None,
                 "active": _yes(available) if available is not None else None,
+                "exam_seats": r.get("exam_seats"),
+                "for_exams": _yes(r["for_exams"]) if r.get("for_exams") is not None else None,
             }
         )
         if given.get("code"):

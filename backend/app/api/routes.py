@@ -17,6 +17,10 @@ from app.api.schemas import (
     CopyTermBody,
     DepartmentBody,
     DepartmentPatch,
+    ExamMoveBody,
+    ExamPeriodBody,
+    ExamResolveBody,
+    ExamRunBody,
     GroupBody,
     LoginBody,
     MoveBody,
@@ -41,6 +45,10 @@ from app.models import ClassRow, Group, Room, Run, RunMode, Term, UnitOffering
 from app.services import (
     allocator_import,
     drafts,
+    exam_drafts,
+    exam_export,
+    exam_runs,
+    exam_setup,
     export,
     grouping,
     integration,
@@ -473,6 +481,108 @@ def export_draft(draft_id: str, fmt: str, identity: Me, db: Db, view: str = Quer
     )
 
 
+# -- exams ------------------------------------------------------------------------------------
+
+
+@router.get("/terms/{term_id}/exams")
+def term_exams(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
+    """The term's exam period, papers, practicals, drafts and versions, and what is missing to generate."""
+    term = setup.get_term(db, term_id)
+    return ok(
+        {
+            "period": exam_setup.period_dict(db, term),
+            "papers": exam_setup.papers_of(db, term),
+            "practicals": exam_setup.practicals_of(db, term),
+            "drafts": exam_drafts.drafts_of(db, term),
+            "publications": exam_drafts.publications(db, term),
+            "readiness": exam_runs.readiness(db, term),
+        }
+    )
+
+
+@router.patch("/terms/{term_id}/exam-period")
+def exam_period(term_id: str, body: ExamPeriodBody, identity: Me, db: Db) -> dict[str, Any]:
+    term = setup.get_term(db, term_id)
+    return ok(exam_setup.update_period(db, identity, term, body.model_dump(exclude_unset=True)))
+
+
+@router.get("/terms/{term_id}/exam-departments")
+def exam_departments(term_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+    """Which departments have published their exam papers in the Allocator."""
+    data = allocator.exams(str(setup.get_term(db, term_id).id))
+    return ok(
+        {
+            "published": [
+                {"code": d["code"], "name": d["name"], "published_at": d["published_at"], "papers": len(d["papers"])}
+                for d in data.get("published") or []
+            ],
+            "not_published": data.get("not_published") or [],
+        }
+    )
+
+
+@router.post("/terms/{term_id}/exams/import")
+def import_exams(term_id: str, identity: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+    return ok(exam_setup.import_exams(db, allocator, identity, setup.get_term(db, term_id)))
+
+
+@router.post("/exam-runs")
+def start_exam_run(body: ExamRunBody, identity: Me, db: Db) -> dict[str, Any]:
+    term = setup.get_term(db, str(body.term_id))
+    return ok(runs.run_dict(exam_runs.create_exam_run(db, identity, term, body.weights, body.time_limit_s, None)))
+
+
+@router.get("/exam-drafts/{draft_id}")
+def get_exam_draft(draft_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+    return ok(exam_drafts.grid(db, exam_drafts.get_draft(db, draft_id), allocator))
+
+
+@router.patch("/exam-drafts/{draft_id}/papers/{paper_id}")
+def move_exam_paper(draft_id: str, paper_id: str, body: ExamMoveBody, identity: Me, db: Db) -> dict[str, Any]:
+    draft = exam_drafts.get_draft(db, draft_id)
+    return ok(exam_drafts.move_paper(db, identity, draft, paper_id, body.day.isoformat(), body.session, body.pinned))
+
+
+@router.post("/exam-drafts/{draft_id}/resolve")
+def resolve_exam_draft(draft_id: str, body: ExamResolveBody, identity: Me, db: Db) -> dict[str, Any]:
+    draft = exam_drafts.get_draft(db, draft_id)
+    term = setup.get_term(db, str(draft.term_id))
+    return ok(runs.run_dict(exam_runs.create_exam_run(db, identity, term, None, body.time_limit_s, draft)))
+
+
+@router.post("/exam-drafts/{draft_id}/share")
+def share_exam_draft(draft_id: str, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(exam_drafts.share(db, identity, exam_drafts.get_draft(db, draft_id)))
+
+
+@router.post("/exam-drafts/{draft_id}/copy")
+def copy_exam_draft(draft_id: str, identity: Me, db: Db) -> dict[str, Any]:
+    new = exam_drafts.copy_draft(db, identity, exam_drafts.get_draft(db, draft_id))
+    return ok(exam_drafts.draft_summary(db, new))
+
+
+@router.post("/exam-drafts/{draft_id}/publish")
+def publish_exam_draft(draft_id: str, identity: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+    return ok(exam_drafts.publish(db, allocator, identity, exam_drafts.get_draft(db, draft_id)))
+
+
+@router.get("/exam-drafts/{draft_id}/export/{kind}.{fmt}")
+def export_exam_draft(draft_id: str, kind: str, fmt: str, identity: Me, db: Db, allocator: Allocator) -> Response:
+    """The exam timetable, room sheets or invigilation roster as Word (.docx) or PDF."""
+    if (kind, fmt) not in exam_export.BUILDERS:
+        raise ApiError(404, "NOT_FOUND", "Downloads are timetable, rooms or roster, as .docx or .pdf.")
+    draft = exam_drafts.get_draft(db, draft_id)
+    data = exam_drafts.grid(db, draft, allocator)
+    term = setup.get_term(db, str(draft.term_id))
+    content = exam_export.BUILDERS[(kind, fmt)](term, data, data["version"], identity.full_name)
+    filename = f"exam-{kind}-{term.academic_year.replace('/', '-')}-S{term.semester}.{fmt}"
+    return Response(
+        content,
+        media_type=exam_export.MEDIA[fmt],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # -- for the Timetable Allocator (shared key, no user session) ------------------------------
 
 AllocatorKey = Depends(integration.require_allocator_key)
@@ -486,3 +596,9 @@ def allocator_terms(db: Db) -> dict[str, Any]:
 @router.get("/integrations/allocator/terms/{term_id}/times", dependencies=[AllocatorKey])
 def allocator_times(term_id: str, db: Db) -> dict[str, Any]:
     return ok(integration.allocator_times(db, setup.get_term(db, term_id)))
+
+
+@router.get("/integrations/allocator/terms/{term_id}/exam-draft", dependencies=[AllocatorKey])
+def allocator_exam_draft(term_id: str, db: Db) -> dict[str, Any]:
+    """The exam draft the Director shared: each paper's date, session and rooms, for departments' invigilators."""
+    return ok(exam_drafts.allocator_draft(db, setup.get_term(db, term_id)))
