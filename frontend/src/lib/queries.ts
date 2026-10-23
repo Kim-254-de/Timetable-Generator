@@ -5,6 +5,10 @@ import type {
   ClassRow,
   Department,
   DepartmentStatus,
+  ExamDraftSummary,
+  ExamGrid,
+  ExamOverview,
+  ExamPeriod,
   DraftSummary,
   Grid,
   Group,
@@ -38,6 +42,8 @@ export const keys = {
   roomList: ['room-list'] as const,
   departments: ['departments'] as const,
   submissions: (id: string) => ['submissions', id] as const,
+  exams: (id: string) => ['exams', id] as const,
+  examDraft: (id: string) => ['exam-draft', id] as const,
 }
 
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
@@ -134,6 +140,9 @@ export interface RoomInput {
   room_type?: RoomType
   active?: boolean
   unavailable?: number[]
+  /** 0 or empty: capacity x the term's exam spacing. */
+  exam_seats?: number | null
+  for_exams?: boolean
 }
 export const useRoomList = () => useQuery({ queryKey: keys.roomList, queryFn: () => get<RoomRecord[]>('/rooms') })
 export const useSaveRoom = () =>
@@ -301,3 +310,59 @@ export const useSendPublication = (termId: string) =>
 export type ExportFormat = 'pdf' | 'docx' | 'xlsx'
 export const exportUrl = (draftId: string, view: View, format: ExportFormat = 'pdf') =>
   `${import.meta.env.VITE_API_URL ?? '/api'}/drafts/${draftId}/export.${format}?view=${view}`
+
+// -- exams ----------------------------------------------------------------------------------
+
+export const useExams = (termId: string) =>
+  useQuery({ queryKey: keys.exams(termId), queryFn: () => get<ExamOverview>(`/terms/${termId}/exams`) })
+
+export const useExamDepartments = (termId: string) =>
+  useQuery({
+    queryKey: ['exam-departments', termId],
+    queryFn: () =>
+      get<{ published: { code: string; name: string; published_at: string; papers: number }[]; not_published: { code: string; name: string }[] }>(
+        `/terms/${termId}/exam-departments`,
+      ),
+    retry: false,
+  })
+
+function useExamMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Promise<TData>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.exams(termId) })
+      void qc.invalidateQueries({ queryKey: keys.runs(termId) })
+      void qc.invalidateQueries({ queryKey: ['exam-draft'] })
+      void qc.invalidateQueries({ queryKey: ['exam-departments', termId] })
+      void qc.invalidateQueries({ queryKey: keys.rows(termId) })
+    },
+  })
+}
+
+export const usePatchExamPeriod = (termId: string) =>
+  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
+    patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
+
+export const useImportExams = (termId: string) =>
+  useExamMutation(termId, () =>
+    post<{ departments: string[]; papers: { added: string[]; changed: string[]; removed: string[] }; not_published: { code: string }[] }>(
+      `/terms/${termId}/exams/import`,
+    ))
+
+export const useStartExamRun = (termId: string) =>
+  useExamMutation(termId, (time_limit_s: number) => post<Run>('/exam-runs', { term_id: termId, time_limit_s }))
+
+export const useExamDraft = (draftId: string) =>
+  useQuery({ queryKey: keys.examDraft(draftId), queryFn: () => get<ExamGrid>(`/exam-drafts/${draftId}`) })
+
+export const useMoveExamPaper = (termId: string, draftId: string) =>
+  useExamMutation(termId, ({ paperId, day, session }: { paperId: string; day: string; session: number }) =>
+    patch<ExamDraftSummary>(`/exam-drafts/${draftId}/papers/${paperId}`, { day, session, pinned: true }))
+
+export const useExamDraftAction = (termId: string, draftId: string) =>
+  useExamMutation(termId, (action: 'share' | 'copy' | 'publish' | 'resolve') =>
+    post<ExamDraftSummary & { version?: number; id: string; draft_id?: string }>(`/exam-drafts/${draftId}/${action}`, action === 'resolve' ? { time_limit_s: 120 } : {}))
+
+export const examExportUrl = (draftId: string, kind: 'timetable' | 'rooms' | 'roster', format: 'docx' | 'pdf') =>
+  `${import.meta.env.VITE_API_URL ?? '/api'}/exam-drafts/${draftId}/export/${kind}.${format}`
