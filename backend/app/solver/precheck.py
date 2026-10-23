@@ -54,7 +54,11 @@ def run(problem: Problem) -> list[Finding]:
                     "split the group or add a room.",
                 )
             )
-        if problem.require_department_capacity and s.department_id not in problem.department_capacity:
+        if (
+            not s.lecturer_id
+            and problem.require_department_capacity
+            and s.department_id not in problem.department_capacity
+        ):
             findings.append(
                 Finding(
                     "H9",
@@ -105,10 +109,28 @@ def run(problem: Problem) -> list[Finding]:
                 )
                 break
 
-    # H9: a department's teaching hours must fit its lecturers x 60.
+    # H13: a lecturer's classes must fit in the teaching week.
+    lecturer_hours: dict[str, int] = defaultdict(int)
+    names: dict[str, str] = {}
+    for s in problem.sessions:
+        if s.lecturer_id:
+            lecturer_hours[s.lecturer_id] += s.length
+            names[s.lecturer_id] = s.lecturer_name or s.lecturer_id
+    for lecturer, hours in lecturer_hours.items():
+        if hours > SLOTS:
+            findings.append(
+                Finding(
+                    "H13",
+                    names[lecturer],
+                    f"{names[lecturer]} is given {hours} teaching hours a week; the week has {SLOTS}.",
+                )
+            )
+
+    # H9: a department's teaching hours with no lecturer named must fit its lecturers x 60.
     dept_hours: dict[int, int] = defaultdict(int)
     for s in problem.sessions:
-        dept_hours[s.department_id] += s.length
+        if not s.lecturer_id:
+            dept_hours[s.department_id] += s.length
     for dept, hours in dept_hours.items():
         cap = problem.department_capacity.get(dept)
         if cap is not None and hours > cap * SLOTS:

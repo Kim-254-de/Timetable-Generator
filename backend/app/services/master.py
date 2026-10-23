@@ -4,8 +4,10 @@ and units (with the class rows that take each unit), entered one
 at a time or pasted in bulk from Excel, and copying a previous term's class
 rows, units and groups into a new term.
 
-Deleting refuses anything still in use and says where, so a timetable is
-never left pointing at a room, class row or unit that no longer exists.
+Deleting a room or department refuses while it is still in use and says where.
+Deleting a unit takes its classes out of the draft timetables; deleting a class
+row deletes the units only it takes and takes it off the units it shares.
+Approved versions keep their own frozen copy, so neither changes them.
 """
 
 from __future__ import annotations
@@ -32,7 +34,8 @@ from app.models import (
     Term,
     UnitOffering,
 )
-from app.services.setup import audit, compact, row_label
+from app.services.grouping import remove_group
+from app.services.setup import audit, compact, require_local, row_label
 
 FIRST_LOCAL_DEPARTMENT_ID = 100_000
 
@@ -274,7 +277,13 @@ def create_class_row(
 
 
 def update_class_row(db: Session, identity: Identity, row: ClassRow, fields: dict[str, Any]) -> None:
-    """Applies a patch (the caller audits and commits). Everything is checked before anything changes."""
+    """
+    Applies a patch (the caller audits and commits). Everything is checked
+    before anything changes. A row from the Allocator takes only the hours it
+    can't be taught; the rest is its department's.
+    """
+    if any(v is not None for k, v in fields.items() if k != "unavailable"):
+        require_local(row)
     if fields.get("department_id") is not None:
         _check_department(db, fields["department_id"])
     new = {
@@ -298,13 +307,43 @@ def update_class_row(db: Session, identity: Identity, row: ClassRow, fields: dic
         row.unavailable = sorted(set(fields["unavailable"]))
 
 
-def delete_class_row(db: Session, identity: Identity, row: ClassRow) -> None:
-    units = db.scalar(select(func.count()).select_from(OfferingClassRow).where(OfferingClassRow.class_row_id == row.id))
-    if units:
-        raise ApiError(409, "IN_USE", f"{row.label} takes {units} units. Remove it from those units first.")
-    audit(db, identity, "class_row.delete", "class_row", str(row.id), {"label": row.label}, None)
+def delete_class_row(db: Session, identity: Identity, row: ClassRow) -> dict[str, Any]:
+    """
+    Deletes the class row with every unit only it takes. A unit it shares with
+    other class rows stays for them: the row leaves the unit and its groups,
+    and a group left with no class rows goes, with its classes in the drafts.
+    """
+    require_local(row)
+    taken = db.scalars(
+        select(UnitOffering)
+        .join(OfferingClassRow, OfferingClassRow.offering_id == UnitOffering.id)
+        .where(OfferingClassRow.class_row_id == row.id)
+        .order_by(UnitOffering.unit_code)
+    ).all()
+    deleted, kept = [], []
+    for offering in taken:
+        if all(link.class_row_id == row.id for link in offering.class_rows):
+            _remove_offering(db, identity, offering)
+            deleted.append(offering.unit_code)
+            continue
+        offering.class_rows = [link for link in offering.class_rows if link.class_row_id != row.id]
+        for group in list(offering.groups):
+            group.members = [m for m in group.members if m.class_row_id != row.id]
+            if not group.members:
+                remove_group(db, offering, group)
+        kept.append(offering.unit_code)
+    audit(
+        db,
+        identity,
+        "class_row.delete",
+        "class_row",
+        str(row.id),
+        {"label": row.label, "units_deleted": deleted, "units_kept": kept},
+        None,
+    )
     db.delete(row)
     db.commit()
+    return {"units_deleted": deleted, "units_kept": kept}
 
 
 # -- units ------------------------------------------------------------------------------------
@@ -384,6 +423,7 @@ def update_offering(
     db: Session, identity: Identity, term: Term, offering: UnitOffering, fields: dict[str, Any]
 ) -> None:
     """Applies a patch (the caller audits and commits). Everything is checked before anything changes."""
+    require_local(offering)
     if fields.get("unit_code") is not None and _offering_code_taken(db, term, fields["unit_code"], offering.id):
         raise ApiError(409, "CODE_TAKEN", f"{fields['unit_code']} is already a unit in this term.")
     if fields.get("department_id") is not None:
@@ -415,21 +455,18 @@ def update_offering(
     db.flush()
 
 
-def delete_offering(db: Session, identity: Identity, offering: UnitOffering) -> None:
-    group_ids = [g.id for g in offering.groups]
-    used = (
-        db.scalar(select(func.count()).select_from(DraftSession).where(DraftSession.group_id.in_(group_ids)))
-        if group_ids
-        else 0
-    )
-    if used:
-        raise ApiError(
-            409,
-            "IN_USE",
-            f"{offering.unit_code} is in {used} classes of saved timetables. Delete those drafts first.",
-        )
+def _remove_offering(db: Session, identity: Identity, offering: UnitOffering) -> None:
+    """Deletes the unit and its classes from every draft (the caller commits)."""
     audit(db, identity, "offering.delete", "offering", str(offering.id), {"unit_code": offering.unit_code}, None)
+    for group in list(offering.groups):
+        remove_group(db, offering, group)
     db.delete(offering)
+    db.flush()
+
+
+def delete_offering(db: Session, identity: Identity, offering: UnitOffering) -> None:
+    require_local(offering)
+    _remove_offering(db, identity, offering)
     db.commit()
 
 

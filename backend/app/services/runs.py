@@ -108,6 +108,7 @@ def create_run(
     weights: dict[str, int] | None,
     time_limit_s: int | None,
     base_draft: Draft | None,
+    keep_published: bool = False,
 ) -> Run:
     settings = get_settings()
     snapshot = latest_snapshot(db, term)
@@ -115,6 +116,8 @@ def create_run(
         raise ApiError(409, "NO_SNAPSHOT", "Take a snapshot of SMARTTT first.")
     if mode == RunMode.RESOLVE and base_draft is None:
         raise ApiError(422, "VALIDATION_ERROR", "A re-solve needs the draft to re-solve.")
+    if keep_published and not (snapshot.data.get("published") or {}).get("version"):
+        raise ApiError(409, "NOTHING_PUBLISHED", "Nothing is published yet, so there are no classes to keep.")
     if mode == RunMode.REPAIR and not (snapshot.data.get("published") or {}).get("version"):
         raise ApiError(409, "NOTHING_PUBLISHED", "A repair re-solve needs a published timetable; run a full solve.")
     ready = readiness(db, term)
@@ -142,12 +145,21 @@ def create_run(
         weights=merged.as_dict(),
         time_limit_s=limit,
         base_draft_id=base_draft.id if base_draft else None,
+        keep_published=keep_published,
         created_by=identity.actor,
         progress={"phase": "queued"},
     )
     db.add(run)
     db.flush()
-    audit(db, identity, "run.create", "run", str(run.id), None, {"mode": mode.value, "time_limit_s": limit})
+    audit(
+        db,
+        identity,
+        "run.create",
+        "run",
+        str(run.id),
+        None,
+        {"mode": mode.value, "time_limit_s": limit, "keep_published": keep_published},
+    )
     db.commit()
 
     if settings.run_inline:
@@ -211,7 +223,9 @@ def _solve(db: Session, run: Run) -> None:
     base = db.get(Draft, run.base_draft_id) if run.base_draft_id else None
     if term is None or snapshot is None:
         raise RuntimeError(f"Run {run.id} lost its term or snapshot")
-    built = build_problem(db, term, snapshot, Weights.from_dict(run.weights), run.mode, base)
+    built = build_problem(
+        db, term, snapshot, Weights.from_dict(run.weights), run.mode, base, keep_published=run.keep_published
+    )
 
     last_write = 0.0
 

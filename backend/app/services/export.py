@@ -45,7 +45,9 @@ def version_line(term: Term, grid: dict[str, Any]) -> str:
 
 
 def cell_lines(grid: dict[str, Any], cell: dict[str, Any]) -> list[str]:
-    fields = ("unit_code", "group") if grid["view"] == "room" else ("unit_code", "group", "room")
+    fields = (
+        ("unit_code", "group", "lecturer") if grid["view"] == "room" else ("unit_code", "group", "room", "lecturer")
+    )
     return [str(cell[f]) for f in fields if cell.get(f)]
 
 

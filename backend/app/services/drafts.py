@@ -83,6 +83,7 @@ CELL_FIELDS = (
     "key",
     "unit_code",
     "group",
+    "lecturer",
     "room_id",
     "room",
     "day",
@@ -118,6 +119,7 @@ def _cells(db: Session, draft: Draft) -> list[dict[str, Any]]:
                 "key": ds.key,
                 "unit_code": offering.unit_code if offering else ds.key,
                 "group": group.label if group else "",
+                "lecturer": group.lecturer_name if group else "",
                 "room_id": ds.smarttt_room_id,
                 "room": room.get("code", "?"),
                 "day": day,
@@ -438,6 +440,9 @@ def _sessions_payload(db: Session, draft: Draft, built: Built) -> list[dict[str,
                 "day_of_week": day,
                 "start_time": start,
                 "end_time": end,
+                # The department's lecturer for the group, as SMARTTT knows them.
+                "lecturer_staff_number": group.lecturer_staff_number,
+                "lecturer_name": group.lecturer_name or None,
             }
         )
     return sessions

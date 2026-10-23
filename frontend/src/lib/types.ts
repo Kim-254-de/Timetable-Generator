@@ -141,6 +141,8 @@ export interface ClassRow {
   sub_class: string
   student_count: number | null
   unavailable: number[]
+  /** Entered by its department in the Allocator, and edited only there (but its unavailable hours). */
+  from_allocator: boolean
 }
 
 export interface GroupMember {
@@ -154,6 +156,8 @@ export interface Group {
   label: string
   student_count: number
   members: GroupMember[]
+  lecturer_staff_number?: string | null
+  lecturer_name?: string
 }
 
 export interface Offering {
@@ -166,9 +170,42 @@ export interface Offering {
   session_length: number | null
   room_type: RoomType
   source: string
+  /** Entered by its department in the Allocator, and edited only there. */
+  from_allocator: boolean
   class_row_ids: string[]
   class_rows: string[]
   groups: Group[]
+}
+
+/** A department's teaching in the Allocator: published or not yet, and whether it is imported. */
+export interface DepartmentSubmission {
+  code: string
+  name: string
+  published: boolean
+  published_at?: string
+  published_by?: string | null
+  units?: number
+  reopened_at?: string | null
+  last_published_at?: string | null
+  changed_units?: string[]
+  imported_at: string | null
+  needs_import: boolean
+}
+
+export interface DepartmentStatus {
+  departments: DepartmentSubmission[]
+  published: number
+  not_published: number
+  needs_import: number
+}
+
+export interface ImportChanges { added: string[]; changed: string[]; removed: string[] }
+
+export interface ImportResult {
+  departments: string[]
+  class_rows: ImportChanges
+  units: Record<string, ImportChanges>
+  not_published: { code: string; name: string }[]
 }
 
 export interface Reason {
@@ -220,6 +257,7 @@ export interface Cell {
   key: string
   unit_code: string
   group: string
+  lecturer?: string
   room_id: string
   room: string
   day: Day

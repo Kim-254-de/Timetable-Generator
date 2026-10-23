@@ -6,9 +6,11 @@ import type {
   Department,
   DepartmentList,
   DepartmentSync,
+  DepartmentStatus,
   DraftSummary,
   Grid,
   Group,
+  ImportResult,
   Me,
   Offering,
   PublicationItem,
@@ -37,6 +39,7 @@ export const keys = {
   grid: (id: string, view: View) => ['grid', id, view] as const,
   roomList: ['room-list'] as const,
   departments: ['departments'] as const,
+  submissions: (id: string) => ['submissions', id] as const,
 }
 
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
@@ -177,8 +180,10 @@ export interface ClassRowInput {
 }
 export const useCreateClassRow = (termId: string) =>
   useTermMutation(termId, (body: ClassRowInput) => post<ClassRow>(`/terms/${termId}/class-rows`, body))
+/** What deleting a class row did: units only it took are deleted, shared units just lose the row. */
+export interface ClassRowDeleted { units_deleted: string[]; units_kept: string[] }
 export const useDeleteClassRow = (termId: string) =>
-  useTermMutation(termId, (id: string) => api.delete(`/class-rows/${id}`))
+  useTermMutation(termId, async (id: string) => (await api.delete<ClassRowDeleted>(`/class-rows/${id}`)).data)
 export const useBulkClassRows = (termId: string) =>
   useTermMutation(termId, (rows: Record<string, string>[]) => post<BulkResult>(`/terms/${termId}/class-rows/bulk`, { rows }))
 
@@ -264,8 +269,29 @@ export function useMoveSession(draftId: string) {
   })
 }
 
+/** Re-solves around the pinned classes; `keep_published` also keeps every class of the published timetable. */
 export const useResolve = (termId: string, draftId: string) =>
-  useTermMutation(termId, (time_limit_s: number) => post<Run>(`/drafts/${draftId}/resolve`, { time_limit_s }))
+  useTermMutation(termId, ({ time_limit_s, keep_published }: { time_limit_s: number; keep_published: boolean }) =>
+    post<Run>(`/drafts/${draftId}/resolve`, { time_limit_s, keep_published }))
+
+// -- departments' teaching, from the Allocator ------------------------------------------------
+
+export const useDepartmentStatus = (termId: string) =>
+  useQuery({ queryKey: keys.submissions(termId), queryFn: () => get<DepartmentStatus>(`/terms/${termId}/departments`), retry: false })
+
+export function useImportDepartments(termId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => post<ImportResult>(`/terms/${termId}/departments/import`),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.term(termId) })
+      void qc.invalidateQueries({ queryKey: keys.rows(termId) })
+      void qc.invalidateQueries({ queryKey: keys.offerings(termId) })
+      void qc.invalidateQueries({ queryKey: keys.submissions(termId) })
+      void qc.invalidateQueries({ queryKey: keys.departments })
+    },
+  })
+}
 export const useCopyDraft = (termId: string, draftId: string) =>
   useTermMutation(termId, () => post<DraftSummary>(`/drafts/${draftId}/copy`))
 export const usePublish = (termId: string, draftId: string) =>

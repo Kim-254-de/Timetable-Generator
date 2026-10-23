@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Download } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
 import type { BulkResult } from '@/lib/types'
 import { Dialog } from './Dialog'
@@ -204,8 +205,8 @@ export function BulkPaste({
         </ul>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <button type="button" onClick={() => downloadText(templateName, templateCsv(columns))} className="text-brand-ink">
-          Download the template (opens in Excel)
+        <button type="button" onClick={() => downloadText(templateName, templateCsv(columns))} className="inline-flex items-center gap-1 text-brand-ink">
+          <Download size={14} aria-hidden /> Download the template (opens in Excel)
         </button>
         <label className="cursor-pointer rounded-md border border-brand px-3 py-1.5 text-brand-ink">
           {reading ? 'Reading…' : 'Open an Excel or CSV file'}

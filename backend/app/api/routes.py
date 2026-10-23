@@ -31,19 +31,32 @@ from app.api.schemas import (
     TermPatch,
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
+from app.clients.allocator import AllocatorClient, get_allocator
 from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
 from app.clients.smarttt import SmartttClient, get_smarttt
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError, ok
 from app.models import ClassRow, Group, Room, Run, RunMode, Term, UnitOffering
-from app.services import departments, drafts, export, grouping, integration, master, runs, setup, spreadsheet
+from app.services import (
+    allocator_import,
+    departments,
+    drafts,
+    export,
+    grouping,
+    integration,
+    master,
+    runs,
+    setup,
+    spreadsheet,
+)
 
 router = APIRouter()
 
 Db = Annotated[Session, Depends(get_db)]
 Smarttt = Annotated[SmartttClient, Depends(get_smarttt)]
 Attendance = Annotated[AttendanceClient, Depends(get_attendance)]
+Allocator = Annotated[AllocatorClient, Depends(get_allocator)]
 Me = Annotated[Identity, Depends(current_identity)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
@@ -233,6 +246,18 @@ def take_snapshot(term_id: str, identity: Me, db: Db, smarttt: Smarttt) -> dict[
     return ok(setup.snapshot_summary(setup.take_snapshot(db, smarttt, identity, term)))
 
 
+@router.get("/terms/{term_id}/departments")
+def department_submissions(term_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+    """Which departments have published their teaching in the Allocator, and whether it's imported."""
+    return ok(allocator_import.status(db, allocator, setup.get_term(db, term_id)))
+
+
+@router.post("/terms/{term_id}/departments/import")
+def import_departments(term_id: str, identity: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+    """Brings in what departments have published: class rows, units and groups with lecturers."""
+    return ok(allocator_import.import_departments(db, allocator, identity, setup.get_term(db, term_id)))
+
+
 @router.post("/terms/{term_id}/setup/import")
 def import_setup(term_id: str, identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
     # The units SMARTTT names belong to departments, which come from Attendance: read them in first.
@@ -280,8 +305,7 @@ def patch_class_row(row_id: str, body: ClassRowPatch, identity: Me, db: Db) -> d
 
 @router.delete("/class-rows/{row_id}")
 def delete_class_row(row_id: str, identity: Me, db: Db) -> dict[str, Any]:
-    master.delete_class_row(db, identity, _get(db, ClassRow, row_id, "class row"))
-    return ok(None)
+    return ok(master.delete_class_row(db, identity, _get(db, ClassRow, row_id, "class row")))
 
 
 @router.get("/terms/{term_id}/offerings")
@@ -367,6 +391,7 @@ def delete_group(group_id: str, identity: Me, db: Db) -> dict[str, Any]:
     offering = db.get(UnitOffering, group.offering_id)
     if offering is None:
         raise ApiError(404, "NOT_FOUND", "No such offering.")
+    setup.require_local(offering)
     setup.audit(db, identity, "group.delete", "group", group_id, {"label": group.label}, None)
     grouping.remove_group(db, offering, group)
     db.commit()
@@ -417,7 +442,9 @@ def move_session(draft_id: str, key: str, body: MoveBody, identity: Me, db: Db) 
 def resolve(draft_id: str, body: ResolveBody, identity: Me, db: Db) -> dict[str, Any]:
     draft = drafts.get_draft(db, draft_id)
     term = setup.get_term(db, str(draft.term_id))
-    run = runs.create_run(db, identity, term, RunMode.RESOLVE, body.weights, body.time_limit_s, draft)
+    run = runs.create_run(
+        db, identity, term, RunMode.RESOLVE, body.weights, body.time_limit_s, draft, keep_published=body.keep_published
+    )
     return ok(runs.run_dict(run))
 
 
@@ -470,6 +497,6 @@ def allocator_terms(db: Db) -> dict[str, Any]:
     return ok(integration.allocator_terms(db))
 
 
-@router.get("/integrations/allocator/terms/{term_id}/sections", dependencies=[AllocatorKey])
-def allocator_sections(term_id: str, db: Db) -> dict[str, Any]:
-    return ok(integration.allocator_sections(db, setup.get_term(db, term_id)))
+@router.get("/integrations/allocator/terms/{term_id}/times", dependencies=[AllocatorKey])
+def allocator_times(term_id: str, db: Db) -> dict[str, Any]:
+    return ok(integration.allocator_times(db, setup.get_term(db, term_id)))

@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
+import { Download, Printer } from 'lucide-react'
 import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, FIRST_HOUR, HOURS, SCORE_LABELS, dateTime, termText } from '@/lib/format'
 import { BulkPaste } from '@/components/BulkPaste'
+import { DepartmentSubmissions } from '@/components/DepartmentSubmissions'
 import { rememberTerm } from '@/lib/lastTerm'
+import { printPdf } from '@/lib/print'
 import {
   exportUrl,
   useBulkClassRows,
@@ -29,8 +32,11 @@ import {
 import type { ClassRow, Group, Offering, RoomType } from '@/lib/types'
 import { CLASS_ROW_COLUMNS, ClassRowForm, OfferingForm, TermDetails, UNIT_COLUMNS } from './TermEntry'
 
+const ROOM_TYPE_NAMES: Record<RoomType, string> = { lecture_hall: 'Lecture hall', lab: 'Lab', seminar: 'Seminar' }
+
 const TABS = [
   ['setup', 'Term details'],
+  ['departments', 'Departments'],
   ['rows', 'Class rows'],
   ['units', 'Units and groups'],
   ['runs', 'Generate'],
@@ -69,6 +75,7 @@ export function TermPage() {
           <SetupTab termId={termId} fromSmarttt={Boolean(term.data.smarttt_term_id)} />
         </div>
       )}
+      {tab === 'departments' && <DepartmentSubmissions termId={termId} />}
       {tab === 'rows' && <RowsTab termId={termId} />}
       {tab === 'units' && <UnitsTab termId={termId} />}
       {tab === 'runs' && <RunsTab termId={termId} />}
@@ -153,13 +160,31 @@ function RowsTab({ termId }: { termId: string }) {
   const patch = usePatchRow(termId)
   const remove = useDeleteClassRow(termId)
   const bulk = useBulkClassRows(termId)
+  const offerings = useOfferings(termId)
   const departments = useDepartments()
   const deptCode = new Map((departments.data ?? []).map((d) => [d.id, d.code]))
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<ClassRow | null>(null)
   const [form, setForm] = useState<ClassRow | 'new' | null>(null)
   const [pasting, setPasting] = useState(false)
+  const [deleted, setDeleted] = useState<string | null>(null)
   const shown = (rows.data ?? []).filter((r) => r.label.toLowerCase().includes(query.trim().toLowerCase()))
+
+  const confirmDelete = (r: ClassRow) => {
+    const taken = (offerings.data ?? []).filter((o) => o.class_row_ids.includes(r.id))
+    const only = taken.filter((o) => o.class_row_ids.length === 1).map((o) => o.unit_code)
+    const shared = taken.filter((o) => o.class_row_ids.length > 1).map((o) => o.unit_code)
+    const lines = [`Delete ${r.label}?`]
+    if (only.length) lines.push(`This also deletes ${only.length === 1 ? 'its unit' : `its ${only.length} units`}: ${only.join(', ')}.`)
+    if (shared.length) lines.push(`It is taken off ${shared.join(', ')}, which other class rows keep.`)
+    if (taken.length) lines.push('Draft timetables lose these classes; approved versions do not change.')
+    if (!window.confirm(lines.join('\n\n'))) return
+    setDeleted(null)
+    remove.mutate(r.id, {
+      onSuccess: (result) => setDeleted(`Deleted ${r.label}${result.units_deleted.length
+        ? ` and ${result.units_deleted.length === 1 ? 'its unit' : `${result.units_deleted.length} units`} (${result.units_deleted.join(', ')})` : ''}.`),
+    })
+  }
 
   return (
     <div className="space-y-3">
@@ -172,6 +197,7 @@ function RowsTab({ termId }: { termId: string }) {
         </div>
       </div>
       {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
+      {deleted && <p role="status" className="text-sm text-success">{deleted}</p>}
       <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
@@ -183,21 +209,23 @@ function RowsTab({ termId }: { termId: string }) {
             )}
             {shown.map((r) => (
               <tr key={r.id} className="border-t border-line">
-                <td className="px-3 py-2 font-medium">{r.label}</td>
+                <td className="px-3 py-2 font-medium">{r.label}{r.from_allocator && <span className="ml-1 rounded bg-brand-soft px-1 text-xs text-brand-ink" title="Entered by its department; edit it in the Allocator">from the Allocator</span>}</td>
                 <td className="px-3 py-2 text-muted">{r.department_id != null ? deptCode.get(r.department_id) ?? '?' : '—'}</td>
                 <td className="px-3 py-2">
-                  <input type="number" min={0} defaultValue={r.student_count ?? ''} aria-label={`Students in ${r.label}`}
+                  {r.from_allocator ? r.student_count : <input type="number" min={0} defaultValue={r.student_count ?? ''} aria-label={`Students in ${r.label}`}
                     onBlur={(e) => {
                       const v = e.target.value === '' ? null : Number(e.target.value)
                       if (v !== null && v !== r.student_count) patch.mutate({ id: r.id, body: { student_count: v } })
                     }}
-                    className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />
+                    className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2 text-muted">{r.unavailable.length ? `${r.unavailable.length} hours` : '—'}</td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
                   <button onClick={() => setEditing(r)} className="text-brand-ink">Unavailable hours</button>
-                  <button onClick={() => setForm(r)} className="text-brand-ink">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${r.label}?`)) remove.mutate(r.id) }} className="text-danger">Delete</button>
+                  {!r.from_allocator && <button onClick={() => setForm(r)} className="text-brand-ink">Edit</button>}
+                  {!r.from_allocator && (
+                    <button onClick={() => confirmDelete(r)} disabled={remove.isPending} className="text-danger disabled:opacity-50">Delete</button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -288,25 +316,25 @@ function UnitsTab({ termId }: { termId: string }) {
             )}
             {shown.map((o) => (
               <tr key={o.id} className="border-t border-line">
-                <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span><span className="block text-muted">{o.unit_name}</span></td>
+                <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span>{o.from_allocator && <span className="ml-1 rounded bg-brand-soft px-1 text-xs text-brand-ink" title="Entered by its department; edit it in the Allocator">from the Allocator</span>}<span className="block text-muted">{o.unit_name}</span></td>
                 <td className="px-3 py-2 text-muted">{deptCode.get(o.department_id) ?? '?'}</td>
                 <td className="px-3 py-2 text-muted">{o.class_rows.join(', ')}</td>
                 <td className="px-3 py-2">
-                  <input type="number" min={1} max={20} defaultValue={o.weekly_hours ?? ''} aria-label={`Weekly hours of ${o.unit_code}`}
+                  {o.from_allocator ? o.weekly_hours : <input type="number" min={1} max={20} defaultValue={o.weekly_hours ?? ''} aria-label={`Weekly hours of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.weekly_hours && patch.mutate({ id: o.id, body: { weekly_hours: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-md border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />
+                    className={clsx('w-16 rounded-md border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2">
-                  <input type="number" min={1} max={6} defaultValue={o.session_length ?? ''} aria-label={`Session length of ${o.unit_code}`}
+                  {o.from_allocator ? o.session_length : <input type="number" min={1} max={6} defaultValue={o.session_length ?? ''} aria-label={`Session length of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.session_length && patch.mutate({ id: o.id, body: { session_length: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-md border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />
+                    className={clsx('w-16 rounded-md border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2">
-                  <select value={o.room_type} aria-label={`Room type of ${o.unit_code}`}
+                  {o.from_allocator ? ROOM_TYPE_NAMES[o.room_type] : <select value={o.room_type} aria-label={`Room type of ${o.unit_code}`}
                     onChange={(e) => patch.mutate({ id: o.id, body: { room_type: e.target.value as RoomType } })}
                     className="rounded-md border border-line px-2 py-1">
                     <option value="lecture_hall">Lecture hall</option><option value="lab">Lab</option><option value="seminar">Seminar</option>
-                  </select>
+                  </select>}
                 </td>
                 <td className="px-3 py-2">
                   <button onClick={() => setOpen(o)} className={clsx(o.groups.length ? 'text-brand-ink' : 'text-warning')}>
@@ -314,8 +342,12 @@ function UnitsTab({ termId }: { termId: string }) {
                   </button>
                 </td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
-                  <button onClick={() => setForm(o)} className="text-brand-ink">Edit</button>
-                  <button onClick={() => { if (window.confirm(`Delete ${o.unit_code}?`)) remove.mutate(o.id) }} className="text-danger">Delete</button>
+                  {!o.from_allocator && <button onClick={() => setForm(o)} className="text-brand-ink">Edit</button>}
+                  {!o.from_allocator && (
+                    <button onClick={() => {
+                      if (window.confirm(`Delete ${o.unit_code}?\n\nDraft timetables lose its classes; approved versions do not change.`)) remove.mutate(o.id)
+                    }} disabled={remove.isPending} className="text-danger disabled:opacity-50">Delete</button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -344,20 +376,27 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
     <div role="dialog" aria-modal="true" aria-label={`Groups of ${offering.unit_code}`} className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 px-4">
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-card p-5 shadow-xl">
         <h2 className="text-lg font-semibold">{offering.unit_code} groups</h2>
-        <p className="text-sm text-muted">You decide the split. Each group is one class with its own room and lecturer.</p>
+        <p className="text-sm text-muted">
+          {offering.from_allocator
+            ? 'Its department decided the split and the lecturers in the Allocator; change them there.'
+            : 'You decide the split. Each group is one class with its own room and lecturer.'}
+        </p>
         <ul className="mt-3 space-y-2">
           {offering.groups.map((g) => (
             <li key={g.id} className="flex items-start justify-between rounded-md border border-line p-2 text-sm">
               <span><b>{g.label || 'Whole class'}</b> · {g.student_count} students
-                <span className="block text-muted">{g.members.map((m) => `${m.label} (${m.students})`).join(', ')}</span></span>
-              <span className="flex gap-2">
-                <button onClick={() => setDraft(g)} className="text-brand-ink">Edit</button>
-                <button onClick={() => remove.mutate(g.id)} className="text-danger">Remove</button>
-              </span>
+                <span className="block text-muted">{g.members.map((m) => `${m.label} (${m.students})`).join(', ')}</span>
+                {g.lecturer_name && <span className="block">{g.lecturer_name}{g.lecturer_staff_number ? ` · ${g.lecturer_staff_number}` : ''}</span>}</span>
+              {!offering.from_allocator && (
+                <span className="flex gap-2">
+                  <button onClick={() => setDraft(g)} className="text-brand-ink">Edit</button>
+                  <button onClick={() => remove.mutate(g.id)} className="text-danger">Remove</button>
+                </span>
+              )}
             </li>
           ))}
         </ul>
-        <button onClick={() => setDraft(blank())} className="mt-2 text-sm text-brand-ink">+ Add a group</button>
+        {!offering.from_allocator && <button onClick={() => setDraft(blank())} className="mt-2 text-sm text-brand-ink">+ Add a group</button>}
 
         {draft && (
           <div className="mt-4 space-y-2 rounded-md border border-line p-3 text-sm">
@@ -484,10 +523,14 @@ function DraftsTab({ termId }: { termId: string }) {
                   {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
                 </button>
               )}
-              <span className="flex gap-3">
-                Download: <a href={exportUrl(p.draft_id, 'row', 'pdf')} className="text-brand-ink">PDF</a>
-                <a href={exportUrl(p.draft_id, 'row', 'docx')} className="text-brand-ink">Word</a>
-                <a href={exportUrl(p.draft_id, 'row', 'xlsx')} className="text-brand-ink">Excel</a>
+              <span className="flex flex-wrap items-center gap-3">
+                Download:
+                {([['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']] as const).map(([format, label]) => (
+                  <a key={format} href={exportUrl(p.draft_id, 'row', format)} className="inline-flex items-center gap-1 text-brand-ink">
+                    <Download size={14} aria-hidden /> {label}
+                  </a>
+                ))}
+                <PrintButton draftId={p.draft_id} />
               </span>
             </li>
           ))}
@@ -496,5 +539,24 @@ function DraftsTab({ termId }: { termId: string }) {
         {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
       </section>
     </div>
+  )
+}
+
+
+/** Prints the approved version as the PDF download lays it out (by class row). */
+function PrintButton({ draftId }: { draftId: string }) {
+  const [state, setState] = useState<'idle' | 'preparing' | 'failed'>('idle')
+  const print = () => {
+    setState('preparing')
+    printPdf(`/drafts/${draftId}/export.pdf?view=row`).then(() => setState('idle'), () => setState('failed'))
+  }
+  return (
+    <>
+      <button type="button" onClick={print} disabled={state === 'preparing'}
+        className="inline-flex items-center gap-1 text-brand-ink disabled:opacity-60">
+        <Printer size={14} aria-hidden /> {state === 'preparing' ? 'Preparing…' : 'Print'}
+      </button>
+      {state === 'failed' && <span role="alert" className="text-danger">Couldn't prepare the timetable to print. Try again, or download the PDF.</span>}
+    </>
   )
 }

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import Identity
 from app.errors import ApiError
 from app.models import ClassRow, DraftSession, Group, GroupClassRow, Term, UnitOffering
-from app.services.setup import audit, latest_snapshot
+from app.services.setup import audit, latest_snapshot, require_local
 from app.solver.groups import RowDemand, propose
 
 
@@ -47,8 +47,8 @@ def propose_groups(db: Session, identity: Identity, term: Term, replace: bool) -
     proposed, skipped = 0, []
 
     for offering in db.scalars(select(UnitOffering).where(UnitOffering.term_id == term.id)):
-        if offering.groups and not replace:
-            continue
+        if offering.allocator_ref or (offering.groups and not replace):
+            continue  # a unit from the Allocator is split by its department
         members = [rows[link.class_row_id] for link in offering.class_rows if link.class_row_id in rows]
         missing = [r.label for r in members if r.student_count is None]
         if not members or missing:
@@ -94,6 +94,7 @@ def replace_group(
     groups (GR A, GR B, ...), never both: naming a group retires the whole
     class, and the whole class can't come back while groups exist.
     """
+    require_local(offering)
     allowed = {link.class_row_id for link in offering.class_rows}
     unknown = [str(row_id) for row_id, _n in members if row_id not in allowed]
     if unknown:

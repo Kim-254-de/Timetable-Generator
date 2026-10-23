@@ -78,10 +78,11 @@ def check(problem: Problem, placements: dict[str, Placement]) -> list[Violation]
                 if row is not None and t in row.unavailable:
                     out.append(Violation("H8", f"{row.label} is unavailable on {_when(t)} ({s.label}).", (s.key,)))
                 row_use[(row_id, t)][s.offering_id][s.group_id].append(s.key)
-            dept_use[(s.department_id, t)] += 1
-            dept_keys[(s.department_id, t)].append(s.key)
             if s.lecturer_id:
                 lecturer_use[(s.lecturer_id, t)].append(s.key)
+            else:
+                dept_use[(s.department_id, t)] += 1
+                dept_keys[(s.department_id, t)].append(s.key)
 
     for (room_id, t), keys in room_use.items():
         if len(keys) > 1:
@@ -101,10 +102,15 @@ def check(problem: Problem, placements: dict[str, Placement]) -> list[Violation]
                     tuple(dept_keys[(dept, t)]),
                 )
             )
-    for (_lecturer, t), keys in lecturer_use.items():
+    names = {s.lecturer_id: s.lecturer_name or s.lecturer_id for s in problem.sessions if s.lecturer_id}
+    for (lecturer, t), keys in lecturer_use.items():
         if len(keys) > 1:
             out.append(
-                Violation("H13", f"An allocated lecturer would teach {len(keys)} classes on {_when(t)}.", tuple(keys))
+                Violation(
+                    "H13",
+                    f"{names.get(lecturer, lecturer)} would teach {len(keys)} classes on {_when(t)}.",
+                    tuple(keys),
+                )
             )
     return _dedupe(out)
 

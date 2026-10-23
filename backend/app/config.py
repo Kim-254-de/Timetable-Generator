@@ -40,10 +40,16 @@ class Settings(BaseSettings):
     # Departments are re-read from Attendance at most this often when listed.
     department_sync_seconds: int = 60
 
-    # The Timetable Allocator reads units, groups and published meetings with
-    # this key (X-API-Key); it must equal GENERATOR_API_KEY in the Allocator.
-    # Unset = the Allocator can't connect.
+    # The Timetable Allocator reads terms and published times with this key
+    # (X-API-Key); it must equal GENERATOR_API_KEY in the Allocator. Unset =
+    # the Allocator can't connect.
     allocator_api_key: str = ""
+    # Where departments publish their teaching, read by "Import published
+    # departments" with ALLOCATOR_CLIENT_KEY, which must equal
+    # GENERATOR_INBOUND_KEY in the Allocator.
+    allocator_base_url: str = "http://localhost:8001"
+    allocator_client_key: str = ""
+    allocator_timeout_seconds: float = 30.0
 
     session_cookie_name: str = "tg_session"
     # Distinct from the Allocator's, so both apps can be signed in on one host.

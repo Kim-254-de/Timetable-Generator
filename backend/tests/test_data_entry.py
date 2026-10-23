@@ -204,7 +204,7 @@ def test_director_enters_everything_and_downloads(client, smarttt, db):
     assert any("COSC 103" in c.text and "GR A" in c.text for row in table.rows for c in row.cells)
 
 
-def test_allocator_reads_units_groups_and_meetings(client, smarttt):
+def test_allocator_reads_terms_and_published_times(client, smarttt):
     sign_in(client)
     term = enter_term(client)
     no_key = client.get("/api/integrations/allocator/terms")
@@ -213,29 +213,57 @@ def test_allocator_reads_units_groups_and_meetings(client, smarttt):
     terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
     assert terms[0]["id"] == term["id"] and terms[0]["published_version"] is None
 
-    before = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
-    keys = {s["key"]: s for s in before["sections"]}
-    assert set(keys) == {"COSC100-MAIN", "COSC103-GRA", "COSC103-GRB", "COSC103-GRC"}
-    assert keys["COSC103-GRA"]["department"]["code"] == "DCOMP"
-    assert keys["COSC103-GRA"]["class_rows"][0]["department"]["code"] == "DEDU"  # servicing
-    assert keys["COSC103-GRA"]["meetings"] == []  # nothing published yet
+    before = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/times", headers=headers))
+    assert before == {"published_version": None, "classes": {}}  # nothing published yet
 
     draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
-    after = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
+    after = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/times", headers=headers))
     assert after["published_version"] == 1
-    meeting = next(s for s in after["sections"] if s["key"] == "COSC103-GRB")["meetings"][0]
+    assert set(after["classes"]) == {"COSC100-MAIN", "COSC103-GRA", "COSC103-GRB", "COSC103-GRC"}
+    meeting = after["classes"]["COSC103-GRB"][0]
     assert meeting["room"] in {"UTC 1", "STB 1", "STB 2", "STB 3"}
     assert int(meeting["end_time"][:2]) - int(meeting["start_time"][:2]) == 3
+
+
+def test_deleting_a_class_row_deletes_the_units_only_it_takes(client, smarttt):
+    sign_in(client)
+    term = enter_term(client)
+    draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
+    ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
+    rows = {r["label"]: r["id"] for r in ok(client.get(f"/api/terms/{term['id']}/class-rows"))}
+
+    # COSC 100 is taken by BSC.COMP SCI alone, so it goes with the row and out of the draft.
+    gone = ok(client.delete(f"/api/class-rows/{rows['BSC.COMP SCI Y1S1']}"))
+    assert gone == {"units_deleted": ["COSC 100"], "units_kept": []}
+    # COSC 103 is shared: BED.MATH/BIO leaves it and its GR C goes; GR A and GR B stay.
+    left = ok(client.delete(f"/api/class-rows/{rows['BED.MATH/BIO Y1S1']}"))
+    assert left == {"units_deleted": [], "units_kept": ["COSC 103"]}
+
+    units = ok(client.get(f"/api/terms/{term['id']}/offerings"))
+    assert [u["unit_code"] for u in units] == ["COSC 103"]
+    assert [g["label"] for g in units[0]["groups"]] == ["GR A", "GR B"]
+    assert "BED.MATH/BIO Y1S1" not in units[0]["class_rows"]
+    # The approved version still shows what was approved.
+    grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
+    assert grid["as_approved"] is True
+    assert {c["unit_code"] for e in grid["entities"] for c in e["cells"]} == {"COSC 100", "COSC 103"}
+
+
+def test_deleting_a_unit_takes_it_out_of_the_drafts(client, smarttt):
+    sign_in(client)
+    term = enter_term(client)
+    draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
+    cosc103 = next(u for u in ok(client.get(f"/api/terms/{term['id']}/offerings")) if u["unit_code"] == "COSC 103")
+    ok(client.delete(f"/api/offerings/{cosc103['id']}"))
+    grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
+    assert {c["unit_code"] for e in grid["entities"] for c in e["cells"]} == {"COSC 100"}
+    assert len(ok(client.get(f"/api/terms/{term['id']}/class-rows"))) == 4  # the class rows stay
 
 
 def test_deleting_what_is_in_use_is_refused(client, smarttt):
     sign_in(client)
     term = enter_term(client)
-    rows = ok(client.get(f"/api/terms/{term['id']}/class-rows"))
-    in_use = next(r for r in rows if r["label"] == "BSC.COMP SCI Y1S1")
-    refused = client.delete(f"/api/class-rows/{in_use['id']}")
-    assert refused.status_code == 409 and refused.json()["error"]["code"] == "IN_USE"
 
     departments = {d["code"]: d for d in ok(client.get("/api/departments"))["departments"]}
     assert client.delete(f"/api/departments/{departments['DCOMP']['id']}").status_code == 409
@@ -380,7 +408,6 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
     """COSC 100 starts as one whole class; once split into GR A/GR B it no longer appears on its own."""
     sign_in(client)
     term = enter_term(client)
-    headers = {"X-API-Key": "test-allocator-key"}
     draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
     cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
@@ -396,8 +423,7 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
     cosc100 = next(o for o in ok(client.get(f"/api/terms/{term['id']}/offerings")) if o["unit_code"] == "COSC 100")
     assert [g["label"] for g in cosc100["groups"]] == ["GR A", "GR B"]
 
-    # The approved version still reads as approved; the next draft needs the groups (it is out of date),
-    # and the Allocator sees only the groups.
+    # The approved version still reads as approved; the next draft needs the groups (it is out of date).
     grid = ok(client.get(f"/api/drafts/{draft_id}?view=row"))
     assert grid["as_approved"] is True
     assert any(c["unit_code"] == "COSC 100" and c["group"] == "" for e in grid["entities"] for c in e["cells"])
@@ -406,8 +432,6 @@ def test_naming_a_group_replaces_the_whole_class(client, smarttt):
         "COSC100-GRA-1",
         "COSC100-GRB-1",
     }
-    sections = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/sections", headers=headers))
-    assert {s["key"] for s in sections["sections"] if s["unit_code"] == "COSC 100"} == {"COSC100-GRA", "COSC100-GRB"}
 
     # The whole class can't come back beside its groups.
     again = client.post(

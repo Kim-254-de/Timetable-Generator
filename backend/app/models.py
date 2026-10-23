@@ -5,9 +5,13 @@ class rows, unit offerings and their groups, snapshots of that data taken for
 each solver run, drafts and their sessions, publications, the audit trail,
 and sign-in sessions.
 
-The Directorate enters everything the solver needs in the Generator. SMARTTT
-is optional: "Import from SMARTTT" pre-fills the same tables, and publishing
-sends the finished timetable there.
+Departments enter their class rows (courses), units and groups, with each
+group's lecturer, in the Timetable Allocator and publish them; the Director
+imports what is published ("Import published departments"), and those rows
+carry `allocator_ref` and are edited only in the Allocator. The Director adds
+the lecture halls, generates and publishes. SMARTTT is optional: "Import from
+SMARTTT" pre-fills the same tables, and publishing sends the finished
+timetable there, lecturers included.
 """
 
 from __future__ import annotations
@@ -161,6 +165,8 @@ class ClassRow(Base):
     student_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Slots (0-59) this class row can't be taught, e.g. teaching practice.
     unavailable: Mapped[list[int]] = mapped_column(JSON, default=list)
+    # The Allocator's course this row was imported from; None for a row entered here.
+    allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
 
 class UnitOffering(Base):
@@ -180,7 +186,9 @@ class UnitOffering(Base):
     weekly_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     session_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     room_type: Mapped[str] = mapped_column(String(30), default="lecture_hall")
-    source: Mapped[str] = mapped_column(String(30))  # curriculum | published | manual
+    source: Mapped[str] = mapped_column(String(30))  # curriculum | published | manual | allocator
+    # The Allocator's unit this offering was imported from; None for one entered here.
+    allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
     class_rows: Mapped[list[OfferingClassRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
     groups: Mapped[list[Group]] = relationship(cascade="all, delete-orphan", lazy="selectin", order_by="Group.label")
@@ -205,7 +213,11 @@ class OfferingClassRow(Base):
 
 
 class Group(Base):
-    """One class of an offering ("GR A"; "" when the unit isn't split). The Director decides the split."""
+    """
+    One class of an offering ("GR A"; "" when the unit isn't split). Imported
+    from the Allocator, the department decided the split and gave the
+    lecturer, who is known by staff number to the solver (rule H13) and SMARTTT.
+    """
 
     __tablename__ = "groups"
     __table_args__ = (UniqueConstraint("offering_id", "label", name="uq_group_label"),)
@@ -213,6 +225,13 @@ class Group(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     offering_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("unit_offerings.id", ondelete="CASCADE"), index=True)
     label: Mapped[str] = mapped_column(String(50), default="")
+    allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    lecturer_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lecturer_name: Mapped[str] = mapped_column(String(255), default="")
+    # Semester hours as on the department's allocation form, for the downloads.
+    lecture_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    practical_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cf_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     members: Mapped[list[GroupClassRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
     @property
@@ -237,6 +256,9 @@ class Run(Base):
     snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("snapshots.id", ondelete="RESTRICT"))
     mode: Mapped[RunMode] = mapped_column(_enum(RunMode, "run_mode"))
     base_draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("drafts.id", ondelete="SET NULL"), nullable=True)
+    # A re-solve that keeps every class of the published timetable where it is
+    # (a late department imported after publishing).
+    keep_published: Mapped[bool] = mapped_column(Boolean, default=False)
     weights: Mapped[dict[str, int]] = mapped_column(JSON)
     time_limit_s: Mapped[int] = mapped_column(Integer)
     status: Mapped[RunStatus] = mapped_column(_enum(RunStatus, "run_status"), default=RunStatus.QUEUED)
@@ -304,6 +326,22 @@ class Publication(Base):
     # show them. Empty for versions approved before these were kept.
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     record: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+
+
+class DepartmentImport(Base):
+    """The last import of a department's published teaching into a term, and what it brought."""
+
+    __tablename__ = "department_imports"
+    __table_args__ = (UniqueConstraint("term_id", "department_code", name="uq_department_import"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
+    department_code: Mapped[str] = mapped_column(String(32))
+    # When the department published what was imported (the Allocator's time).
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    imported_by: Mapped[str] = mapped_column(String(255))
+    changes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
 class AuditLog(Base):

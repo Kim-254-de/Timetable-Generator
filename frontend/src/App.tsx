@@ -3,6 +3,7 @@ import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigat
 import { AxiosError } from 'axios'
 import clsx from 'clsx'
 import { Field, inputClass } from '@/components/Dialog'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { errorMessage } from '@/lib/api'
 import { termText } from '@/lib/format'
 import { readLastTerm } from '@/lib/lastTerm'
@@ -65,6 +66,7 @@ function Layout() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
+            <ThemeToggle />
             <span className="text-brand-100">{me.data?.full_name}</span>
             <button onClick={() => logout.mutate()} className="font-medium text-gold-500 hover:underline">Sign out</button>
           </div>
