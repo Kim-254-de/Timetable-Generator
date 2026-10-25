@@ -67,6 +67,14 @@ class AllocatorClient:
         """Published departments (courses, units, groups with lecturers) and the ones not published yet."""
         return dict(self._get(f"/terms/{term_id}/submissions") or {})
 
+    def exams(self, term_id: str) -> dict[str, Any]:
+        """Published exam papers (with the class rows sitting them) and practicals, and who hasn't published."""
+        return dict(self._get(f"/terms/{term_id}/exams") or {})
+
+    def invigilators(self, term_id: str) -> dict[str, Any]:
+        """Who invigilates each paper of the shared exam draft: {paper ref: {room code or "": {staff_number, name}}}."""
+        return dict(self._get(f"/terms/{term_id}/invigilators") or {})
+
 
 _client: AllocatorClient | None = None
 _client_lock = threading.Lock()

@@ -15,6 +15,8 @@ const COLUMNS: BulkColumn[] = [
   { key: 'capacity', label: 'Capacity', example: '120', required: true },
   { key: 'room_type', label: 'Room type', example: 'Lecture hall', hint: 'Lecture hall, Lab or Seminar room' },
   { key: 'available', label: 'Available', example: 'Yes', hint: 'Yes or No (a closed room is never used)' },
+  { key: 'exam_seats', label: 'Exam seats', example: '', hint: "Blank: capacity x the term's spacing (0.9)." },
+  { key: 'for_exams', label: 'For exams', example: 'Yes', hint: 'No keeps the room out of exams.' },
 ]
 
 /** The Directorate's list of lecture halls, labs and seminar rooms, shared by every term. */
@@ -57,7 +59,8 @@ export function RoomsPage() {
           <thead className="bg-surface text-xs uppercase text-muted">
             <tr>
               <th className="px-3 py-2">Code</th><th className="px-3 py-2">Building</th><th className="px-3 py-2">Capacity</th>
-              <th className="px-3 py-2">Type</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">Blocked hours</th><th />
+              <th className="px-3 py-2">Type</th><th className="px-3 py-2">Available</th><th className="px-3 py-2">Blocked hours</th>
+              <th className="px-3 py-2" title="Blank: capacity x the term's spacing">Exam seats</th><th />
             </tr>
           </thead>
           <tbody>
@@ -71,6 +74,7 @@ export function RoomsPage() {
                 <td className="px-3 py-2">
                   <button onClick={() => setHours(r)} className="text-brand-ink">{r.unavailable.length ? `${r.unavailable.length} hours` : 'None'}</button>
                 </td>
+                <td className="px-3 py-2">{r.for_exams ? (r.exam_seats ?? <span className="text-muted">× spacing</span>) : <span className="text-muted">Not for exams</span>}</td>
                 <td className="space-x-3 px-3 py-2 text-right">
                   <button onClick={() => setEditing(r)} className="text-brand-ink">Edit</button>
                   <button onClick={() => { if (window.confirm(`Delete ${r.code}?`)) remove.mutate(r.id) }} className="text-danger"
@@ -107,10 +111,12 @@ function RoomForm({ room, onClose }: { room: RoomRecord | null; onClose: () => v
     capacity: room?.capacity ?? 100,
     room_type: room?.room_type ?? 'lecture_hall',
     active: room?.active ?? true,
+    exam_seats: room?.exam_seats ?? null,
+    for_exams: room?.for_exams ?? true,
   })
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    save.mutate({ id: room?.id, body: form }, { onSuccess: onClose })
+    save.mutate({ id: room?.id, body: { ...form, exam_seats: form.exam_seats || (room ? 0 : null) } }, { onSuccess: onClose })
   }
   return (
     <Dialog title={room ? `Edit ${room.code}` : 'Add a lecture hall'} onClose={onClose}>
@@ -131,6 +137,16 @@ function RoomForm({ room, onClose }: { room: RoomRecord | null; onClose: () => v
           <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
           Available for teaching
         </label>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Exam seats" hint="Blank: capacity x the term's spacing (0.9).">
+            <input type="number" min={1} max={5000} value={form.exam_seats ?? ''}
+              onChange={(e) => setForm({ ...form, exam_seats: e.target.value === '' ? null : Number(e.target.value) })} className={inputClass} />
+          </Field>
+          <label className="mt-6 flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.for_exams} onChange={(e) => setForm({ ...form, for_exams: e.target.checked })} />
+            Used for exams
+          </label>
+        </div>
         {save.isError && <p role="alert" className="text-sm text-danger">{errorMessage(save.error)}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>

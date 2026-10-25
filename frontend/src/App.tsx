@@ -10,6 +10,7 @@ import { readLastTerm } from '@/lib/lastTerm'
 import { useCreateTerm, useLogin, useLogout, useMe, useOpenTerm, useSmartttTerms, useTerms } from '@/lib/queries'
 import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { DraftPage } from '@/pages/DraftPage'
+import { ExamDraftPage } from '@/pages/ExamDraftPage'
 import { RoomsPage } from '@/pages/RoomsPage'
 import { TermPage } from '@/pages/TermPage'
 
@@ -29,6 +30,7 @@ export function App() {
         <Route path="departments" element={<DepartmentsPage />} />
         <Route path="terms/:termId" element={<TermPage />} />
         <Route path="terms/:termId/drafts/:draftId" element={<DraftPage />} />
+        <Route path="terms/:termId/exam-drafts/:draftId" element={<ExamDraftPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
