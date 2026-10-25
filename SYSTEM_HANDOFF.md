@@ -28,6 +28,11 @@ below that describes the Allocator is history.
   lock on their own. The Generator reads `.../terms/{term}/exams` and
   `.../invigilators` from Attendance and serves the shared draft at
   `/api/integrations/attendance/terms/{id}/exam-draft`.
+- **Signing in to the Generator**: the timetabling office is invited by an
+  administrator in Attendance (role `TIMETABLING`, migration 042) and signs in
+  at the Generator, which checks the login with Attendance
+  (`/api/v1/integrations/generator/authenticate` and `/identity`). The SMARTTT
+  `generator/authenticate|identity` endpoints (never built) are no longer needed.
 - **The Generator imports** what is published from Attendance:
   `GET /api/v1/integrations/generator/terms/{term}/submissions`, the same
   JSON the Allocator served (`app/clients/teaching.py`,

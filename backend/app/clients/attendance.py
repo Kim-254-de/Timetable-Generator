@@ -91,6 +91,47 @@ class AttendanceClient:
             logger.error("Attendance departments answer could not be read: %s", exc)
             raise AttendanceError() from exc
 
+    # -- sign-in: the timetabling office is invited in Attendance ------------------------------
+
+    def _auth_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        if not self.enabled:
+            raise AttendanceError()
+        try:
+            response = self._http.request(method, PREFIX + path, **kwargs)
+        except httpx.HTTPError as exc:
+            logger.warning("Attendance %s failed: %s", path, exc)
+            raise AttendanceError() from exc
+        if response.status_code in (401, 403):
+            logger.error("Attendance refused the Generator's key (%s)", response.status_code)
+            raise AttendanceMisconfigured()
+        if response.status_code >= 500:
+            raise AttendanceError()
+        return response
+
+    @staticmethod
+    def _data(response: httpx.Response) -> Any:
+        body: Any = response.json()
+        return body.get("data") if isinstance(body, dict) and "success" in body else body
+
+    def authenticate(self, identifier: str, password: str) -> dict[str, Any] | None:
+        """{account, timetabling_office} for a right login of an active Attendance account, else None."""
+        response = self._auth_request("POST", "/authenticate", json={"identifier": identifier, "password": password})
+        if response.status_code >= 400:
+            raise AttendanceError()
+        data = dict(self._data(response) or {})
+        if not data.pop("authenticated", False):
+            return None
+        return data
+
+    def identity(self, account_id: str) -> dict[str, Any] | None:
+        """The account's {account, timetabling_office} now; None once it is gone or no longer active."""
+        response = self._auth_request("GET", "/identity", params={"account_id": account_id})
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            raise AttendanceError()
+        return dict(self._data(response) or {})
+
 
 _client: AttendanceClient | None = None
 _client_lock = threading.Lock()

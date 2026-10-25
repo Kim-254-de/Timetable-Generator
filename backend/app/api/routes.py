@@ -104,9 +104,9 @@ async def read_spreadsheet(request: Request, identity: Me) -> dict[str, Any]:
 
 @router.post("/auth/login")
 def login(
-    body: LoginBody, request: Request, response: Response, db: Db, smarttt: Smarttt, settings: Cfg
+    body: LoginBody, request: Request, response: Response, db: Db, attendance: Attendance, settings: Cfg
 ) -> dict[str, Any]:
-    return ok(sign_in(db, response, request, body.identifier, body.password, smarttt, settings).public())
+    return ok(sign_in(db, response, request, body.identifier, body.password, attendance, settings).public())
 
 
 @router.post("/auth/logout")

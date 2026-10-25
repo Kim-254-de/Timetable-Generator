@@ -155,20 +155,6 @@ class FakeSmarttt:
         self.refuse_publish: dict[str, Any] | None = None
         self.down = False  # True: SMARTTT can't be reached
 
-    def identity(self, account: str, office: bool) -> dict[str, Any]:
-        return {
-            "account": {
-                "id": account,
-                "role": "admin",
-                "university_id": "STF/0900",
-                "email": None,
-                "full_name": "Dee Director" if office else "Lee Lecturer",
-                "is_active": True,
-            },
-            "timetabling_office": office,
-            "departments": [],
-        }
-
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
 
@@ -179,17 +165,6 @@ class FakeSmarttt:
             return httpx.Response(403, json={"detail": "A valid X-API-Key header is required."})
         route = request.url.path[len(PREFIX) :]
         body = json.loads(request.content) if request.content else {}
-        params = dict(request.url.params)
-        if route == "/authenticate/":
-            if body.get("password") != "right-password":
-                return httpx.Response(200, json={"authenticated": False})
-            office = body.get("identifier") == "director"
-            return httpx.Response(
-                200, json={"authenticated": True, **self.identity(DIRECTOR if office else LECTURER_ACCOUNT, office)}
-            )
-        if route == "/identity/":
-            office = params.get("account_id") == DIRECTOR
-            return httpx.Response(200, json=self.identity(params["account_id"], office))
         if route == "/terms/":
             return httpx.Response(200, json={"terms": [TERM]})
         if route == "/snapshot/":

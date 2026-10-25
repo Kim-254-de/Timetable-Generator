@@ -265,5 +265,13 @@ cd backend && uv pip compile pyproject.toml --python-version 3.12 \n  --python-p
 
 ## Access
 
-Only members of SMARTTT's `timetabling_office` group (the Directorate) can sign
-in.
+Only the Directorate of Examinations and Timetabling (the timetabling office)
+can sign in. An administrator invites each person from Smart Attendance's admin
+console (Officers, role "Timetabling office"), like any other officer; they
+choose a password from the emailed link and sign in here with that email and
+password. The Generator checks the login with Attendance
+(`POST /api/v1/integrations/generator/authenticate`, the shared key) and
+re-checks the account every `IDENTITY_REFRESH_SECONDS` (`GET .../identity`), so
+someone the administrator removes loses access within minutes. Set
+`GENERATOR_WEB_URL` in Attendance to this web app's address, for the
+invitation email.
