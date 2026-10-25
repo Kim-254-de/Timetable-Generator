@@ -321,12 +321,12 @@ def snapshot_summary(snapshot: Snapshot) -> dict[str, Any]:
 
 
 def require_local(obj: Any) -> None:
-    """Class rows, units and groups imported from the Allocator are edited there, by their department."""
+    """Class rows, units and groups imported from a department's Teaching page are edited there, by the department."""
     if getattr(obj, "allocator_ref", None):
         raise ApiError(
             409,
             "FROM_ALLOCATOR",
-            "This comes from the department's list in the Timetable Allocator; edit it there.",
+            "This comes from the department's Teaching page in Smart Attendance; the department edits it there.",
         )
 
 

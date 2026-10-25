@@ -145,7 +145,7 @@ export const useDeleteRoom = () => useMasterMutation(keys.roomList, (id: string)
 export const useBulkRooms = () =>
   useMasterMutation(keys.roomList, (rows: Record<string, string>[]) => post<BulkResult>('/rooms/bulk', { rows }))
 
-/** The Generator's own fields; a department's name and school come from Smart Attendance. */
+/** The Generator's own fields; a department's name, and its code when it has one there, come from Smart Attendance. */
 export interface DepartmentInput {
   code?: string
   lecturer_count?: number | null
@@ -274,7 +274,7 @@ export const useResolve = (termId: string, draftId: string) =>
   useTermMutation(termId, ({ time_limit_s, keep_published }: { time_limit_s: number; keep_published: boolean }) =>
     post<Run>(`/drafts/${draftId}/resolve`, { time_limit_s, keep_published }))
 
-// -- departments' teaching, from the Allocator ------------------------------------------------
+// -- departments' teaching, from Smart Attendance ------------------------------------------------
 
 export const useDepartmentStatus = (termId: string) =>
   useQuery({ queryKey: keys.submissions(termId), queryFn: () => get<DepartmentStatus>(`/terms/${termId}/departments`), retry: false })

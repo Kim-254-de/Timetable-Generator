@@ -3,9 +3,10 @@ Client for Smart Attendance's Generator endpoint
 (/api/v1/integrations/generator/), authenticated with this system's own key
 (X-API-Key = ATTENDANCE_API_KEY here, GENERATOR_API_KEY there).
 
-Faculty officers create the university's departments in Attendance (which
-creates them in SMARTTT first); the Generator reads them from there and plans
-each term's units against them (app.services.departments).
+Administrators create the university's departments in Attendance, each with
+a name and a code (which Attendance creates in SMARTTT first); the Generator
+reads them from there and plans each term's units against them
+(app.services.departments). Faculties play no part.
 """
 
 from __future__ import annotations
@@ -41,7 +42,8 @@ class AttendanceMisconfigured(AttendanceError):
 class AttendanceDepartment:
     id: str
     name: str
-    faculty_name: str
+    # The administrator's code ("DCOMP"), unique across the university; None for one made before codes existed.
+    code: str | None
     smarttt_department_id: int | None
     lecturer_count: int
 
@@ -79,7 +81,7 @@ class AttendanceClient:
                 AttendanceDepartment(
                     id=str(d["id"]),
                     name=" ".join(str(d["name"]).split()),
-                    faculty_name=str(d.get("facultyName") or ""),
+                    code=" ".join(str(d["code"]).split()).upper() if d.get("code") else None,
                     smarttt_department_id=int(d["smartttDepartmentId"]) if d.get("smartttDepartmentId") else None,
                     lecturer_count=int(d.get("lecturerCount") or 0),
                 )

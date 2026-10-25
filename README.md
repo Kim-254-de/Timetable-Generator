@@ -6,22 +6,25 @@ Examinations and Timetabling. It decides when and where every class meets
 lets the Director review and adjust the result, approves it, and provides the
 timetable as **PDF, Word and Excel** downloads.
 
-**Departments enter their teaching first**, in the Timetable Allocator: their
-courses (class rows), units, group splits and each group's lecturer, which
-they publish to the Director. The Director **imports** what is published
-(`ALLOCATOR_BASE_URL`, `ALLOCATOR_CLIENT_KEY`), adds the lecture halls,
+**Departments enter their teaching first**, on the Teaching page of Smart
+Attendance's department portal: their courses (class rows), units, group
+splits and each group's lecturer, which they publish to the Director. The
+Director **imports** what is published (Attendance's
+`/api/v1/integrations/generator/terms/{id}/submissions`, with
+`ATTENDANCE_BASE_URL` and `ATTENDANCE_API_KEY`), adds the lecture halls,
 generates and publishes; SMARTTT receives the timetable with the lecturers in
 it, in one publish. Imported class rows, units and groups are read-only here
-("edit this in the Allocator"); a class row's unavailable hours, the rooms and
+(their department edits them in Attendance); a class row's unavailable hours, the rooms and
 the term settings stay the Director's. Rows can still be entered here for
 units no department enters.
 
 SMARTTT is optional: its data can be imported to pre-fill the same screens,
 and an approved timetable is sent to it (over SMARTTT's
 `/api/v1/integrations/generator/` endpoints, `X-API-Key`) when it is connected.
-The Timetable Allocator reads each term and, once published, each class's
-day, time and room (`/api/integrations/allocator/terms[/{id}/times]`) with its
-own key (`ALLOCATOR_API_KEY`).
+Attendance's Teaching page reads each term and, once published, each class's
+day, time and room (`/api/integrations/attendance/terms[/{id}/times]`) with the
+same shared key (`ATTENDANCE_API_KEY` here = `GENERATOR_API_KEY` there).
+(This used to be a separate app, the Timetable Allocator, which is retired.)
 See `SYSTEM_HANDOFF.md` for the whole platform.
 
 ## Workflow
@@ -43,7 +46,7 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    (Or, for a SMARTTT term, **import** rooms, departments, class rows and units
    from a SMARTTT snapshot; anything already entered is kept.)
    **Departments** tab: **Import published departments** brings in what
-   departments published in the Allocator (class rows, units, groups with
+   departments published in Smart Attendance (class rows, units, groups with
    lecturers); importing again updates in place and lists what changed. The
    tab shows which departments have and haven't published; you can generate
    without the missing ones.
@@ -67,10 +70,10 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    in place, so allocated lecturers stay. A term entered here is created in
    SMARTTT from its year, semester and dates, then linked. When SMARTTT can't
    be reached (or the term has no dates yet) the version is marked "not yet in
-   SMARTTT", still counts as approved for downloads and the Allocator, and can
+   SMARTTT", still counts as approved for downloads and the departments' pages, and can
    be sent later. Each session carries its lecturer (`lecturer_staff_number`,
-   `lecturer_name`), and departments see each class's day, time and room in
-   the Allocator. SMARTTT refusing it (a room clash, a department it doesn't
+   `lecturer_name`), and departments see each class's day, time and room on
+   their Teaching page. SMARTTT refusing it (a room clash, a department it doesn't
    have yet, someone else published first) is reported and nothing is approved.
 7. **Download** any draft or version as **PDF**, **Word (.docx)** or
    **Excel (.xlsx)**, by class row, lecture hall or department, in the
@@ -178,7 +181,7 @@ then http://localhost:8081.
 On a Linux server with Docker and the Compose plugin:
 
 ```bash
-cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ALLOCATOR_API_KEY, ALLOCATOR_BASE_URL, ALLOCATOR_CLIENT_KEY;
+cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ATTENDANCE_BASE_URL, ATTENDANCE_API_KEY;
                          # SOLVER_WORKERS = the server's cores
 docker compose up -d --build
 ```
@@ -189,7 +192,7 @@ worker and the web app on port 8081, all restarting on their own. Then:
 - Put an HTTPS proxy (Caddy, nginx, Traefik, or the host's) in front of port 8081;
   sign-in cookies are `Secure` and need HTTPS. Add `Strict-Transport-Security` there.
 - Back up the `db-data` volume (or `pg_dump`) on a schedule.
-- The Allocator reaches the Generator through this web address
+- Smart Attendance reaches the Generator through this web address
   (`GENERATOR_BASE_URL` there), so the URL must be reachable from its server.
 - Update: `git pull && docker compose up -d --build`.
 
@@ -213,4 +216,4 @@ cd backend && uv pip compile pyproject.toml --python-version 3.12 \n  --python-p
 ## Access
 
 Only members of SMARTTT's `timetabling_office` group (the Directorate) can sign
-in. Sessions, CSRF and rate limiting work as in the Allocator.
+in.

@@ -8,10 +8,8 @@ import pytest
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("SMARTTT_API_KEY", "test-generator-key")
-os.environ.setdefault("ALLOCATOR_API_KEY", "test-allocator-key")
 os.environ.setdefault("ATTENDANCE_BASE_URL", "http://attendance.test")
 os.environ.setdefault("ATTENDANCE_API_KEY", "test-attendance-key")
-os.environ.setdefault("ALLOCATOR_CLIENT_KEY", "test-inbound-key")
 os.environ.setdefault("RUN_INLINE", "true")
 os.environ.setdefault("SOLVER_WORKERS", "2")
 
@@ -19,15 +17,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app import models  # noqa: F401  (registers the tables)
-from app.clients.allocator import AllocatorClient, set_allocator
 from app.clients.attendance import AttendanceClient, set_attendance
 from app.clients.smarttt import SmartttClient, set_smarttt
+from app.clients.teaching import TeachingClient, set_teaching
 from app.config import get_settings
 from app.db import Base, get_engine, get_sessionmaker
 from app.services.departments import reset_sync_state
-from tests.fake_allocator import FakeAllocator
 from tests.fake_attendance import FakeAttendance
 from tests.fake_smarttt import FakeSmarttt
+from tests.fake_teaching import FakeTeaching
 
 
 @pytest.fixture(autouse=True)
@@ -66,12 +64,13 @@ def attendance() -> Iterator[FakeAttendance]:
 
 
 @pytest.fixture
-def allocator() -> Iterator[FakeAllocator]:
-    fake = FakeAllocator()
-    client = AllocatorClient(get_settings(), transport=fake.transport())
-    set_allocator(client)
+def teaching() -> Iterator[FakeTeaching]:
+    """What departments published in Attendance's Teaching page."""
+    fake = FakeTeaching()
+    client = TeachingClient(get_settings(), transport=fake.transport())
+    set_teaching(client)
     yield fake
-    set_allocator(None)
+    set_teaching(None)
     client.close()
 
 

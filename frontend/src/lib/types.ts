@@ -46,14 +46,16 @@ export interface RoomRecord {
 }
 
 /**
- * A department, read from Smart Attendance (where faculty officers create
- * them). `code` and `lecturer_count` are the Generator's own.
+ * A department, read from Smart Attendance (where an administrator creates
+ * it with a name and a code). `lecturer_count` is the Generator's own; the
+ * code is Attendance's when `code_from_attendance`, else made here.
  */
 export interface Department {
   id: number
   code: string
   name: string
-  school: string
+  /** True when the code is Attendance's: it can only be changed there. */
+  code_from_attendance: boolean
   lecturer_count: number | null
   smarttt_department_id: number | null
   /** False for one entered here before departments came from Attendance. */
@@ -141,7 +143,7 @@ export interface ClassRow {
   sub_class: string
   student_count: number | null
   unavailable: number[]
-  /** Entered by its department in the Allocator, and edited only there (but its unavailable hours). */
+  /** Entered by its department in Smart Attendance, and edited only there (but its unavailable hours). */
   from_allocator: boolean
 }
 
@@ -170,14 +172,14 @@ export interface Offering {
   session_length: number | null
   room_type: RoomType
   source: string
-  /** Entered by its department in the Allocator, and edited only there. */
+  /** Entered by its department in Smart Attendance, and edited only there. */
   from_allocator: boolean
   class_row_ids: string[]
   class_rows: string[]
   groups: Group[]
 }
 
-/** A department's teaching in the Allocator: published or not yet, and whether it is imported. */
+/** A department's teaching in Smart Attendance: published or not yet, and whether it is imported. */
 export interface DepartmentSubmission {
   code: string
   name: string

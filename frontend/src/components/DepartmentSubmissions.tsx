@@ -13,7 +13,7 @@ const changeText = (c: ImportChanges) =>
 
 /**
  * Departments enter their courses, units, groups and lecturers in the
- * Allocator and publish them; the Director imports what is published here.
+ * Teaching page in Smart Attendance and publish them; the Director imports what is published here.
  * A department that hasn't published can be imported later; the timetable can
  * then be re-solved keeping the published classes where they are.
  */
@@ -28,7 +28,7 @@ export function DepartmentSubmissions({ termId }: { termId: string }) {
           <div>
             <h2 className="font-semibold">Departments' teaching</h2>
             <p className="text-sm text-muted">
-              Each department enters its courses, units, groups and lecturers in the Timetable Allocator and publishes them.
+              Each department enters its courses, units, groups and lecturers on its Teaching page in Smart Attendance and publishes them.
               Import them here; you add the lecture halls, generate and publish.
             </p>
           </div>
@@ -37,7 +37,7 @@ export function DepartmentSubmissions({ termId }: { termId: string }) {
             {run.isPending ? 'Importing…' : `Import published departments${status.data?.needs_import ? ` (${status.data.needs_import} new)` : ''}`}
           </button>
         </div>
-        {status.isPending && <p className="text-sm text-muted">Asking the Allocator…</p>}
+        {status.isPending && <p className="text-sm text-muted">Asking Smart Attendance…</p>}
         {status.isError && <p role="alert" className="text-sm text-danger">{errorMessage(status.error)}</p>}
         {run.isError && <p role="alert" className="text-sm text-danger">{errorMessage(run.error)}</p>}
         {run.isSuccess && <ImportSummary result={run.data} />}
@@ -77,7 +77,7 @@ export function DepartmentSubmissions({ termId }: { termId: string }) {
                     </tr>
                   ))}
                   {status.data.departments.length === 0 && (
-                    <tr><td colSpan={4} className="px-3 py-6 text-center text-muted">No departments in the Allocator yet.</td></tr>
+                    <tr><td colSpan={4} className="px-3 py-6 text-center text-muted">No departments in Smart Attendance yet.</td></tr>
                   )}
                 </tbody>
               </table>

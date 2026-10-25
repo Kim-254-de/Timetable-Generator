@@ -204,21 +204,21 @@ def test_director_enters_everything_and_downloads(client, smarttt, db):
     assert any("COSC 103" in c.text and "GR A" in c.text for row in table.rows for c in row.cells)
 
 
-def test_allocator_reads_terms_and_published_times(client, smarttt):
+def test_attendance_reads_terms_and_published_times(client, smarttt):
     sign_in(client)
     term = enter_term(client)
-    no_key = client.get("/api/integrations/allocator/terms")
+    no_key = client.get("/api/integrations/attendance/terms")
     assert no_key.status_code == 401
-    headers = {"X-API-Key": "test-allocator-key"}
-    terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
+    headers = {"X-API-Key": "test-attendance-key"}
+    terms = ok(client.get("/api/integrations/attendance/terms", headers=headers))
     assert terms[0]["id"] == term["id"] and terms[0]["published_version"] is None
 
-    before = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/times", headers=headers))
+    before = ok(client.get(f"/api/integrations/attendance/terms/{term['id']}/times", headers=headers))
     assert before == {"published_version": None, "classes": {}}  # nothing published yet
 
     draft_id = ok(client.post("/api/runs", json={"term_id": term["id"], "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
-    after = ok(client.get(f"/api/integrations/allocator/terms/{term['id']}/times", headers=headers))
+    after = ok(client.get(f"/api/integrations/attendance/terms/{term['id']}/times", headers=headers))
     assert after["published_version"] == 1
     assert set(after["classes"]) == {"COSC100-MAIN", "COSC103-GRA", "COSC103-GRB", "COSC103-GRC"}
     meeting = after["classes"]["COSC103-GRB"][0]
@@ -372,20 +372,31 @@ def test_departments_come_from_attendance_and_are_typed_by_name(client, smarttt,
     assert "Smart Attendance" in refused.json()["error"]["message"]
     assert client.post("/api/departments", json={"code": "MS", "name": "Maths"}).status_code == 405
 
-    # Once the faculty officer adds it in Attendance, it is read in and can be used.
+    # Once an administrator adds it in Attendance, it is read in and can be used. A department
+    # Attendance has no code for (made before codes existed) gets one made here.
     attendance.add("att-math", "Department of Mathematics and Statistics")
     synced = ok(client.post("/api/departments/sync"))
     assert synced["report"]["created"] == 1
     maths = next(d for d in synced["departments"] if d["name"] == "Department of Mathematics and Statistics")
     assert maths["code"] == "MS" and maths["id"] >= 100_000 and maths["smarttt_department_id"] is None
+    assert maths["code_from_attendance"] is False and "school" not in maths
     unit = ok(client.patch(f"/api/offerings/{unit['id']}", json={"department": "Mathematics and Statistics"}))
     assert unit["department_id"] == maths["id"]
 
-    # Name and school are Attendance's; the Generator's own code stays.
+    # The name and the code are Attendance's: changed there, they change here, and the code can't be changed here.
+    assert cs["code_from_attendance"] is True
     attendance.departments[0]["name"] = "Computer Science and ICT"
+    attendance.departments[0]["code"] = "DCSICT"
     renamed = {d["id"]: d for d in ok(client.post("/api/departments/sync"))["departments"]}[cs["id"]]
-    assert (renamed["name"], renamed["code"]) == ("Computer Science and ICT", "DCOMP")
+    assert (renamed["name"], renamed["code"]) == ("Computer Science and ICT", "DCSICT")
     assert client.patch(f"/api/departments/{cs['id']}", json={"name": "Other"}).status_code == 422
+    refused_code = client.patch(f"/api/departments/{cs['id']}", json={"code": "OTHER"})
+    assert refused_code.status_code == 409 and refused_code.json()["error"]["code"] == "CODE_FROM_ATTENDANCE"
+    ok(client.patch(f"/api/departments/{cs['id']}", json={"lecturer_count": 4}))
+    # Attendance's code for the new department replaces the one made here.
+    attendance.departments[2]["code"] = "DMATHS"
+    maths = {d["id"]: d for d in ok(client.post("/api/departments/sync"))["departments"]}[maths["id"]]
+    assert (maths["code"], maths["code_from_attendance"]) == ("DMATHS", True)
     assert client.delete(f"/api/departments/{cs['id']}").json()["error"]["code"] == "FROM_ATTENDANCE"
 
     # A unit still needs a department, and a refused save adds none.

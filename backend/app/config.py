@@ -31,29 +31,21 @@ class Settings(BaseSettings):
     smarttt_api_key: str = ""
     smarttt_timeout_seconds: float = 60.0  # a publish writes the whole term
 
-    # Smart Attendance, where faculty officers create the departments the
-    # Generator plans against (GET /api/v1/integrations/generator/departments).
-    # The key must equal GENERATOR_API_KEY there. Unset URL = departments stay
-    # as last read.
+    # Smart Attendance, where administrators create the departments the
+    # Generator plans against (GET /api/v1/integrations/generator/departments)
+    # and where departments enter and publish their teaching, which "Import
+    # published departments" reads (.../terms/{id}/submissions). One shared
+    # key both ways: it must equal GENERATOR_API_KEY there, and Attendance
+    # sends it to read the terms and published times here. Unset URL =
+    # departments stay as last read and nothing can be imported.
     attendance_base_url: str = ""
     attendance_api_key: str = ""
     attendance_timeout_seconds: float = 15.0
     # Departments are re-read from Attendance at most this often when listed.
     department_sync_seconds: int = 60
 
-    # The Timetable Allocator reads terms and published times with this key
-    # (X-API-Key); it must equal GENERATOR_API_KEY in the Allocator. Unset =
-    # the Allocator can't connect.
-    allocator_api_key: str = ""
-    # Where departments publish their teaching, read by "Import published
-    # departments" with ALLOCATOR_CLIENT_KEY, which must equal
-    # GENERATOR_INBOUND_KEY in the Allocator.
-    allocator_base_url: str = "http://localhost:8001"
-    allocator_client_key: str = ""
-    allocator_timeout_seconds: float = 30.0
-
     session_cookie_name: str = "tg_session"
-    # Distinct from the Allocator's, so both apps can be signed in on one host.
+    # Distinct from other apps' on the same host, so each keeps its own sign-in.
     csrf_cookie_name: str = "tg_xsrf"
     csrf_header_name: str = "X-XSRF-TOKEN"
     session_idle_minutes: int = 120

@@ -1,4 +1,4 @@
-"""An in-memory Smart Attendance: the departments faculty officers created there."""
+"""An in-memory Smart Attendance: the departments administrators created there, each with its code."""
 
 from __future__ import annotations
 
@@ -13,13 +13,12 @@ PREFIX = "/api/v1/integrations/generator"
 
 
 def department(
-    attendance_id: str, name: str, faculty: str, smarttt_id: int | None, lecturers: int = 0
+    attendance_id: str, name: str, code: str | None, smarttt_id: int | None, lecturers: int = 0
 ) -> dict[str, Any]:
     return {
         "id": attendance_id,
         "name": name,
-        "facultyId": f"fac-{faculty.lower()}",
-        "facultyName": faculty,
+        "code": code,
         "smartttDepartmentId": smarttt_id,
         "lecturerCount": lecturers,
     }
@@ -29,14 +28,14 @@ class FakeAttendance:
     def __init__(self) -> None:
         # The same two departments SMARTTT's snapshot has, linked by SMARTTT's id.
         self.departments: list[dict[str, Any]] = [
-            department("att-cs", "Computer Science", "Science", CS, lecturers=5),
-            department("att-edu", "Education", "Education", EDU, lecturers=9),
+            department("att-cs", "Computer Science", "DCOMP", CS, lecturers=5),
+            department("att-edu", "Education", "DEDU", EDU, lecturers=9),
         ]
         self.down = False
         self.calls = 0
 
-    def add(self, attendance_id: str, name: str, faculty: str = "Science", smarttt_id: int | None = None) -> None:
-        self.departments.append(department(attendance_id, name, faculty, smarttt_id))
+    def add(self, attendance_id: str, name: str, code: str | None = None, smarttt_id: int | None = None) -> None:
+        self.departments.append(department(attendance_id, name, code, smarttt_id))
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)

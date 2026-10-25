@@ -79,7 +79,10 @@ DepartmentText = Annotated[str, StringConstraints(strip_whitespace=True, min_len
 
 
 class DepartmentPatch(_Strict):
-    """The Generator's own fields; a department's name and school come from Smart Attendance."""
+    """
+    The Generator's own fields; a department's name, and its code when it has
+    one there, come from Smart Attendance.
+    """
 
     code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)] | None = None
     lecturer_count: Annotated[int, Field(ge=0, le=2000)] | None = None  # 0 clears the count

@@ -8,16 +8,17 @@ import type { Department } from '@/lib/types'
 const COLUMNS: BulkColumn[] = [
   { key: 'department', label: 'Department', example: 'Computer Science', required: true,
     hint: 'Its name or code, as on the Departments list.' },
-  { key: 'code', label: 'Code', example: 'DCOMP', hint: 'Optional: the code printed on the timetable.' },
+  { key: 'code', label: 'Code', example: 'DCOMP', hint: 'Optional, only for a department Attendance gives no code: the code printed on the timetable.' },
   { key: 'lecturer_count', label: 'Lecturers', example: '24',
     hint: 'How many lecturers the department has. The Generator never runs more of its classes at once. Leave blank to keep the current number.' },
 ]
 
 /**
  * Departments own units; the department that owns a unit allocates its
- * lecturer in the Allocator. Faculty officers create departments in Smart
- * Attendance; they are read from there. The Generator keeps its own code and
- * lecturer count for each.
+ * lecturer in Smart Attendance's department portal. An administrator creates each department in
+ * Smart Attendance with a name and a code; both are read from there. The
+ * Generator keeps its own lecturer count for each, and makes a code only for
+ * a department Attendance has none for.
  */
 export function DepartmentsPage() {
   const list = useDepartmentList()
@@ -34,7 +35,7 @@ export function DepartmentsPage() {
         <div>
           <h1 className="text-xl font-semibold">Departments</h1>
           <p className="text-sm text-muted">
-            From Smart Attendance, where faculty officers add them. Set each one’s code and number of lecturers here. Used by every term.
+            From Smart Attendance, where an administrator adds each one with its code. Set each one’s number of lecturers here. Used by every term.
           </p>
         </div>
         <div className="flex gap-2 text-sm">
@@ -63,17 +64,19 @@ export function DepartmentsPage() {
       <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
-            <tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">School</th><th className="px-3 py-2">Lecturers</th><th /></tr>
+            <tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">Lecturers</th><th /></tr>
           </thead>
           <tbody>
             {(list.data?.departments ?? []).map((d) => (
               <tr key={d.id} className="border-t border-line">
-                <td className="px-3 py-2 font-medium">{d.code}</td>
+                <td className="px-3 py-2 font-medium">
+                  {d.code}
+                  {!d.code_from_attendance && d.from_attendance && <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">no code in Attendance</span>}
+                </td>
                 <td className="px-3 py-2">
                   {d.name}
                   {!d.from_attendance && <span className="ml-2 rounded bg-warning-soft px-1.5 py-0.5 text-xs text-warning">not in Attendance</span>}
                 </td>
-                <td className="px-3 py-2 text-muted">{d.school}</td>
                 <td className="px-3 py-2">
                   {d.lecturer_count ?? <span className="text-muted">no limit</span>}
                   {d.attendance_lecturer_count != null && <span className="ml-2 text-xs text-muted">({d.attendance_lecturer_count} in Attendance)</span>}
@@ -87,7 +90,7 @@ export function DepartmentsPage() {
               </tr>
             ))}
             {list.data?.departments.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No departments yet. Faculty officers add them in Smart Attendance.</td></tr>
+              <tr><td colSpan={4} className="px-3 py-6 text-center text-muted">No departments yet. An administrator adds them in Smart Attendance.</td></tr>
             )}
           </tbody>
         </table>
@@ -112,9 +115,12 @@ function DepartmentForm({ department, onClose }: { department: Department; onClo
   return (
     <Dialog title={`Edit ${department.name}`} onClose={onClose}>
       <form onSubmit={submit} className="mt-3 space-y-3">
-        <p className="text-sm text-muted">The name and school come from Smart Attendance and are changed there.</p>
-        <Field label="Code" hint="Printed on the timetable and used by the Allocator.">
-          <input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="DCOMP" className={inputClass} />
+        <p className="text-sm text-muted">
+          The name{department.code_from_attendance ? ' and code come' : ' comes'} from Smart Attendance and {department.code_from_attendance ? 'are' : 'is'} changed there.
+        </p>
+        <Field label="Code" hint={department.code_from_attendance ? 'Set in Smart Attendance’s admin console.' : 'Printed on the timetable and how its published teaching names it. Attendance has no code for this department yet.'}>
+          <input required value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="DCOMP"
+            disabled={department.code_from_attendance} className={inputClass} />
         </Field>
         <Field label="Number of lecturers" hint={`The Generator never runs more of this department's classes at the same hour. Leave blank for no limit.${department.attendance_lecturer_count != null ? ` Attendance lists ${department.attendance_lecturer_count}.` : ''}`}>
           <input type="number" min={1} value={form.lecturer_count ?? ''}

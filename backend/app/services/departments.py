@@ -1,12 +1,14 @@
 """
 Departments come from Smart Attendance.
 
-Faculty officers create the university's departments in Attendance (which
-creates them in SMARTTT first, the owner); the Generator reads them over
-Attendance's Generator endpoint (app.clients.attendance) and keeps a copy,
-because units and class rows hang off it. Name and school are Attendance's
-and are refreshed at every read; the code (printed on timetables and used
-by the Allocator) and the lecturer count (rule H9) are the Generator's own.
+An administrator creates the university's departments in Attendance, each
+with a name and a code (Attendance creates them in SMARTTT first, the owner);
+faculties play no part. The Generator reads them over Attendance's Generator
+endpoint (app.clients.attendance) and keeps a copy, because units and class
+rows hang off it. The name and the code (printed on timetables and how
+imported teaching names its department) are Attendance's and are refreshed at every read; a code is
+made here only for a department Attendance has none for. The lecturer count
+(rule H9) is the Generator's own.
 
 A department in Attendance is matched to one here by Attendance's id, then
 by SMARTTT's id, then by name ("Department of Computer Science" = "computer
@@ -90,7 +92,6 @@ def sync_departments(
                 id=_free_id(db, a.smarttt_department_id),
                 code=new_department_code(db, a.name),
                 name=a.name,
-                school=a.faculty_name,
             )
             db.add(d)
             db.flush()
@@ -104,17 +105,27 @@ def sync_departments(
         )
         if smarttt_taken:
             report["skipped"].append(f"{a.name}: its SMARTTT id is already on another department here.")
-        before = (d.attendance_department_id, d.name, d.school, d.smarttt_department_id, d.attendance_lecturer_count)
+        # Attendance's code, unless another department here already holds it.
+        code_holder = (
+            next((x for x in local if x is not d and x.code.upper() == a.code), None) if a.code is not None else None
+        )
+        if code_holder is not None:
+            report["skipped"].append(f"{a.name}: its code {a.code} is already used by {code_holder.name} here.")
+        before = (d.attendance_department_id, d.name, d.code, d.smarttt_department_id, d.attendance_lecturer_count)
         d.attendance_department_id = a.id
         d.name = a.name
-        d.school = a.faculty_name
+        if a.code is not None and code_holder is None:
+            d.code = a.code
+            d.code_from_attendance = True
+        else:
+            d.code_from_attendance = False
         if a.smarttt_department_id is not None and not smarttt_taken:
             d.smarttt_department_id = a.smarttt_department_id
         d.attendance_lecturer_count = a.lecturer_count
         if before[0] is not None and before != (
             d.attendance_department_id,
             d.name,
-            d.school,
+            d.code,
             d.smarttt_department_id,
             d.attendance_lecturer_count,
         ):

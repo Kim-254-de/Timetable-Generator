@@ -90,21 +90,21 @@ def test_runs_whose_worker_died_are_marked_failed(client, smarttt, db):
     assert "worker" in listed[str(lost.id)]["failure"]["reasons"][0]["message"]
 
 
-def test_the_allocator_learns_when_smarttt_has_the_version(client, smarttt):
+def test_attendance_learns_when_smarttt_has_the_version(client, smarttt):
     sign_in(client)
     term_id = setup_term(client)
-    headers = {"X-API-Key": "test-allocator-key"}
+    headers = {"X-API-Key": "test-attendance-key"}
     draft_id = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))["draft_id"]
 
     smarttt.down = True
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
     smarttt.down = False
-    terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
+    terms = ok(client.get("/api/integrations/attendance/terms", headers=headers))
     assert terms[0]["published_version"] == 1 and terms[0]["in_smarttt"] is False  # approved while SMARTTT was down
     assert terms[0]["smarttt_term_id"]
 
     ok(client.post(f"/api/terms/{term_id}/publications/1/send"))
-    terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
+    terms = ok(client.get("/api/integrations/attendance/terms", headers=headers))
     assert terms[0]["in_smarttt"] is True
 
 

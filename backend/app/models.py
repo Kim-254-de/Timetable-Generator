@@ -6,9 +6,10 @@ each solver run, drafts and their sessions, publications, the audit trail,
 and sign-in sessions.
 
 Departments enter their class rows (courses), units and groups, with each
-group's lecturer, in the Timetable Allocator and publish them; the Director
-imports what is published ("Import published departments"), and those rows
-carry `allocator_ref` and are edited only in the Allocator. The Director adds
+group's lecturer, in Smart Attendance's department portal and publish them;
+the Director imports what is published ("Import published departments"), and
+those rows carry `allocator_ref` (named for the Timetable Allocator that used
+to hold them) and are edited only by their department. The Director adds
 the lecture halls, generates and publishes. SMARTTT is optional: "Import from
 SMARTTT" pre-fills the same tables, and publishing sends the finished
 timetable there, lecturers included.
@@ -92,12 +93,13 @@ class Term(Base):
 class Department(Base):
     """
     A department that owns units. Departments are created in Smart Attendance
-    (by faculty officers; Attendance creates them in SMARTTT first) and read
-    from there (app.services.departments): name and school are Attendance's.
-    `code` and `lecturer_count` are the Generator's own: `lecturer_count` caps
-    how many of its classes may run at once (rule H9); left empty, no cap is
-    applied. The id is SMARTTT's department id when known, else a number from
-    100000 up.
+    by an administrator, with a name and a code (Attendance creates them in
+    SMARTTT first), and read from there (app.services.departments): the name,
+    and the code when Attendance has one (`code_from_attendance`), are
+    Attendance's. A code is made here only for a department Attendance has
+    none for. `lecturer_count` is the Generator's own: it caps how many of its
+    classes may run at once (rule H9); left empty, no cap is applied. The id
+    is SMARTTT's department id when known, else a number from 100000 up.
     """
 
     __tablename__ = "departments"
@@ -105,7 +107,8 @@ class Department(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(255))
-    school: Mapped[str] = mapped_column(String(255), default="")
+    # True while the code is the one Attendance gives it, which can only be changed there.
+    code_from_attendance: Mapped[bool] = mapped_column(Boolean, default=False)
     lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     smarttt_department_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
     # Attendance's id for the department; None for one entered here before
@@ -165,7 +168,7 @@ class ClassRow(Base):
     student_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Slots (0-59) this class row can't be taught, e.g. teaching practice.
     unavailable: Mapped[list[int]] = mapped_column(JSON, default=list)
-    # The Allocator's course this row was imported from; None for a row entered here.
+    # Attendance's course (a department's Teaching page) this row was imported from; None for a row entered here.
     allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
 
@@ -187,7 +190,7 @@ class UnitOffering(Base):
     session_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     room_type: Mapped[str] = mapped_column(String(30), default="lecture_hall")
     source: Mapped[str] = mapped_column(String(30))  # curriculum | published | manual | allocator
-    # The Allocator's unit this offering was imported from; None for one entered here.
+    # Attendance's unit (a department's Teaching page) this offering was imported from; None for one entered here.
     allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
     class_rows: Mapped[list[OfferingClassRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
@@ -215,7 +218,7 @@ class OfferingClassRow(Base):
 class Group(Base):
     """
     One class of an offering ("GR A"; "" when the unit isn't split). Imported
-    from the Allocator, the department decided the split and gave the
+    from a department's Teaching page, the department decided the split and gave the
     lecturer, who is known by staff number to the solver (rule H13) and SMARTTT.
     """
 
@@ -337,7 +340,7 @@ class DepartmentImport(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
     department_code: Mapped[str] = mapped_column(String(32))
-    # When the department published what was imported (the Allocator's time).
+    # When the department published what was imported (Attendance's time).
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     imported_by: Mapped[str] = mapped_column(String(255))

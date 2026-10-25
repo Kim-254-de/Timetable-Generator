@@ -31,9 +31,9 @@ from app.api.schemas import (
     TermPatch,
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
-from app.clients.allocator import AllocatorClient, get_allocator
 from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
 from app.clients.smarttt import SmartttClient, get_smarttt
+from app.clients.teaching import TeachingClient, get_teaching
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError, ok
@@ -56,7 +56,7 @@ router = APIRouter()
 Db = Annotated[Session, Depends(get_db)]
 Smarttt = Annotated[SmartttClient, Depends(get_smarttt)]
 Attendance = Annotated[AttendanceClient, Depends(get_attendance)]
-Allocator = Annotated[AllocatorClient, Depends(get_allocator)]
+Teaching = Annotated[TeachingClient, Depends(get_teaching)]
 Me = Annotated[Identity, Depends(current_identity)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
@@ -247,15 +247,15 @@ def take_snapshot(term_id: str, identity: Me, db: Db, smarttt: Smarttt) -> dict[
 
 
 @router.get("/terms/{term_id}/departments")
-def department_submissions(term_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
-    """Which departments have published their teaching in the Allocator, and whether it's imported."""
-    return ok(allocator_import.status(db, allocator, setup.get_term(db, term_id)))
+def department_submissions(term_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
+    """Which departments have published their teaching in Smart Attendance, and whether it's imported."""
+    return ok(allocator_import.status(db, teaching, setup.get_term(db, term_id)))
 
 
 @router.post("/terms/{term_id}/departments/import")
-def import_departments(term_id: str, identity: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+def import_departments(term_id: str, identity: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
     """Brings in what departments have published: class rows, units and groups with lecturers."""
-    return ok(allocator_import.import_departments(db, allocator, identity, setup.get_term(db, term_id)))
+    return ok(allocator_import.import_departments(db, teaching, identity, setup.get_term(db, term_id)))
 
 
 @router.post("/terms/{term_id}/setup/import")
@@ -487,16 +487,16 @@ def export_draft(draft_id: str, fmt: str, identity: Me, db: Db, view: str = Quer
     )
 
 
-# -- for the Timetable Allocator (shared key, no user session) ------------------------------
+# -- for Smart Attendance's department Teaching page (shared key, no user session) ----------
 
-AllocatorKey = Depends(integration.require_allocator_key)
-
-
-@router.get("/integrations/allocator/terms", dependencies=[AllocatorKey])
-def allocator_terms(db: Db) -> dict[str, Any]:
-    return ok(integration.allocator_terms(db))
+AttendanceKey = Depends(integration.require_attendance_key)
 
 
-@router.get("/integrations/allocator/terms/{term_id}/times", dependencies=[AllocatorKey])
-def allocator_times(term_id: str, db: Db) -> dict[str, Any]:
-    return ok(integration.allocator_times(db, setup.get_term(db, term_id)))
+@router.get("/integrations/attendance/terms", dependencies=[AttendanceKey])
+def attendance_terms(db: Db) -> dict[str, Any]:
+    return ok(integration.teaching_terms(db))
+
+
+@router.get("/integrations/attendance/terms/{term_id}/times", dependencies=[AttendanceKey])
+def attendance_times(term_id: str, db: Db) -> dict[str, Any]:
+    return ok(integration.teaching_times(db, setup.get_term(db, term_id)))

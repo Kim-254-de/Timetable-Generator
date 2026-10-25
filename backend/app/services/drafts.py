@@ -327,7 +327,7 @@ def publish(
         "sessions": sessions,
     }
     # The Director's approval stands even when SMARTTT can't be told yet
-    # (SMARTTT down): the version is recorded here, downloads and the Allocator
+    # (SMARTTT down): the version is recorded here, downloads and the departments' Teaching pages
     # use it, and `sent` says it still has to reach SMARTTT. SMARTTT refusing
     # the timetable (409/422) is different: it is reported and nothing is
     # published.

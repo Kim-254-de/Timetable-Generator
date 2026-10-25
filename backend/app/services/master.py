@@ -129,7 +129,7 @@ def department_dict(d: Department) -> dict[str, Any]:
         "id": d.id,
         "code": d.code,
         "name": d.name,
-        "school": d.school,
+        "code_from_attendance": d.code_from_attendance,
         "lecturer_count": d.lecturer_count,
         "smarttt_department_id": d.smarttt_department_id,
         "from_attendance": d.attendance_department_id is not None,
@@ -149,7 +149,11 @@ def _department_by_code(db: Session, code: str) -> Department | None:
 
 
 def _apply_department(db: Session, d: Department, fields: dict[str, Any]) -> None:
-    """The Generator's own fields; name and school are Attendance's."""
+    """The Generator's own fields; the name, and a code Attendance gives, are Attendance's."""
+    if fields.get("code") is not None and d.code_from_attendance and fields["code"].strip().upper() != d.code.upper():
+        raise ApiError(
+            409, "CODE_FROM_ATTENDANCE", f"{d.name}'s code is set in Smart Attendance's admin console; change it there."
+        )
     if fields.get("code") is not None:
         clash = _department_by_code(db, fields["code"])
         if clash is not None and clash.id != d.id:
@@ -215,7 +219,7 @@ def new_department_code(db: Session, name: str) -> str:
 def department_for(db: Session, identity: Identity, text: str) -> Department:
     """
     The department typed on a class row or unit, by code or name. Departments
-    are created in Smart Attendance by faculty officers, never here.
+    are created in Smart Attendance by an administrator, never here.
     """
     found = find_department(db, text)
     if found is not None:
@@ -223,8 +227,8 @@ def department_for(db: Session, identity: Identity, text: str) -> Department:
     raise ApiError(
         422,
         "UNKNOWN_DEPARTMENT",
-        f"{' '.join(text.split())} is not a department. Departments are added in Smart Attendance by the faculty "
-        "officer; once it is there, refresh the Departments page.",
+        f"{' '.join(text.split())} is not a department. Departments are added in Smart Attendance's admin console "
+        "by an administrator; once it is there, refresh the Departments page.",
     )
 
 
@@ -279,7 +283,7 @@ def create_class_row(
 def update_class_row(db: Session, identity: Identity, row: ClassRow, fields: dict[str, Any]) -> None:
     """
     Applies a patch (the caller audits and commits). Everything is checked
-    before anything changes. A row from the Allocator takes only the hours it
+    before anything changes. A row from a department's Teaching page takes only the hours it
     can't be taught; the rest is its department's.
     """
     if any(v is not None for k, v in fields.items() if k != "unavailable"):
