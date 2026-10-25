@@ -38,6 +38,38 @@ class AttendanceMisconfigured(AttendanceError):
     )
 
 
+class AttendanceSignInError(AttendanceError):
+    """Why sign-in could not ask Attendance; `message` says it on the sign-in screen."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+SIGN_IN_NOT_SET_UP = (
+    "Sign-in is not set up: the Generator has no Smart Attendance address (ATTENDANCE_BASE_URL). "
+    "Contact the system administrator."
+)
+SIGN_IN_KEY_REFUSED = (
+    "Sign-in is not set up correctly: Smart Attendance refused the Generator's key. ATTENDANCE_API_KEY "
+    "here must equal GENERATOR_API_KEY in Smart Attendance. Contact the system administrator."
+)
+SIGN_IN_WRONG_ADDRESS = (
+    "Sign-in is not set up correctly: Smart Attendance's sign-in check was not found at the Generator's "
+    "ATTENDANCE_BASE_URL, or that Attendance is too old. Contact the system administrator."
+)
+SIGN_IN_UNREACHABLE = "Smart Attendance could not be reached (it may be starting up). Try again in a minute."
+SIGN_IN_FAILED = "Smart Attendance could not check your sign-in just now. Try again in a minute."
+
+
+def _base_url(url: str) -> str:
+    """Attendance's root: PREFIX already starts with /api/v1, so a configured ".../api/v1" is dropped."""
+    url = url.strip().rstrip("/")
+    if url.endswith("/api/v1"):
+        url = url[: -len("/api/v1")]
+    return url or "http://attendance.invalid"
+
+
 @dataclass(frozen=True)
 class AttendanceDepartment:
     id: str
@@ -52,7 +84,7 @@ class AttendanceClient:
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None):
         self.enabled = bool(settings.attendance_base_url)
         self._http = httpx.Client(
-            base_url=settings.attendance_base_url.rstrip("/") or "http://attendance.invalid",
+            base_url=_base_url(settings.attendance_base_url),
             timeout=settings.attendance_timeout_seconds,
             headers={"X-API-Key": settings.attendance_api_key, "Accept": "application/json"},
             transport=transport,
@@ -95,17 +127,22 @@ class AttendanceClient:
 
     def _auth_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         if not self.enabled:
-            raise AttendanceError()
+            logger.error("Sign-in: ATTENDANCE_BASE_URL is not set")
+            raise AttendanceSignInError(SIGN_IN_NOT_SET_UP)
         try:
             response = self._http.request(method, PREFIX + path, **kwargs)
         except httpx.HTTPError as exc:
-            logger.warning("Attendance %s failed: %s", path, exc)
-            raise AttendanceError() from exc
+            logger.warning("Sign-in: Attendance %s%s could not be reached: %r", self._http.base_url, PREFIX + path, exc)
+            raise AttendanceSignInError(SIGN_IN_UNREACHABLE) from exc
         if response.status_code in (401, 403):
-            logger.error("Attendance refused the Generator's key (%s)", response.status_code)
-            raise AttendanceMisconfigured()
+            logger.error("Sign-in: Attendance refused the Generator's key (%s)", response.status_code)
+            raise AttendanceSignInError(SIGN_IN_KEY_REFUSED)
+        if response.status_code == 404 and path == "/authenticate":
+            logger.error("Sign-in: %s%s answered 404; check ATTENDANCE_BASE_URL", self._http.base_url, PREFIX + path)
+            raise AttendanceSignInError(SIGN_IN_WRONG_ADDRESS)
         if response.status_code >= 500:
-            raise AttendanceError()
+            logger.warning("Sign-in: Attendance %s answered %s", path, response.status_code)
+            raise AttendanceSignInError(SIGN_IN_FAILED)
         return response
 
     @staticmethod
@@ -117,7 +154,10 @@ class AttendanceClient:
         """{account, timetabling_office} for a right login of an active Attendance account, else None."""
         response = self._auth_request("POST", "/authenticate", json={"identifier": identifier, "password": password})
         if response.status_code >= 400:
-            raise AttendanceError()
+            logger.warning(
+                "Sign-in: Attendance /authenticate answered %s: %s", response.status_code, response.text[:300]
+            )
+            raise AttendanceSignInError(SIGN_IN_FAILED)
         data = dict(self._data(response) or {})
         if not data.pop("authenticated", False):
             return None
@@ -129,7 +169,8 @@ class AttendanceClient:
         if response.status_code == 404:
             return None
         if response.status_code >= 400:
-            raise AttendanceError()
+            logger.warning("Sign-in: Attendance /identity answered %s", response.status_code)
+            raise AttendanceSignInError(SIGN_IN_FAILED)
         return dict(self._data(response) or {})
 
 
