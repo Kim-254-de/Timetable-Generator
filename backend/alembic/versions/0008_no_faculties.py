@@ -4,8 +4,8 @@ Faculties play no part any more. An administrator creates each department in
 Smart Attendance with a name and a code; the Generator takes both from there
 and marks a code that came from Attendance, which can only be changed there.
 
-Revision ID: 0007
-Revises: 0006
+Revision ID: 0008
+Revises: 0007
 Create Date: 2026-10-24 12:00:00.000000
 """
 
@@ -15,8 +15,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0007"
-down_revision: str | None = "0006"
+revision: str = "0008"
+down_revision: str | None = "0007"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

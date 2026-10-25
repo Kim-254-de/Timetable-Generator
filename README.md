@@ -83,6 +83,38 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    session where it was unless a rule forces a move, and never moves a class
    onto an hour its lecturer already teaches (H13).
 
+## Exam timetable
+
+On the term's **Exams** tab:
+
+1. **Exam period**: first and last day, weekdays used, days off, and the
+   sessions of each day (default 08:30-10:30, 11:30-13:30, 14:30-16:30).
+   **Spacing**: exam seats are 0.9 x each room's capacity unless changed for
+   the term, or set per room on the Rooms page ("Exam seats", "For exams").
+   A room's block is its building, so a big paper stays within one block.
+2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
+   the class rows sitting each, ODEL marked) and their practicals.
+3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
+   class row sits two papers in one session, at most 2 papers per class row
+   per day, each session's students fit the exam seats, pinned papers stay.
+   Soft: back-to-back sessions (heavily weighted), two papers on one day, big
+   papers late. Phase 2 seats each session: every class row (or part of one
+   bigger than any room) gets one room; small papers share rooms, a big paper
+   uses few rooms in one block, a paper's ODEL students sit apart. The
+   pre-check and conflict explanations name the class row or session at fault.
+4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
+   as room sheets; **move** a paper (checked; both sessions re-seated; pinned)
+   and **re-solve around pins**.
+5. **Share with departments** so they name invigilators on their Teaching page in Smart Attendance.
+6. **Approve and publish**: refused while any paper has no invigilator. The
+   version is frozen with the SMARTTT payload (codes, date, times, seating
+   with invigilators); SMARTTT can't take exams yet, so it is approved here.
+7. **Download** (Word, PDF): the timetable in the Directorate's layout, room
+   sheets, and the invigilation roster per department.
+
+Benchmark at the April 2026 size: `python -m tools.exam_benchmark` (a
+generated fixture of the same shape until the real data is supplied).
+
 ## Needs from SMARTTT
 
 Not built in these two repos; SMARTTT needs these for the department-first flow:
@@ -95,6 +127,24 @@ Not built in these two repos; SMARTTT needs these for the department-first flow:
 - **Match by code**: units, rooms and programmes are now typed in by
   departments and the Director, so SMARTTT matches them by code (`unit_code`,
   `room_code`, programme code and year/semester), not by SMARTTT ids.
+
+### Exams: needs from SMARTTT and Smart Attendance
+
+Not built in these two repos:
+
+- **SMARTTT**
+  - an exam publication endpoint taking the Generator's exam payload: per paper,
+    its codes, date, start and end, examiner, and seating
+    `[{room_code, class_row, part, parts, students, invigilator_staff_number}]`;
+    until it exists, exam versions are approved in the Generator and marked
+    "not yet in SMARTTT";
+  - an exam view per student (each paper's date, time and *their* room) and per
+    lecturer (papers they set, invigilation duties);
+  - pushing exam sessions to Smart Attendance;
+  - an *Exams* tab in the SMARTTT app, shown first during the exam period.
+- **Smart Attendance**: an *exam* session type, one per paper per room, opened
+  by its invigilator; students check in only to their own paper and room; a
+  sat/absent report per paper for the invigilator.
 
 ## Rules
 

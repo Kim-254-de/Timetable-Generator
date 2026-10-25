@@ -43,6 +43,10 @@ export interface RoomRecord {
   active: boolean
   unavailable: number[]
   in_use: number
+  /** Seats for exams when set; otherwise capacity x the term's spacing. */
+  exam_seats: number | null
+  for_exams: boolean
+  block: string
 }
 
 /**
@@ -219,7 +223,7 @@ export interface Reason {
 export interface Run {
   id: string
   term_id: string
-  mode: 'full' | 'resolve' | 'repair'
+  mode: 'full' | 'resolve' | 'repair' | 'exam'
   status: 'queued' | 'running' | 'succeeded' | 'failed'
   base_draft_id: string | null
   weights: Record<string, number>
@@ -304,4 +308,121 @@ export interface ApiErrorBody {
   message: string
   code?: string
   details?: unknown
+}
+
+// -- exams ----------------------------------------------------------------------------------
+
+export interface ExamSessionTime { start: string; end: string }
+
+export interface ExamPeriod {
+  exam_start: string | null
+  exam_end: string | null
+  exam_weekdays: number[]
+  exam_days_off: string[]
+  exam_sessions: ExamSessionTime[]
+  exam_spacing: number
+  days: string[]
+  slots: number
+  rooms: number
+  exam_seats: number
+}
+
+export interface ExamPaperItem {
+  id: string
+  codes: string
+  title: string
+  department: string
+  examiner: string
+  students: number
+  rows: { label: string; students: number; odel: boolean }[]
+}
+
+export interface ExamPracticalItem {
+  codes: string
+  title: string
+  department: string
+  date: string
+  start_time: string
+  end_time: string
+}
+
+export interface ExamDraftItem { id: string; name: string; status: string; shared_at: string | null; created_at: string }
+
+export interface ExamPublicationItem {
+  version: number
+  draft_id: string
+  published_by: string
+  published_at: string
+  sent_to_smarttt: boolean
+  not_sent_reason: string | null
+}
+
+export interface ExamOverview {
+  period: ExamPeriod
+  papers: ExamPaperItem[]
+  practicals: ExamPracticalItem[]
+  drafts: ExamDraftItem[]
+  publications: ExamPublicationItem[]
+  readiness: { code: string; message: string }[]
+}
+
+export interface ExamSeatItem {
+  room_id: string
+  room: string
+  block: string
+  row: string
+  students: number
+  part: number
+  parts: number
+  odel: boolean
+}
+
+export interface ExamGridPaper {
+  id: string
+  allocator_ref: string
+  codes: string
+  title: string
+  department: string
+  examiner: string
+  students: number
+  day: string | null
+  session: number | null
+  pinned: boolean
+  seating: ExamSeatItem[]
+  invigilators: Record<string, { staff_number: string | null; name: string }>
+}
+
+export interface ExamRoomSheet {
+  day: string
+  session: number
+  rooms: {
+    room: string
+    students: number
+    papers: { codes: string; title: string; invigilator: string | null; rows: { row: string; students: number; odel: boolean }[] }[]
+  }[]
+}
+
+export interface ExamDraftSummary {
+  id: string
+  term_id: string
+  name: string
+  status: string
+  shared_at: string | null
+  papers: number
+  placed: number
+  pinned: number
+  soft_scores: Record<string, number>
+  violations: { rule: string; message: string; paper_ids: string[] }[]
+  publishable: boolean
+}
+
+export interface ExamGrid {
+  draft: ExamDraftSummary
+  as_approved: boolean
+  version: number | null
+  days: { date: string; label: string }[]
+  sessions: ExamSessionTime[]
+  papers: ExamGridPaper[]
+  practicals: ExamPracticalItem[]
+  rooms: ExamRoomSheet[]
 }

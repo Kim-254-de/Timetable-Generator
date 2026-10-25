@@ -6,6 +6,7 @@ import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, FIRST_HOUR, HOURS, SCORE_LABELS, dateTime, termText } from '@/lib/format'
 import { BulkPaste } from '@/components/BulkPaste'
 import { DepartmentSubmissions } from '@/components/DepartmentSubmissions'
+import { ExamsTab } from '@/components/ExamsTab'
 import { rememberTerm } from '@/lib/lastTerm'
 import { printPdf } from '@/lib/print'
 import {
@@ -41,6 +42,7 @@ const TABS = [
   ['units', 'Units and groups'],
   ['runs', 'Generate'],
   ['drafts', 'Timetables and downloads'],
+  ['exams', 'Exams'],
 ] as const
 type Tab = (typeof TABS)[number][0]
 
@@ -80,6 +82,7 @@ export function TermPage() {
       {tab === 'units' && <UnitsTab termId={termId} />}
       {tab === 'runs' && <RunsTab termId={termId} />}
       {tab === 'drafts' && <DraftsTab termId={termId} />}
+      {tab === 'exams' && <ExamsTab termId={termId} />}
     </div>
   )
 }

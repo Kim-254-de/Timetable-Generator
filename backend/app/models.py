@@ -54,6 +54,7 @@ class RunMode(enum.StrEnum):
     FULL = "full"  # solve the whole term from scratch
     RESOLVE = "resolve"  # re-solve a draft around the Director's pinned sessions
     REPAIR = "repair"  # mid-term change: keep the published timetable where possible (S8, H13)
+    EXAM = "exam"  # the exam timetable: each paper to a date and session, then its students to rooms
 
 
 class RunStatus(enum.StrEnum):
@@ -87,6 +88,22 @@ class Term(Base):
     prepared_by_title: Mapped[str] = mapped_column(String(255), default="Director Examination & Timetabling")
     # Used for a unit whose own hours/session length aren't set.
     default_session_length: Mapped[int] = mapped_column(Integer, default=3)
+    # The exam period: dates, the weekdays used (0 = Monday), days off, the
+    # sessions of each day ({start, end} as HH:MM), and exam seats as a share
+    # of each room's teaching capacity (spacing).
+    exam_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    exam_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    exam_weekdays: Mapped[list[int]] = mapped_column(JSON, default=lambda: [0, 1, 2, 3, 4])
+    exam_days_off: Mapped[list[str]] = mapped_column(JSON, default=list)
+    exam_sessions: Mapped[list[dict[str, str]]] = mapped_column(
+        JSON,
+        default=lambda: [
+            {"start": "08:30", "end": "10:30"},
+            {"start": "11:30", "end": "13:30"},
+            {"start": "14:30", "end": "16:30"},
+        ],
+    )
+    exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -131,6 +148,14 @@ class Room(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Slots (0-59) the room can't be used, e.g. maintenance.
     unavailable: Mapped[list[int]] = mapped_column(JSON, default=list)
+    # Exam seats: capacity x the term's spacing unless set here; some rooms are never used for exams.
+    exam_seats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    for_exams: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    @property
+    def block(self) -> str:
+        """The block a big paper is kept within: the building, else the code's letters ('UTC 1' -> 'UTC')."""
+        return (self.building or "").strip().upper() or "".join(ch for ch in self.code if ch.isalpha()).upper()
 
 
 class Snapshot(Base):
@@ -259,6 +284,8 @@ class Run(Base):
     snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("snapshots.id", ondelete="RESTRICT"))
     mode: Mapped[RunMode] = mapped_column(_enum(RunMode, "run_mode"))
     base_draft_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("drafts.id", ondelete="SET NULL"), nullable=True)
+    # An exam re-solve's draft (exam drafts are their own table).
+    exam_base_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     # A re-solve that keeps every class of the published timetable where it is
     # (a late department imported after publishing).
     keep_published: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -385,3 +412,134 @@ class LoginAttempt(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     key: Mapped[str] = mapped_column(String(255))
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# -- exams ---------------------------------------------------------------------------------
+
+
+class ExamPaper(Base):
+    """
+    A written exam paper a department published in Smart Attendance: one or more
+    unit codes sat together ("BITE 131/COSC 130"), and the class rows that sit it.
+    """
+
+    __tablename__ = "exam_papers"
+    __table_args__ = (Index("ix_exam_paper_term", "term_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"))
+    allocator_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    department_id: Mapped[int] = mapped_column(Integer)
+    codes: Mapped[list[str]] = mapped_column(JSON)
+    title: Mapped[str] = mapped_column(String(255))
+    examiner_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    examiner_name: Mapped[str] = mapped_column(String(255), default="")
+    notes: Mapped[str] = mapped_column(String(500), default="")
+
+    rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def label(self) -> str:
+        return "/".join(self.codes)
+
+    @property
+    def students(self) -> int:
+        return sum(r.students for r in self.rows)
+
+
+class ExamPaperRow(Base):
+    """A class row sitting a paper, its students, and whether it is ODEL (seated apart from the others)."""
+
+    __tablename__ = "exam_paper_rows"
+
+    paper_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exam_papers.id", ondelete="CASCADE"), primary_key=True)
+    class_row_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("class_rows.id", ondelete="CASCADE"), primary_key=True)
+    students: Mapped[int] = mapped_column(Integer)
+    odel: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ExamPractical(Base):
+    """A practical on the date its department set; shown on the exam timetable, never moved."""
+
+    __tablename__ = "exam_practicals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
+    allocator_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    department_id: Mapped[int] = mapped_column(Integer)
+    codes: Mapped[list[str]] = mapped_column(JSON)
+    title: Mapped[str] = mapped_column(String(255))
+    date: Mapped[date] = mapped_column(Date)
+    start_time: Mapped[str] = mapped_column(String(5))
+    end_time: Mapped[str] = mapped_column(String(5))
+
+
+class ExamDraft(Base):
+    """
+    An exam timetable: each paper's date and session, and where its students
+    sit. Shared with departments so they can name invigilators.
+    """
+
+    __tablename__ = "exam_drafts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    name: Mapped[str] = mapped_column(String(120))
+    status: Mapped[DraftStatus] = mapped_column(_enum(DraftStatus, "draft_status"), default=DraftStatus.DRAFT)
+    soft_scores: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    placements: Mapped[list[ExamPlacement]] = relationship(cascade="all, delete-orphan", lazy="selectin")
+
+
+class ExamPlacement(Base):
+    """A paper's date and session in a draft, and its seating."""
+
+    __tablename__ = "exam_placements"
+    __table_args__ = (UniqueConstraint("draft_id", "paper_id", name="uq_exam_placement_paper"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exam_drafts.id", ondelete="CASCADE"), index=True)
+    paper_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exam_papers.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+    session: Mapped[int] = mapped_column(Integer)  # index into the term's exam sessions
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    seats: Mapped[list[ExamSeat]] = relationship(cascade="all, delete-orphan", lazy="selectin")
+
+
+class ExamSeat(Base):
+    """
+    Where a class row (or one part of a class row too big for any room) sits a
+    paper: every student is told one room.
+    """
+
+    __tablename__ = "exam_seats"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    placement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exam_placements.id", ondelete="CASCADE"), index=True)
+    room_id: Mapped[str] = mapped_column(String(64))
+    class_row_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    part: Mapped[int] = mapped_column(Integer, default=1)  # part 1 of `parts` when a row is split
+    parts: Mapped[int] = mapped_column(Integer, default=1)
+    students: Mapped[int] = mapped_column(Integer)
+
+
+class ExamPublication(Base):
+    """An approved exam timetable version, frozen: `payload` for SMARTTT, `record` for views and downloads."""
+
+    __tablename__ = "exam_publications"
+    __table_args__ = (UniqueConstraint("term_id", "version", name="uq_exam_publication_version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exam_drafts.id", ondelete="RESTRICT"))
+    published_by: Mapped[str] = mapped_column(String(255))
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    smarttt_response: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    record: Mapped[dict[str, Any]] = mapped_column(JSON)

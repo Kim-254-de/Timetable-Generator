@@ -138,22 +138,20 @@ def _set(obj: Any, values: dict[str, Any]) -> bool:
     return changed
 
 
-def import_departments(db: Session, teaching: TeachingClient, identity: Identity, term: Term) -> dict[str, Any]:
-    data = teaching.submissions(str(term.id))
-    published = list(data.get("published") or [])
-    if not published:
-        raise ApiError(409, "NOTHING_PUBLISHED", "No department has published its teaching for this term yet.")
-    changes = _Changes()
-    departments: dict[str, Department] = {}
-    for d in published:
-        departments[d["code"]] = _department(db, identity, d["code"], d["name"])
-
-    # Class rows, from every course the published units take (any department's).
+def upsert_class_rows(
+    db: Session,
+    identity: Identity,
+    term: Term,
+    courses: list[dict[str, Any]],
+    departments: dict[str, Department],
+    changes: dict[str, list[str]],
+) -> dict[str, ClassRow]:
+    """Attendance's courses as the term's class rows (by Attendance's id, else the label), by course id."""
     term_rows = list(db.scalars(select(ClassRow).where(ClassRow.term_id == term.id)))
     by_ref = {r.allocator_ref: r for r in term_rows if r.allocator_ref}
     by_label = {compact(r.label): r for r in term_rows}
     rows: dict[str, ClassRow] = {}
-    for c in data.get("courses") or []:
+    for c in courses:
         owner = departments.get(c["department_code"]) or _department(
             db, identity, c["department_code"], c["department_code"]
         )
@@ -172,12 +170,27 @@ def import_departments(db: Session, teaching: TeachingClient, identity: Identity
         if row is None:
             row = ClassRow(term_id=term.id, unavailable=[], **values)
             db.add(row)
-            changes.class_rows["added"].append(label)
+            changes["added"].append(label)
         elif _set(row, values):
-            changes.class_rows["changed"].append(label)
+            changes["changed"].append(label)
         by_label[compact(label)] = row
         rows[c["id"]] = row
     db.flush()
+    return rows
+
+
+def import_departments(db: Session, teaching: TeachingClient, identity: Identity, term: Term) -> dict[str, Any]:
+    data = teaching.submissions(str(term.id))
+    published = list(data.get("published") or [])
+    if not published:
+        raise ApiError(409, "NOTHING_PUBLISHED", "No department has published its teaching for this term yet.")
+    changes = _Changes()
+    departments: dict[str, Department] = {}
+    for d in published:
+        departments[d["code"]] = _department(db, identity, d["code"], d["name"])
+
+    # Class rows, from every course the published units take (any department's).
+    rows = upsert_class_rows(db, identity, term, data.get("courses") or [], departments, changes.class_rows)
 
     offerings = list(db.scalars(select(UnitOffering).where(UnitOffering.term_id == term.id)))
     offering_by_ref = {o.allocator_ref: o for o in offerings if o.allocator_ref}

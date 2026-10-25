@@ -64,6 +64,11 @@ class FakeTeaching:
         self.published: list[dict[str, Any]] = []
         self.not_published: list[dict[str, Any]] = []
         self.calls: list[str] = []
+        # Exams: published papers per department, and the invigilators named on the shared draft.
+        self.exam_courses: list[dict[str, Any]] = []
+        self.exam_published: list[dict[str, Any]] = []
+        self.exam_not_published: list[dict[str, Any]] = []
+        self.invigilators: dict[str, dict[str, dict[str, str]]] = {}
 
     def publish(self, code: str, name: str, units: list[dict[str, Any]], at: str = "2026-10-20T08:00:00+00:00") -> None:
         self.not_published = [d for d in self.not_published if d["code"] != code]
@@ -93,4 +98,27 @@ class FakeTeaching:
                 "not_published": copy.deepcopy(self.not_published),
             }
             return httpx.Response(200, json={"success": True, "data": data})
+        if path.startswith("/terms/") and path.endswith("/exams"):
+            data = {
+                "term_id": path.split("/")[2],
+                "courses": copy.deepcopy(self.exam_courses),
+                "published": copy.deepcopy(self.exam_published),
+                "not_published": copy.deepcopy(self.exam_not_published),
+            }
+            return httpx.Response(200, json={"success": True, "data": data})
+        if path.startswith("/terms/") and path.endswith("/invigilators"):
+            return httpx.Response(200, json={"success": True, "data": copy.deepcopy(self.invigilators)})
         return httpx.Response(404, json={"success": False})
+
+
+def paper(pid: str, codes: list[str], rows: list[tuple[str, int, str]], staff: str = "STF/9") -> dict[str, Any]:
+    """A published exam paper; rows are (course id, students, mode)."""
+    return {
+        "id": pid,
+        "codes": codes,
+        "title": f"{codes[0]} paper",
+        "examiner": {"staff_number": staff, "name": f"Dr. {staff}"},
+        "notes": "",
+        "rows": [{"course_id": c, "students": n, "mode": m} for c, n, m in rows],
+        "students": sum(n for _c, n, _m in rows),
+    }

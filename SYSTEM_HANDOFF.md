@@ -20,6 +20,14 @@ below that describes the Allocator is history.
   (staff number, FT/PT, weekly hour limit), paste from Excel, publish/reopen,
   and the allocation form as PDF, Word or Excel. Any department officer can
   publish. It replaces the portal's old Courses page (`course_offerings`).
+- **Exams too**: departments' exam papers (one per unit, or shared:
+  "BITE 131/COSC 130"), examiners, units with no written exam, practicals,
+  the moderation letter, and the invigilators named on the exam draft the
+  Director shares (Attendance `src/modules/teaching` exams/invigilation,
+  migration 041). Teaching, exam papers and invigilators each publish and
+  lock on their own. The Generator reads `.../terms/{term}/exams` and
+  `.../invigilators` from Attendance and serves the shared draft at
+  `/api/integrations/attendance/terms/{id}/exam-draft`.
 - **The Generator imports** what is published from Attendance:
   `GET /api/v1/integrations/generator/terms/{term}/submissions`, the same
   JSON the Allocator served (`app/clients/teaching.py`,
