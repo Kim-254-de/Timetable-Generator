@@ -72,3 +72,11 @@ def test_a_refused_key_is_said_on_the_sign_in_screen(client):
     response = _login(client)
     assert response.status_code == 503
     assert "ATTENDANCE_API_KEY" in response.json()["error"]["message"]
+
+
+def test_keys_pasted_with_spaces_or_quotes_are_cleaned():
+    from app.config import Settings
+
+    for raw in ("  abc123\n", '"abc123"', "'abc123' ", "abc123"):
+        settings = Settings(attendance_api_key=raw, smarttt_api_key=raw)
+        assert (settings.attendance_api_key, settings.smarttt_api_key) == ("abc123", "abc123")
