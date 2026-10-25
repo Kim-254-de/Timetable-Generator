@@ -103,8 +103,11 @@ On the term's **Exams** tab:
    extra room.
 6. **Approve and publish**: refused while any paper, or any extra room of a
    paper, has no invigilator. The
-   version is frozen with the SMARTTT payload (codes, date, times, seating
-   with invigilators); SMARTTT can't take exams yet, so it is approved here.
+   version is frozen and sent to SMARTTT (`generator/exam-publish/`: papers
+   with their codes, date and session, each class row's room with its main or
+   extra invigilator, the rooms, practicals). SMARTTT refusing it (e.g. a staff
+   number it doesn't know) approves nothing; SMARTTT down leaves it approved
+   here, and **Send to SMARTTT now** sends it later.
 7. **Download** (Word, PDF): the timetable in the Directorate's layout, room
    sheets (each room's invigilator, main or extra), and the invigilation
    roster per department (main and extra duties).
@@ -131,49 +134,19 @@ Not built in these two repos; SMARTTT needs these for the department-first flow:
   departments and the Director, so SMARTTT matches them by code (`unit_code`,
   `room_code`, programme code and year/semester), not by SMARTTT ids.
 
-### Exams: needs from SMARTTT and Smart Attendance
+### Exams in SMARTTT and Smart Attendance
 
-Not built in these two repos:
+SMARTTT's side is on its `exam-timetable` branch (Generator API key):
+`POST generator/exam-publish/` (the exam version), `GET generator/exam-mode/?term=`
+(the state), `POST`/`DELETE generator/exam-switch/` and `generator/exam-close/`
+(`{term_id, at | now: true, by}`; DELETE `?term=&by=` cancels). In exam mode
+SMARTTT hides the teaching timetable, shows students their papers and *their*
+room and lecturers their papers and duties, sends exam reminders instead of
+class reminders, notifies changes to the people affected, and pushes exam
+sessions and the mode to Smart Attendance, which refuses teaching classes and
+lets invigilators open exam sessions.
 
-- **SMARTTT**
-  - an exam publication endpoint taking the Generator's exam payload: per paper,
-    its codes, date, start and end, examiner, and seating
-    `[{room_code, class_row, part, parts, students, invigilator_staff_number}]`
-    (the room's invigilator: the main one in `main_room`, else that room's extra
-    one) and `main_invigilator_staff_number`;
-    until it exists, exam versions are approved in the Generator and marked
-    "not yet in SMARTTT";
-  - an exam view per student (each paper's date, time and *their* room) and per
-    lecturer (papers they set, invigilation duties);
-  - pushing exam sessions to Smart Attendance;
-  - an *Exams* tab in the SMARTTT app, shown first during the exam period.
-- **Smart Attendance**: an *exam* session type, one per paper per room, opened
-  by its invigilator; students check in only to their own paper and room; a
-  sat/absent report per paper for the invigilator.
-- **Switching SMARTTT to exams** (scheduled by the Director in the Generator):
-  - a term **mode**, `teaching` | `exams`, with `exam_switch_at`, `switched_at`,
-    `switched_by`, `exam_close_at`, `exam_closed_at` and `closed_by`; a
-    scheduled job flips the mode when `exam_switch_at` (or `exam_close_at`)
-    passes;
-  - Generator endpoints (Generator API key): `GET /api/v1/integrations/generator/exam-mode/?term=`
-    returns that state; `POST .../exam-mode/` with `{term_id, action, at, by}`,
-    `action` one of `schedule_switch` (also moves it), `cancel_switch`,
-    `switch_now`, `schedule_close`, `cancel_close`, `close_now`, returns the new
-    state (refuse `cancel_switch` once switched, code `already_switched`);
-  - in exam mode the teaching timetable is **hidden completely**: teaching slots
-    are not returned to the app (hidden, not deleted) until the next term's
-    teaching timetable is published;
-  - students' home screen shows only their papers (date, time, codes, title and
-    *their* room); lecturers see their papers (as examiner) and invigilation
-    duties (main, or extra in a room);
-  - exam reminders (the evening before, and 1 hour before each paper or duty)
-    replace class reminders;
-  - changes after the switch (a paper moved, a room changed) notify the
-    affected students and invigilators at once;
-  - the exam period closes when the Director closes it, or on its own when the
-    next term's teaching timetable is published; SMARTTT then shows that teaching.
-- **Smart Attendance** refuses opening teaching classes while the term is in
-  exam mode.
+The SMARTTT app's *Exams* tab is still to be built.
 
 ## Rules
 

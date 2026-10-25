@@ -33,7 +33,7 @@ def _smarttt_term(client: TestClient, allocator: FakeAllocator) -> tuple[str, da
     return term_id, first, last
 
 
-def _publish_exams(client: TestClient, allocator: FakeAllocator, term_id: str) -> None:
+def _publish_exams(client: TestClient, allocator: FakeAllocator, term_id: str, expect_ok: bool = True) -> None:
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
     draft_id = ok(client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/exam-drafts/{draft_id}/share"))
@@ -48,7 +48,11 @@ def _publish_exams(client: TestClient, allocator: FakeAllocator, term_id: str) -
         }
         for n, p in enumerate(shared["papers"])
     }
-    ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))
+    response = client.post(f"/api/exam-drafts/{draft_id}/publish")
+    if expect_ok:
+        ok(response)
+    else:
+        assert response.status_code == 422 and response.json()["error"]["code"] == "UNKNOWN_LECTURER"
 
 
 def _act(client: TestClient, term_id: str, action: str, at: str | None = None):
@@ -130,3 +134,47 @@ def test_close_the_exam_period_scheduled_or_now(client, allocator, smarttt: Fake
     assert state["status"] == "closed" and state["closed_by"] == "Dee Director (STF/0900)"
     assert state["label"].startswith("Closed on ")
     assert smarttt.exam_mode["mode"] == "teaching"
+
+
+def test_the_exam_version_goes_to_smarttt(client, allocator, smarttt: FakeSmarttt, db: Session):
+    sign_in(client)
+    term_id, first, _last = _smarttt_term(client, allocator)
+    _publish_exams(client, allocator, term_id)
+    [payload] = smarttt.exam_payloads
+    assert payload["term_id"] == TERM["id"] and payload["version"] == 1 and payload["based_on_version"] is None
+    assert payload["exam_start"] == first.isoformat()
+    assert all(p["start_time"] in ("08:30", "11:30", "14:30") for p in payload["papers"])
+    assert all(len([s for s in p["seating"] if s["role"] == "main"]) >= 1 for p in payload["papers"])
+    exams = ok(client.get(f"/api/terms/{term_id}/exams"))
+    assert exams["publications"][0]["sent_to_smarttt"] is True
+
+
+def test_smarttt_down_leaves_the_version_approved_to_send_later(client, allocator, smarttt: FakeSmarttt):
+    sign_in(client)
+    term_id, _first, _last = _smarttt_term(client, allocator)
+    smarttt.down = True
+    try:
+        _publish_exams(client, allocator, term_id)
+    finally:
+        smarttt.down = False
+    publication = ok(client.get(f"/api/terms/{term_id}/exams"))["publications"][0]
+    assert publication["sent_to_smarttt"] is False and publication["not_sent_reason"]
+    sent = ok(client.post(f"/api/terms/{term_id}/exam-publications/1/send"))
+    assert sent["smarttt"]["sent"] is True and len(smarttt.exam_payloads) == 1
+    again = client.post(f"/api/terms/{term_id}/exam-publications/1/send")
+    assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_SENT"
+
+
+def test_smarttt_refusing_the_exam_version_approves_nothing(client, allocator, smarttt: FakeSmarttt):
+    sign_in(client)
+    term_id, _first, _last = _smarttt_term(client, allocator)
+    smarttt.refuse_exams = {
+        "code": "unknown_lecturer",
+        "detail": "SMARTTT doesn't know 1 staff numbers.",
+        "staff_numbers": ["STF/0"],
+    }
+    try:
+        _publish_exams(client, allocator, term_id, expect_ok=False)
+    finally:
+        smarttt.refuse_exams = None
+    assert ok(client.get(f"/api/terms/{term_id}/exams"))["publications"] == []

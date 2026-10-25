@@ -124,9 +124,22 @@ class SmartttClient:
         """
         Schedules, moves or cancels the switch to exams, or switches now; or
         schedules, cancels or does the close of the exam period. Returns the new state.
+
+        exam-switch/ and exam-close/: POST {term_id, at | now: true, by} schedules
+        (or moves) or acts now; DELETE ?term=&by= cancels.
         """
-        body = {"term_id": term_id, "action": action, "at": at, "by": by}
-        return dict(self._json(self._request("POST", "/exam-mode/", json=body)))
+        path = "/exam-switch/" if action.endswith("_switch") or action == "switch_now" else "/exam-close/"
+        if action.startswith("cancel_"):
+            return dict(self._json(self._request("DELETE", path, params={"term": term_id, "by": by})))
+        body: dict[str, Any] = {"term_id": term_id, "by": by}
+        body.update({"now": True} if action in ("switch_now", "close_now") else {"at": at})
+        return dict(self._json(self._request("POST", path, json=body)))
+
+    def publish_exams(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """(status, result). 201 = published now, 200 = this exam version was already published."""
+        response = self._request("POST", "/exam-publish/", json=payload)
+        body = self._json(response)
+        return response.status_code, dict(body)
 
 
 def _body(response: httpx.Response) -> dict[str, Any]:

@@ -10,6 +10,7 @@ import {
   useImportExams,
   usePatchExamPeriod,
   useRuns,
+  useSendExamPublication,
   useStartExamRun,
 } from '@/lib/queries'
 import type { ExamPeriod, ExamSessionTime } from '@/lib/types'
@@ -25,6 +26,7 @@ export function ExamsTab({ termId }: { termId: string }) {
   const departments = useExamDepartments(termId)
   const importExams = useImportExams(termId)
   const start = useStartExamRun(termId)
+  const send = useSendExamPublication(termId)
   const runs = useRuns(termId)
   const [minutes, setMinutes] = useState(5)
 
@@ -147,9 +149,16 @@ export function ExamsTab({ termId }: { termId: string }) {
                 <Link to={`/terms/${termId}/exam-drafts/${p.draft_id}`} className="font-medium text-brand-ink">Version {p.version}</Link>
                 {' '}· {dateTime(p.published_at)} by {p.published_by}
                 {!p.sent_to_smarttt && <span className="block text-warning">Not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
+                {!p.sent_to_smarttt && p.version === data.publications[0]?.version && (
+                  <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
+                    className="mt-1 rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-warning disabled:opacity-50">
+                    {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
+                  </button>
+                )}
               </li>
             ))}
             {data.publications.length === 0 && <li className="text-muted">Nothing published yet.</li>}
+            {send.isError && <li role="alert" className="text-danger">{errorMessage(send.error)}</li>}
           </ul>
         </section>
       </div>

@@ -379,3 +379,8 @@ export function useExamSwitchAction(termId: string) {
     onSuccess: (state) => qc.setQueryData(['exam-switch', termId], state),
   })
 }
+
+/** Sends an approved exam version SMARTTT missed (it was down), exactly as approved. */
+export const useSendExamPublication = (termId: string) =>
+  useExamMutation(termId, (version: number) =>
+    post<{ version: number; smarttt: { sent?: boolean; reason?: string } }>(`/terms/${termId}/exam-publications/${version}/send`, {}))

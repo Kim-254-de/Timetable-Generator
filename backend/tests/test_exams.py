@@ -195,11 +195,18 @@ def test_import_generate_share_and_publish(client, allocator, db: Session):
     by_key = {p["key"]: p for p in publication.payload["papers"]}
     seat = by_key["p-200"]["seating"][0]
     assert seat["room_code"] and seat["students"] == 120 and seat["invigilator_staff_number"] == "STF/1"
+    # SMARTTT's exam-publish shape: the main invigilator in the main room, an extra one in each other room.
     epsc = by_key["p-epsc"]
-    assert epsc["main_invigilator_staff_number"] == "STF/3"
-    in_rooms = {s["room_code"]: s["invigilator_staff_number"] for s in epsc["seating"]}
-    assert in_rooms[epsc["main_room"]] == "STF/3" and in_rooms[extras["p-epsc"][0]].startswith("STF/X")
-    assert by_key["p-shared"]["codes"] == ["BITE 131", "COSC 130"] and by_key["p-shared"]["start_time"]
+    roles = {s["room_code"]: (s["role"], s["invigilator_staff_number"]) for s in epsc["seating"]}
+    assert sorted(r for r, _staff in roles.values()) == ["extra", "main"]
+    assert roles[extras["p-epsc"][0]][0] == "extra" and roles[extras["p-epsc"][0]][1].startswith("STF/X")
+    assert next(staff for role, staff in roles.values() if role == "main") == "STF/3"
+    assert {(s["part"], s["parts"]) for s in epsc["seating"]} == {(1, 2), (2, 2)}
+    assert epsc["seating"][0]["class_rows"] == [
+        {"program": "BED.ARTS", "year_of_study": 2, "study_semester": 1, "stream": ""}
+    ]
+    assert by_key["p-shared"]["unit_codes"] == ["BITE 131", "COSC 130"] and by_key["p-shared"]["start_time"]
+    assert {r["code"] for r in publication.payload["rooms"]} >= {s["room_code"] for s in epsc["seating"]}
 
     # Downloads: the timetable, room sheets and roster.
     timetable = client.get(f"/api/exam-drafts/{draft_id}/export/timetable.docx")

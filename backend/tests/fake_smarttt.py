@@ -165,6 +165,8 @@ class FakeSmarttt:
             "closed_by": None,
         }
         self.exam_mode_calls: list[dict[str, Any]] = []
+        self.exam_payloads: list[dict[str, Any]] = []
+        self.refuse_exams: dict[str, Any] | None = None
 
     def identity(self, account: str, office: bool) -> dict[str, Any]:
         return {
@@ -222,18 +224,34 @@ class FakeSmarttt:
             self.publications[body["version"]] = publication
             return httpx.Response(201, json=publication)
         if route == "/exam-mode/":
-            if request.method == "GET":
-                return httpx.Response(200, json=self.exam_mode)
-            return self._exam_mode_action(body)
+            return httpx.Response(200, json=self.exam_mode)
+        if route in ("/exam-switch/", "/exam-close/"):
+            return self._exam_mode_action(route, request.method, body, params)
+        if route == "/exam-publish/":
+            self.exam_payloads.append(body)
+            if self.refuse_exams:
+                return httpx.Response(422, json=self.refuse_exams)
+            return httpx.Response(201, json={"version": body["version"], "papers": len(body["papers"])})
         return httpx.Response(404, json={"detail": f"No route {route}"})
 
-    def _exam_mode_action(self, body: dict[str, Any]) -> httpx.Response:
+    def _exam_mode_action(
+        self, route: str, method: str, body: dict[str, Any], params: dict[str, Any]
+    ) -> httpx.Response:
+        """SMARTTT's exam-switch/ and exam-close/: POST {term_id, at | now, by}; DELETE ?term=&by= cancels."""
         from datetime import UTC, datetime
 
-        self.exam_mode_calls.append(body)
-        state, action, now = self.exam_mode, body["action"], datetime.now(UTC).isoformat()
+        switch = route == "/exam-switch/"
+        if method == "DELETE":
+            action = "cancel_switch" if switch else "cancel_close"
+            call = {"term_id": params.get("term"), "action": action, "at": None, "by": params.get("by")}
+        else:
+            action = ("switch" if switch else "close") + ("_now" if body.get("now") else "")
+            action = {"switch": "schedule_switch", "close": "schedule_close"}.get(action, action)
+            call = {"term_id": body["term_id"], "action": action, "at": body.get("at"), "by": body.get("by")}
+        self.exam_mode_calls.append(call)
+        state, now = self.exam_mode, datetime.now(UTC).isoformat()
         if action == "schedule_switch":
-            state["exam_switch_at"] = body["at"]
+            state["exam_switch_at"] = call["at"]
         elif action == "cancel_switch":
             if state["switched_at"]:
                 return httpx.Response(
@@ -241,11 +259,11 @@ class FakeSmarttt:
                 )
             state["exam_switch_at"] = None
         elif action == "switch_now":
-            state.update(mode="exams", exam_switch_at=now, switched_at=now, switched_by=body["by"])
+            state.update(mode="exams", exam_switch_at=now, switched_at=now, switched_by=call["by"])
         elif action == "schedule_close":
-            state["exam_close_at"] = body["at"]
+            state["exam_close_at"] = call["at"]
         elif action == "cancel_close":
             state["exam_close_at"] = None
         elif action == "close_now":
-            state.update(mode="teaching", exam_close_at=now, exam_closed_at=now, closed_by=body["by"])
+            state.update(mode="teaching", exam_close_at=now, exam_closed_at=now, closed_by=call["by"])
         return httpx.Response(200, json=state)
