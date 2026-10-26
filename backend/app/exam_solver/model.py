@@ -15,12 +15,28 @@ Hard rules:
   H-E7 a main invigilator named before generating is in one paper per slot.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
+
+Papers nobody is known to sit (no class rows: nobody synced the unit yet) are
+still kept apart, by a guess: units of one subject and year ("BPPA 110",
+"BPPA 121": BPPA, year 1) are usually sat by the same class. S-E4 keeps such a
+guessed class to one paper a session and two a day, and S-E5 spreads these
+papers evenly over the period instead of stacking them in one session. Both
+are soft (heavily weighted): a guess must never make a timetable impossible.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
+
+_CODE = re.compile(r"^\s*([A-Za-z]{2,6})\s*-?\s*0*([1-9])\d*")
+
+
+def guessed_class(code: str) -> str | None:
+    """'BPPA 110' -> 'BPPA year 1'; 'COSC 0172' -> 'COSC year 1'; None when the code doesn't say."""
+    m = _CODE.match(code)
+    return f"{m.group(1).upper()} year {m.group(2)}" if m else None
 
 
 @dataclass(frozen=True)
@@ -48,6 +64,11 @@ class Paper:
     pinned: int | None = None  # slot, when the Director pinned it
     previous: int | None = None  # where a re-solve's base draft had it (a hint)
     invigilator: str | None = None  # the main invigilator's staff number, when named before generating
+    codes: tuple[str, ...] = ()  # its unit codes, to guess who sits it when no class row is known
+
+    @property
+    def unknown_students(self) -> bool:
+        return not self.rows
 
     @property
     def students(self) -> int:
@@ -63,6 +84,9 @@ class ExamWeights:
     back_to_back: int = 50  # S-E1 per class row with papers in consecutive sessions of a day
     same_day: int = 10  # S-E2 per class row with two papers on one day
     big_late: int = 1  # S-E3 per 100 students per day into the period
+    guessed_clash: int = 1000  # S-E4 per extra paper of a guessed class in one session
+    guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
+    spread: int = 20  # S-E5 per paper with no students known over an even share of a session
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
@@ -112,6 +136,16 @@ class ExamProblem:
         for p in self.papers:
             if p.invigilator:
                 out.setdefault(p.invigilator, []).append(p)
+        return out
+
+    def guessed_classes(self) -> dict[str, list[Paper]]:
+        """Papers nobody is known to sit, by the class their codes suggest (S-E4)."""
+        out: dict[str, list[Paper]] = {}
+        for p in self.papers:
+            if not p.unknown_students:
+                continue
+            for group in sorted({g for g in map(guessed_class, p.codes) if g}):
+                out.setdefault(group, []).append(p)
         return out
 
     def rows(self) -> dict[str, list[Paper]]:

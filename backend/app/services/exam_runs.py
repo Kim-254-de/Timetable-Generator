@@ -45,6 +45,7 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
                 pinned=slot if pl is not None and pl.pinned else None,
                 previous=slot,
                 invigilator=p.invigilator_staff_number,
+                codes=tuple(p.codes or ()),
             )
         )
     labels = {str(r.id): r.label for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
