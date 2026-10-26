@@ -28,7 +28,16 @@ def ok(response: Any) -> Any:
 
 def setup_exams(client: TestClient, teaching: FakeTeaching) -> str:
     term = ok(
-        client.post("/api/terms", json={"academic_year": "2026/2027", "semester": 1, "name": "Semester I 2026/2027"})
+        client.post(
+            "/api/terms",
+            json={
+                "academic_year": "2026/2027",
+                "semester": 1,
+                "name": "Semester I 2026/2027",
+                "start_date": "2026-09-07",
+                "end_date": "2026-12-18",
+            },
+        )
     )
     rows = [
         {"code": "ADM 1", "building": "ADM", "capacity": "100", "room_type": "Lecture hall"},
@@ -95,7 +104,7 @@ def test_the_exam_period_and_exam_seats(client, teaching):
     assert rooms["UTC 1"]["block"] == "UTC"
 
 
-def test_import_generate_share_and_publish(client, teaching, db: Session):
+def test_import_generate_share_and_publish(client, teaching, smarttt, db: Session):
     sign_in(client)
     term_id = setup_exams(client, teaching)
     status = ok(client.get(f"/api/terms/{term_id}/exam-departments"))
@@ -154,6 +163,9 @@ def test_import_generate_share_and_publish(client, teaching, db: Session):
     )
     assert {p["paper_ref"] for p in shared_view["papers"]} == {"p-shared", "p-200", "p-301", "p-epsc"}
     assert all(p["rooms"] and p["start_time"] for p in shared_view["papers"])
+    # Codes as a list, the way Smart Attendance's invigilator page reads them.
+    shared_paper = next(p for p in shared_view["papers"] if p["paper_ref"] == "p-shared")
+    assert shared_paper["codes"] == ["BITE 131", "COSC 130"] and shared_paper["sitting"] == "regular"
     refused = client.post(f"/api/exam-drafts/{draft_id}/publish")
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "NO_INVIGILATOR"
     teaching.invigilators = {
@@ -161,7 +173,7 @@ def test_import_generate_share_and_publish(client, teaching, db: Session):
         for n, ref in enumerate(["p-shared", "p-200", "p-301", "p-epsc"])
     }
     published = ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))
-    assert published["version"] == 1 and published["smarttt"]["sent"] is False
+    assert published["version"] == 1 and published["smarttt"]["sent"] is True
 
     publication = db.scalar(select(ExamPublication).where(ExamPublication.draft_id == uuid.UUID(draft_id)))
     assert publication is not None
@@ -169,6 +181,16 @@ def test_import_generate_share_and_publish(client, teaching, db: Session):
     seat = by_key["p-200"]["seating"][0]
     assert seat["room_code"] and seat["students"] == 120 and seat["invigilator_staff_number"] == "STF/1"
     assert by_key["p-shared"]["codes"] == ["BITE 131", "COSC 130"] and by_key["p-shared"]["start_time"]
+    # Each class row's programme, year and stream, so SMARTTT can show students their own room.
+    assert (seat["program_code"], seat["year_of_study"], seat["study_semester"]) == ("BSC.CS", 1, 1)
+    odel = next(s for s in by_key["p-shared"]["seating"] if s["class_row"] == "BSC.CS Y1S1 (ODEL)")
+    assert odel["stream"] == "ODEL"
+
+    # SMARTTT received it, with the practicals.
+    sent = smarttt.exam_payloads[-1]
+    assert sent["version"] == 1 and sent["based_on_version"] is None
+    assert sent["practicals"][0]["codes"] == ["COSC 200"] and sent["practicals"][0]["date"] == "2026-11-20"
+    assert ok(client.get(f"/api/terms/{term_id}/exams"))["publications"][0]["sent_to_smarttt"] is True
 
     # Downloads: the timetable, room sheets and roster.
     timetable = client.get(f"/api/exam-drafts/{draft_id}/export/timetable.docx")
@@ -192,3 +214,82 @@ def test_generating_needs_the_period_rooms_and_papers(client, teaching):
     assert refused.status_code == 409
     codes = {p["code"] for p in refused.json()["error"]["details"]["problems"]}
     assert codes == {"no_period", "no_papers"}
+
+
+def _generate(client: TestClient, term_id: str) -> str:
+    run = ok(client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 20}))
+    assert run["status"] == "succeeded", run
+    return str(run["draft_id"])
+
+
+def test_an_exam_version_smarttt_missed_is_sent_later(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    draft_id = _generate(client, term_id)
+    ok(client.post(f"/api/exam-drafts/{draft_id}/share"))
+    teaching.invigilators = {
+        ref: {"": {"staff_number": f"STF/{n}", "name": f"Dr. Invigilator {n}"}}
+        for n, ref in enumerate(["p-shared", "p-200", "p-301", "p-epsc"])
+    }
+    smarttt.down = True
+    published = ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))
+    assert published["version"] == 1 and published["smarttt"]["sent"] is False
+    (version,) = ok(client.get(f"/api/terms/{term_id}/exams"))["publications"]
+    assert version["sent_to_smarttt"] is False and version["can_send"] is True
+
+    down = client.post(f"/api/terms/{term_id}/exam-publications/1/send")
+    assert down.status_code == 503
+    smarttt.down = False
+    sent = ok(client.post(f"/api/terms/{term_id}/exam-publications/1/send"))
+    assert sent["sent_to_smarttt"] is True and sent["can_send"] is False
+    assert smarttt.exam_publications[1]["paper_count"] == 4
+    again = client.post(f"/api/terms/{term_id}/exam-publications/1/send")
+    assert again.json()["error"]["code"] == "ALREADY_SENT"
+
+
+def test_an_odel_paper_of_the_same_unit_is_its_own_paper(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    # COSC 200's ODEL class sits a separate paper, as Smart Attendance sends it.
+    teaching.exam_published[0]["papers"].append(
+        {**paper("p-200-odel", ["COSC 200"], [("c-odel", 30, "odel")]), "sitting": "odel"}
+    )
+    result = ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    assert "COSC 200 (ODEL)" in result["papers"]["added"] and "COSC 200" in result["papers"]["added"]
+    draft_id = _generate(client, term_id)
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/exam-drafts/{draft_id}"))["papers"]}
+    assert papers["COSC 200 (ODEL)"]["sitting"] == "odel" and papers["COSC 200"]["sitting"] == "regular"
+    assert {s["row"] for s in papers["COSC 200 (ODEL)"]["seating"]} == {"BSC.CS Y1S1 (ODEL)"}
+
+    ok(client.post(f"/api/exam-drafts/{draft_id}/share"))
+    teaching.invigilators = {
+        ref: {"": {"staff_number": f"STF/{n}", "name": f"Dr. Invigilator {n}"}}
+        for n, ref in enumerate(["p-shared", "p-200", "p-301", "p-epsc", "p-200-odel"])
+    }
+    assert ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))["smarttt"]["sent"] is True
+    sent = {p["key"]: p for p in smarttt.exam_payloads[-1]["papers"]}
+    # SMARTTT gets the codes as they are, and the sitting beside them.
+    assert (sent["p-200-odel"]["codes"], sent["p-200-odel"]["sitting"]) == (["COSC 200"], "odel")
+    assert sent["p-200"]["sitting"] == "regular"
+
+
+def test_the_timetable_pdf_holds_a_session_busier_than_a_page():
+    """At full size (899 papers) one session had 86 papers: its day must not overflow the page."""
+    from types import SimpleNamespace
+
+    from app.services import exam_export
+
+    day = {"date": "2026-12-01", "label": "TUE 01/12/2026"}
+    papers = [
+        {"codes": f"COSC {100 + i}", "day": day["date"], "session": 0, "seating": [{"room": f"UTC {i % 14}"}]}
+        for i in range(150)
+    ]
+    rec = {"days": [day], "sessions": [{"start": "08:30", "end": "10:30"}], "papers": papers, "practicals": []}
+    term = SimpleNamespace(
+        academic_year="2026/2027", semester=1, name="Semester I", prepared_by="", prepared_by_title=""
+    )
+    pdf = exam_export.timetable_pdf(term, rec, 1, "Director")
+    assert pdf[:4] == b"%PDF"
+    rows = exam_export._fit_pages(exam_export.timetable_table(rec)[1])
+    assert [r[0] for r in rows] == ["TUE 01/12/2026"] + ["TUE 01/12/2026 (cont.)"] * 3

@@ -355,6 +355,8 @@ export interface ExamPublicationItem {
   published_at: string
   sent_to_smarttt: boolean
   not_sent_reason: string | null
+  /** Not yet in SMARTTT, the latest version, and SMARTTT has the term: it can be sent now. */
+  can_send: boolean
 }
 
 export interface ExamOverview {

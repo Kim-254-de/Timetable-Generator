@@ -113,6 +113,12 @@ class SmartttClient:
         body = self._json(response)
         return response.status_code, dict(body)
 
+    def publish_exams(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """(status, result) for an exam version. 201 = published now, 200 = already published."""
+        response = self._request("POST", "/exams/publish/", json=payload)
+        body = self._json(response)
+        return response.status_code, dict(body)
+
     def publication(self, term_id: str, version: int) -> dict[str, Any]:
         return dict(self._json(self._request("GET", f"/publish/{int(version)}/", params={"term": term_id})))
 
