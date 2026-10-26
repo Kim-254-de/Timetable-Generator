@@ -11,7 +11,8 @@ Hard rules:
   H-E3 a slot's students fit the exam seats of all rooms;
   H-E4 papers only in the period's slots, pinned papers stay;
   H-E6 every class row (or part of one) sits in one room, rooms within their
-       exam seats, a paper's ODEL students apart from its other students.
+       exam seats, a paper's ODEL students apart from its other students;
+  H-E7 a main invigilator named before generating is in one paper per slot.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
 """
@@ -46,6 +47,7 @@ class Paper:
     rows: tuple[Sitting, ...]
     pinned: int | None = None  # slot, when the Director pinned it
     previous: int | None = None  # where a re-solve's base draft had it (a hint)
+    invigilator: str | None = None  # the main invigilator's staff number, when named before generating
 
     @property
     def students(self) -> int:
@@ -103,6 +105,14 @@ class ExamProblem:
     @property
     def total_seats(self) -> int:
         return sum(r.seats for r in self.rooms)
+
+    def invigilators(self) -> dict[str, list[Paper]]:
+        """Each main invigilator's papers, for those named before generating."""
+        out: dict[str, list[Paper]] = {}
+        for p in self.papers:
+            if p.invigilator:
+                out.setdefault(p.invigilator, []).append(p)
+        return out
 
     def rows(self) -> dict[str, list[Paper]]:
         """Each class row's papers."""

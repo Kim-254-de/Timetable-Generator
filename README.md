@@ -36,6 +36,9 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    is downloadable on each screen):
    - **Lecture halls**: code, building, capacity, type (lecture hall, lab,
      seminar room), available or closed, blocked hours. Shared by every term.
+     **Bring in from SMARTTT** takes the rooms and capacities the admin
+     uploaded there (by code), and importing exam papers does it first;
+     exam seats, "for exams" and blocked hours set here stay.
    - **Departments**: code, name, school, number of lecturers (caps how many of
      its classes run at once). Shared by every term.
    - **Class rows**: programme, year, study semester, sub class, department,
@@ -112,6 +115,11 @@ On the term's **Exams** tab:
    in Smart Attendance: each paper's main invigilator (in its main room, the
    one with most of its students; collects every room's scripts) and one extra
    invigilator for each extra room.
+   A main invigilator a department names before the timetable is generated
+   comes in with the papers, and the solver keeps that person's papers in
+   different sessions (rule H-E7). A paper nobody is known to sit (no class
+   rows: nobody synced it, e.g. part-time students) still gets a date and
+   session, with no room ("room to be announced") and no invigilator needed.
 6. **Approve and publish**: refused while any paper, or any extra room of a
    paper, has no invigilator. The
    version is frozen and sent to SMARTTT (`generator/exam-publish/`: papers

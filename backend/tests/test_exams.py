@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ExamPublication
+from app.models import ExamPaper, ExamPublication
 from tests.conftest import sign_in
 from tests.fake_smarttt import TERM
 from tests.fake_teaching import FakeTeaching, course, paper
@@ -334,3 +334,25 @@ def test_the_timetable_pdf_holds_a_session_busier_than_a_page():
     assert pdf[:4] == b"%PDF"
     rows = exam_export._fit_pages(exam_export.timetable_table(rec)[1])
     assert [r[0] for r in rows] == ["TUE 01/12/2026"] + ["TUE 01/12/2026 (cont.)"] * 3
+
+
+def test_a_paper_nobody_synced_is_timetabled_and_published_without_a_room(client, teaching, smarttt, db: Session):
+    sign_in(client)
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
+    # Part-time students may never sync the unit: no class rows, yet it is offered and needs a date.
+    nobody = paper("p-nobody", ["MATH 100"], [])
+    nobody["invigilator"] = {"staff_number": "STF/7", "name": "Dr. Seven"}
+    teaching.exam_published[0]["papers"].append(nobody)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    stored = db.scalar(select(ExamPaper).where(ExamPaper.allocator_ref == "p-nobody"))
+    assert stored is not None and stored.invigilator_staff_number == "STF/7" and stored.rows == []
+    draft_id = _generate(client, term_id)
+    grid = ok(client.get(f"/api/exam-drafts/{draft_id}"))
+    placed = next(p for p in grid["papers"] if p["codes"] == "MATH 100")
+    assert placed["day"] is not None and placed["seating"] == []
+    ok(client.post(f"/api/exam-drafts/{draft_id}/share"))
+    _name_invigilators(client, teaching, term_id)
+    del teaching.invigilators["p-nobody"]  # no room, so nobody to name
+    assert ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))["smarttt"]["sent"] is True
+    sent = next(p for p in smarttt.exam_payloads[-1]["papers"] if p["key"] == "p-nobody")
+    assert sent["seating"] == [] and sent["date"]

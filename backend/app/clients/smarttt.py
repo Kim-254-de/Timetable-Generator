@@ -104,6 +104,10 @@ class SmartttClient:
     def terms(self) -> list[dict[str, Any]]:
         return list(self._json(self._request("GET", "/terms/"))["terms"])
 
+    def rooms(self) -> list[dict[str, Any]]:
+        """Every room the admin uploaded to SMARTTT: code, building, capacity, room_type, status."""
+        return list(self._json(self._request("GET", "/rooms/")).get("rooms") or [])
+
     def snapshot(self, term_id: str) -> dict[str, Any]:
         return dict(self._json(self._request("GET", "/snapshot/", params={"term": term_id})))
 

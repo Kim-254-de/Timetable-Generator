@@ -96,6 +96,15 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
                 m.add(sum(day_terms) - 1 <= c)
                 mm.penalties.append(w.same_day * c)
 
+    # H-E7: one main invigilator, one paper per slot.
+    for staff, papers in problem.invigilators().items():
+        if len(papers) < 2:
+            continue
+        for t in slots:
+            terms = [x[p.id, t] for p in papers if (p.id, t) in x]
+            if len(terms) > 1:
+                mm.limit(terms, 1, f"H-E7|{staff}")
+
     seats = problem.total_seats
     if sum(p.students for p in problem.papers) > seats:
         for t in slots:

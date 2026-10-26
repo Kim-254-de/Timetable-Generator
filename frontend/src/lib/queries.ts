@@ -153,6 +153,9 @@ export const useSaveRoom = () =>
     id ? patch<RoomRecord>(`/rooms/${id}`, body) : post<RoomRecord>('/rooms', body),
   )
 export const useDeleteRoom = () => useMasterMutation(keys.roomList, (id: string) => api.delete(`/rooms/${id}`))
+/** The rooms and capacities the admin uploaded to SMARTTT, brought in by code. */
+export const useSyncRooms = () =>
+  useMasterMutation(keys.roomList, () => post<{ added: string[]; updated: string[]; only_here: string[] }>('/rooms/sync', {}))
 export const useBulkRooms = () =>
   useMasterMutation(keys.roomList, (rows: Record<string, string>[]) => post<BulkResult>('/rooms/bulk', { rows }))
 

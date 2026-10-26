@@ -447,6 +447,8 @@ class ExamPaper(Base):
     examiner_name: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(500), default="")
     sitting: Mapped[str] = mapped_column(String(10), default="regular", server_default="regular")
+    # The main invigilator a department named before the timetable is generated: their papers go in different sessions.
+    invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

@@ -37,7 +37,7 @@ from app.api.schemas import (
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
 from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
-from app.clients.smarttt import SmartttClient, get_smarttt
+from app.clients.smarttt import SmartttClient, SmartttError, get_smarttt
 from app.clients.teaching import TeachingClient, get_teaching
 from app.config import Settings, get_settings
 from app.db import get_db
@@ -198,6 +198,12 @@ def create_room(body: RoomBody, identity: Me, db: Db) -> dict[str, Any]:
 @router.post("/rooms/bulk")
 def bulk_rooms(body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
     return ok(master.bulk_rooms(db, identity, body.rows))
+
+
+@router.post("/rooms/sync")
+def sync_rooms(identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """The rooms and capacities the admin uploaded to SMARTTT."""
+    return ok(master.sync_rooms(db, smarttt, identity))
 
 
 @router.patch("/rooms/{room_id}")
@@ -538,8 +544,14 @@ def exam_departments(term_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[
 
 
 @router.post("/terms/{term_id}/exams/import")
-def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
-    return ok(exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id)))
+def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching, smarttt: Smarttt) -> dict[str, Any]:
+    """Departments' published papers, after bringing the admin's rooms in from SMARTTT (best effort)."""
+    try:
+        rooms: dict[str, Any] = master.sync_rooms(db, smarttt, identity)
+    except SmartttError as down:
+        db.rollback()
+        rooms = {"error": getattr(down, "message", None) or "SMARTTT can't be reached; the rooms here were used."}
+    return ok({**exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id)), "rooms": rooms})
 
 
 @router.post("/exam-runs")

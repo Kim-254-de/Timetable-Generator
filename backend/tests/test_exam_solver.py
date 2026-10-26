@@ -91,3 +91,25 @@ def test_an_impossible_session_is_explained():
     assert status == "INFEASIBLE" and slots == {}
     reasons = sessions.explain(problem, 5)
     assert reasons and reasons[0]["rule"] == "H-E3"
+
+
+def test_a_main_invigilator_named_before_generating_has_one_paper_per_slot():
+    # Three papers of different classes, all with Dr. Otieno as main invigilator; a day of three sessions.
+    papers = [Paper(id=f"P{i}", label=f"P{i}", rows=(Sitting(f"R{i}", 30),), invigilator="STF/0001") for i in range(3)]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 200)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert sorted(result.slots.values()) == [0, 1, 2]
+    assert check(problem, result.slots, result.seats) == []
+    clash = check(problem, {"P0": 0, "P1": 0, "P2": 1})
+    assert [v.rule for v in clash] == ["H-E7"] and "STF/0001 invigilates P0 and P1" in clash[0].message
+
+
+def test_a_paper_nobody_is_known_to_sit_gets_a_slot_and_no_room():
+    papers = [_paper("SEATED", ("R1", 40)), Paper(id="NOBODY", label="NOBODY", rows=())]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=2, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert set(result.slots) == {"SEATED", "NOBODY"}
+    assert [s.paper_id for s in result.seats] == ["SEATED"]
+    assert check(problem, result.slots, result.seats) == []

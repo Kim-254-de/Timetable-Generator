@@ -143,7 +143,7 @@ function Grid({ data, search, flagged, onPick }: {
                       title={`${p.title} · ${p.students} students${p.pinned ? ' · pinned' : ''}`}
                       className={clsx('mb-1 block w-full rounded border px-1.5 py-1 text-left',
                         flagged.has(p.id) ? 'border-danger/40 bg-danger-soft' : 'border-line bg-surface', onPick && 'hover:border-brand')}>
-                      <b>{p.codes}</b> → {roomsOf(p).join(', ')}
+                      <b>{p.codes}</b> → {roomsOf(p).join(', ') || 'room to be announced (no students known)'}
                       <span className="block text-muted">{p.students} students{p.pinned ? ' · pinned' : ''}</span>
                     </button>
                   ))}

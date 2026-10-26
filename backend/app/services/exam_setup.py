@@ -144,6 +144,7 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                 if r["course_id"] in rows
             )
             examiner = p.get("examiner") or {}
+            invigilator = p.get("invigilator") or {}
             values = {
                 "department_id": dept.id,
                 "codes": list(p["codes"]),
@@ -152,6 +153,7 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                 "examiner_name": examiner.get("name") or "",
                 "notes": p.get("notes") or "",
                 "sitting": "odel" if p.get("sitting") == "odel" else "regular",
+                "invigilator_staff_number": (invigilator.get("staff_number") or "").strip().upper() or None,
             }
             paper = existing.get(p["id"])
             label = "/".join(p["codes"]) + (" (ODEL)" if values["sitting"] == "odel" else "")

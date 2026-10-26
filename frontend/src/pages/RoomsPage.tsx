@@ -4,7 +4,7 @@ import { BulkPaste, type BulkColumn } from '@/components/BulkPaste'
 import { Dialog, Field, inputClass } from '@/components/Dialog'
 import { SlotPicker } from '@/components/SlotPicker'
 import { errorMessage } from '@/lib/api'
-import { useBulkRooms, useDeleteRoom, useRoomList, useSaveRoom, type RoomInput } from '@/lib/queries'
+import { useBulkRooms, useDeleteRoom, useRoomList, useSaveRoom, useSyncRooms, type RoomInput } from '@/lib/queries'
 import type { RoomRecord, RoomType } from '@/lib/types'
 
 export const ROOM_TYPE_NAMES: Record<RoomType, string> = { lecture_hall: 'Lecture hall', lab: 'Lab', seminar: 'Seminar room' }
@@ -24,6 +24,7 @@ export function RoomsPage() {
   const rooms = useRoomList()
   const remove = useDeleteRoom()
   const bulk = useBulkRooms()
+  const sync = useSyncRooms()
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<RoomRecord | 'new' | null>(null)
   const [hours, setHours] = useState<RoomRecord | null>(null)
@@ -46,6 +47,10 @@ export function RoomsPage() {
           </p>
         </div>
         <div className="flex gap-2 text-sm">
+          <button onClick={() => sync.mutate()} disabled={sync.isPending} className="rounded-md border border-line bg-card px-3 py-2"
+            title="The rooms and capacities the admin uploaded to SMARTTT. Exam seats and blocked hours set here stay.">
+            {sync.isPending ? 'Bringing in…' : 'Bring in from SMARTTT'}
+          </button>
           <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
           <button onClick={() => setEditing('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a lecture hall</button>
         </div>
@@ -54,6 +59,13 @@ export function RoomsPage() {
         className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
       {rooms.isError && <p role="alert" className="text-sm text-danger">{errorMessage(rooms.error)}</p>}
       {remove.isError && <p role="alert" className="text-sm text-danger">{errorMessage(remove.error)}</p>}
+      {sync.isError && <p role="alert" className="text-sm text-danger">{errorMessage(sync.error)}</p>}
+      {sync.data && (
+        <p role="status" className="text-sm text-muted">
+          From SMARTTT: {sync.data.added.length} added, {sync.data.updated.length} updated.
+          {sync.data.only_here.length > 0 && ` Only here, not in SMARTTT: ${sync.data.only_here.join(', ')}.`}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">

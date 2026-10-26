@@ -63,9 +63,15 @@ def room_invigilator(paper: dict[str, Any], room: str) -> dict[str, Any]:
 
 
 def missing_invigilators(papers: list[dict[str, Any]]) -> list[str]:
-    """Each paper without its main invigilator, and each extra room without its own."""
+    """
+    Each paper without its main invigilator, and each extra room without its
+    own. A paper nobody is known to sit (no class rows yet) has no room, so it
+    needs none: it is published with its date and session, room to be announced.
+    """
     out = []
     for p in papers:
+        if not p["seating"]:
+            continue
         if not p["invigilators"].get(MAIN):
             out.append(f"{p['codes']} (main)")
         out.extend(f"{p['codes']} in {room}" for room in p["extra_rooms"] if not p["invigilators"].get(room))
@@ -286,7 +292,7 @@ def move_paper(
     broken = [
         v
         for v in check(unpinned, slots)
-        if (v.rule in ("H-E1", "H-E2") and paper_id in v.paper_ids) or (v.rule == "H-E3" and not v.paper_ids)
+        if (v.rule in ("H-E1", "H-E2", "H-E7") and paper_id in v.paper_ids) or (v.rule == "H-E3" and not v.paper_ids)
     ]
     if broken:
         raise ApiError(409, "BREAKS_RULE", broken[0].message, {"violations": [v.__dict__ for v in broken]})

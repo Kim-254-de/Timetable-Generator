@@ -1,4 +1,4 @@
-"""Every hard-rule violation (H-E1 to H-E6) in an exam timetable and its seating."""
+"""Every hard-rule violation (H-E1 to H-E7) in an exam timetable and its seating."""
 
 from __future__ import annotations
 
@@ -35,6 +35,15 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         for r in paper.row_ids:
             by_row_slot[(r, t)].append(pid)
             by_row_day[(r, problem.day_of(t))].append(pid)
+    by_staff_slot: dict[tuple[str, int], list[str]] = defaultdict(list)
+    for pid, t in slots.items():
+        paper = papers.get(pid)
+        if paper is not None and paper.invigilator and 0 <= t < problem.slots:
+            by_staff_slot[(paper.invigilator, t)].append(pid)
+    for (staff, t), ids in by_staff_slot.items():
+        if len(ids) > 1:
+            labels = " and ".join(papers[i].label for i in ids)
+            out.append(ExamViolation("H-E7", f"{staff} invigilates {labels} on {when(t)}.", tuple(ids)))
     for (r, t), ids in by_row_slot.items():
         if len(ids) > 1:
             out.append(
