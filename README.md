@@ -115,6 +115,11 @@ On the term's **Exams** tab:
    in Smart Attendance: each paper's main invigilator (in its main room, the
    one with most of its students; collects every room's scripts) and one extra
    invigilator for each extra room.
+   Papers nobody is known to sit yet are still kept apart: units of one
+   subject and year ("BPPA 110", "BPPA 121") are taken to be one class, kept
+   to one paper a session and two a day (S-E4), and these papers are spread
+   evenly over the period (S-E5). Both give way rather than make a timetable
+   impossible; real numbers from the department replace the guess.
    A main invigilator a department names before the timetable is generated
    comes in with the papers, and the solver keeps that person's papers in
    different sessions (rule H-E7). A paper nobody is known to sit (no class
