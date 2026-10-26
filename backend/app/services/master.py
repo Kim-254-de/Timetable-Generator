@@ -75,6 +75,17 @@ def _room_by_code(db: Session, code: str) -> Room | None:
 
 
 def _apply_room(db: Session, room: Room, fields: dict[str, Any]) -> None:
+    # Exam seats are capacity x the term's spacing in every room; a room's own
+    # number is only for one that can't be used at that share (fixed benches).
+    capacity = fields.get("capacity") or room.capacity
+    seats = fields.get("exam_seats", room.exam_seats)
+    if seats and seats > capacity:
+        raise ApiError(
+            422,
+            "VALIDATION_ERROR",
+            f"Exam seats can't be more than the room's capacity ({capacity}). "
+            "Set them only for a room that can't be used at the usual share.",
+        )
     if "code" in fields and fields["code"] is not None:
         clash = _room_by_code(db, fields["code"])
         if clash is not None and clash.id != room.id:

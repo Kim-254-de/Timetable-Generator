@@ -15,7 +15,7 @@ const COLUMNS: BulkColumn[] = [
   { key: 'capacity', label: 'Capacity', example: '120', required: true },
   { key: 'room_type', label: 'Room type', example: 'Lecture hall', hint: 'Lecture hall, Lab or Seminar room' },
   { key: 'available', label: 'Available', example: 'Yes', hint: 'Yes or No (a closed room is never used)' },
-  { key: 'exam_seats', label: 'Exam seats', example: '', hint: "Blank: capacity x the term's spacing (0.9)." },
+  { key: 'exam_seats', label: 'Exam seats', example: '', hint: "Leave blank: capacity x the term's spacing (0.9). Only for a room that can't be used at that share (fixed benches)." },
   { key: 'for_exams', label: 'For exams', example: 'Yes', hint: 'No keeps the room out of exams.' },
 ]
 
@@ -138,8 +138,8 @@ function RoomForm({ room, onClose }: { room: RoomRecord | null; onClose: () => v
           Available for teaching
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Exam seats" hint="Blank: capacity x the term's spacing (0.9).">
-            <input type="number" min={1} max={5000} value={form.exam_seats ?? ''}
+          <Field label="Fixed exam seats" hint="Leave blank: exam seats are capacity x the term's spacing (0.9). Only for a room that can't be used at that share (e.g. fixed benches).">
+            <input type="number" min={1} max={form.capacity} value={form.exam_seats ?? ''}
               onChange={(e) => setForm({ ...form, exam_seats: e.target.value === '' ? null : Number(e.target.value) })} className={inputClass} />
           </Field>
           <label className="mt-6 flex items-center gap-2 text-sm">

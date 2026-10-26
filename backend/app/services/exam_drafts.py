@@ -40,10 +40,36 @@ from app.models import (
     Term,
     utcnow,
 )
-from app.services.drafts import NO_TERM_DATES, _smarttt_can_place
 from app.services.exam_runs import build
-from app.services.exam_setup import practicals_of
+from app.services.exam_setup import exam_seats, practicals_of
 from app.services.setup import audit
+
+LOCAL_ONLY = "This term exists only in the Generator."
+MAIN = ""  # the invigilators' key for the paper's main invigilator
+
+
+def main_room(seating: list[dict[str, Any]]) -> str | None:
+    """The room with most of the paper's students (ties: by code); its main invigilator sits there."""
+    totals: dict[str, int] = defaultdict(int)
+    for s in seating:
+        totals[s["room"]] += s["students"]
+    return min(totals, key=lambda r: (-totals[r], r)) if totals else None
+
+
+def room_invigilator(paper: dict[str, Any], room: str) -> dict[str, Any]:
+    """Who invigilates the paper in a room: the main invigilator in its main room, else that room's extra one."""
+    key = MAIN if room == paper["main_room"] else room
+    return dict(paper["invigilators"].get(key) or {})
+
+
+def missing_invigilators(papers: list[dict[str, Any]]) -> list[str]:
+    """Each paper without its main invigilator, and each extra room without its own."""
+    out = []
+    for p in papers:
+        if not p["invigilators"].get(MAIN):
+            out.append(f"{p['codes']} (main)")
+        out.extend(f"{p['codes']} in {room}" for room in p["extra_rooms"] if not p["invigilators"].get(room))
+    return out
 
 
 def get_draft(db: Session, draft_id: str) -> ExamDraft:
@@ -108,7 +134,8 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
     term = built.term
     papers = {p.id: p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id))}
     rooms = {r.id: r for r in db.scalars(select(Room))}
-    labels = {r.id: r.label for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
+    rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
+    labels = {i: r.label for i, r in rows.items()}
     departments = {d.id: d.code for d in db.scalars(select(Department))}
     odel = {(p.id, r.class_row_id): r.odel for p in papers.values() for r in p.rows}
     placed = {pl.paper_id: pl for pl in draft.placements}
@@ -138,6 +165,11 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                             "room": rooms[s.room_id].code if s.room_id in rooms else s.room_id,
                             "block": rooms[s.room_id].block if s.room_id in rooms else "",
                             "row": labels.get(s.class_row_id, "?"),
+                            # The class row as SMARTTT finds its students.
+                            "program": rows[s.class_row_id].program_code if s.class_row_id in rows else "",
+                            "year_of_study": rows[s.class_row_id].study_year if s.class_row_id in rows else 0,
+                            "study_semester": rows[s.class_row_id].study_semester if s.class_row_id in rows else None,
+                            "stream": rows[s.class_row_id].sub_class if s.class_row_id in rows else "",
                             "students": s.students,
                             "part": s.part,
                             "parts": s.parts,
@@ -150,6 +182,9 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                 "invigilators": (invigilators or {}).get(p.allocator_ref, {}),
             }
         )
+        seating = out[-1]["seating"]
+        out[-1]["main_room"] = main_room(seating)
+        out[-1]["extra_rooms"] = sorted({s["room"] for s in seating} - {out[-1]["main_room"]})
     return {
         "days": [{"date": d.isoformat(), "label": d.strftime("%a %d/%m/%Y").upper()} for d in built.problem.days],
         "sessions": list(term.exam_sessions or []),
@@ -159,7 +194,7 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
 
 
 def room_sheets(rec: dict[str, Any]) -> list[dict[str, Any]]:
-    """Per date and session, each room with its papers, class rows, students and invigilator."""
+    """Per date and session, each room with its papers, class rows, students, and the invigilator there."""
     by_slot: dict[tuple[str, int], dict[str, dict[str, Any]]] = defaultdict(dict)
     for p in rec["papers"]:
         if p["day"] is None:
@@ -175,7 +210,9 @@ def room_sheets(rec: dict[str, Any]) -> list[dict[str, Any]]:
                     "codes": p["codes"],
                     "title": p["title"],
                     "rows": [],
-                    "invigilator": (p["invigilators"].get(s["room"]) or p["invigilators"].get("") or {}).get("name"),
+                    "invigilator": room_invigilator(p, s["room"]).get("name"),
+                    "main": s["room"] == p["main_room"],
+                    "main_invigilator": (p["invigilators"].get(MAIN) or {}).get("name"),
                 },
             )
             part = f" (part {s['part']} of {s['parts']})" if s["parts"] > 1 else ""
@@ -314,14 +351,95 @@ def copy_draft(db: Session, identity: Identity, draft: ExamDraft) -> ExamDraft:
     return new
 
 
+def smarttt_payload(
+    db: Session, term: Term, rec: dict[str, Any], version: int, based_on: int | None, actor: str
+) -> dict[str, Any]:
+    """The exam version as SMARTTT's generator/exam-publish/ takes it."""
+    sessions = rec["sessions"]
+    used = {s["room"] for p in rec["papers"] for s in p["seating"]}
+    rooms = [r for r in db.scalars(select(Room)) if r.code in used]
+    return {
+        "term_id": term.smarttt_term_id,
+        "version": version,
+        "based_on_version": based_on,
+        "published_by": actor,
+        "exam_start": term.exam_start.isoformat() if term.exam_start else None,
+        "exam_end": term.exam_end.isoformat() if term.exam_end else None,
+        "rooms": [
+            {
+                "code": r.code,
+                "building": r.building,
+                "capacity": r.capacity,
+                "exam_seats": exam_seats(r, term.exam_spacing),
+            }
+            for r in sorted(rooms, key=lambda r: r.code)
+        ],
+        "papers": [
+            {
+                "key": p["allocator_ref"],
+                "unit_codes": p.get("code_list") or p["codes"].split("/"),
+                "sitting": p.get("sitting") or "regular",
+                "title": p["title"],
+                "date": p["day"],
+                "start_time": sessions[p["session"]]["start"],
+                "end_time": sessions[p["session"]]["end"],
+                "examiner_staff_number": p["examiner_staff_number"],
+                "seating": [
+                    {
+                        "room_code": s["room"],
+                        "class_rows": [
+                            {
+                                "program": s["program"],
+                                "year_of_study": s["year_of_study"],
+                                "study_semester": s["study_semester"],
+                                "stream": s["stream"],
+                            }
+                        ],
+                        # A class row split over rooms: SMARTTT cuts its students by registration number.
+                        "part": s["part"],
+                        "parts": s["parts"],
+                        "students": s["students"],
+                        "invigilator_staff_number": room_invigilator(p, s["room"]).get("staff_number") or "",
+                        "role": "main" if s["room"] == p["main_room"] else "extra",
+                    }
+                    for s in p["seating"]
+                ],
+            }
+            for p in rec["papers"]
+            if p["day"] is not None
+        ],
+        "practicals": [
+            {
+                "unit_codes": pr["codes"].split("/"),
+                "title": pr["title"],
+                "date": pr["date"],
+                "start_time": pr["start_time"],
+                "end_time": pr["end_time"],
+            }
+            for pr in rec["practicals"]
+        ],
+    }
+
+
+def _send(smarttt: SmartttClient, term: Term, payload: dict[str, Any]) -> dict[str, Any]:
+    """Sends the version to SMARTTT. Down or not connected: not sent (retry later); refused: raised."""
+    if not term.smarttt_term_id:
+        return {"sent": False, "reason": LOCAL_ONLY}
+    try:
+        _status, result = smarttt.publish_exams(payload)
+    except (SmartttUnavailable, SmartttMisconfigured) as down:
+        return {"sent": False, "reason": getattr(down, "message", None) or "SMARTTT can't be reached."}
+    return {"sent": True, **result}
+
+
 def publish(
     db: Session, smarttt: SmartttClient, teaching: TeachingClient, identity: Identity, draft: ExamDraft
 ) -> dict[str, Any]:
     """
-    The Director approves the exam draft as the term's next exam version and
-    it is sent to SMARTTT. Every paper needs its invigilator. As with the
-    teaching timetable, the approval stands when SMARTTT can't be reached (it
-    is sent later); SMARTTT refusing it publishes nothing.
+    The Director approves the exam draft as the term's next exam version, and
+    SMARTTT gets it. Every paper, and every extra room, needs its invigilator.
+    SMARTTT refusing it (409/422) is reported and nothing is approved; SMARTTT
+    down leaves it approved here, to send later.
     """
     _require_editable(draft)
     summary = draft_summary(db, draft)
@@ -336,13 +454,13 @@ def publish(
         raise ApiError(409, "NOT_SHARED", "Share the draft with departments first, so they name the invigilators.")
     invigilators = teaching.invigilators(str(draft.term_id))
     rec = record(db, draft, invigilators)
-    missing = [p["codes"] for p in rec["papers"] if not p["invigilators"].get("")]
+    missing = missing_invigilators(rec["papers"])
     if missing:
         raise ApiError(
             409,
             "NO_INVIGILATOR",
-            f"{len(missing)} papers have no invigilator yet: {', '.join(missing[:10])}.",
-            {"papers": missing},
+            f"{len(missing)} invigilators are still to be named: {', '.join(missing[:10])}.",
+            {"missing": missing},
         )
     term = db.get(Term, draft.term_id)
     assert term is not None
@@ -353,73 +471,16 @@ def publish(
         .limit(1)
     )
     version = (last.version if last else 0) + 1
-    sessions = rec["sessions"]
-    class_rows = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
-
-    def row_fields(s: dict[str, Any]) -> dict[str, Any]:
-        row = class_rows.get(uuid.UUID(s["row_id"])) if s.get("row_id") else None
-        if row is None:
-            return {}
-        return {
-            "program_id": row.smarttt_program_id,
-            "program_code": row.program_code,
-            "year_of_study": row.study_year,
-            "study_semester": row.study_semester,
-            "stream": row.sub_class,
-        }
-
-    payload = {
-        "term_id": term.smarttt_term_id,
-        "academic_year": term.academic_year,
-        "semester": term.semester,
-        "version": version,
-        "based_on_version": None,  # set when sent: the latest exam version SMARTTT has
-        "published_by": identity.actor,
-        "papers": [
-            {
-                "key": p["allocator_ref"],
-                "codes": p.get("code_list") or p["codes"].split("/"),
-                "sitting": p.get("sitting") or "regular",
-                "title": p["title"],
-                "date": p["day"],
-                "start_time": sessions[p["session"]]["start"],
-                "end_time": sessions[p["session"]]["end"],
-                "examiner_staff_number": p["examiner_staff_number"],
-                "seating": [
-                    {
-                        "room_code": s["room"],
-                        "class_row": s["row"],
-                        **row_fields(s),
-                        "part": s["part"],
-                        "parts": s["parts"],
-                        "students": s["students"],
-                        "invigilator_staff_number": (
-                            p["invigilators"].get(s["room"]) or p["invigilators"].get("") or {}
-                        ).get("staff_number"),
-                    }
-                    for s in p["seating"]
-                ],
-            }
-            for p in rec["papers"]
-        ],
-        "practicals": [
-            {
-                "codes": pr["codes"].split("/"),
-                "title": pr["title"],
-                "department": pr["department"],
-                "date": pr["date"],
-                "start_time": pr["start_time"],
-                "end_time": pr["end_time"],
-            }
-            for pr in rec["practicals"]
-        ],
-    }
+    sent_before = db.scalar(
+        select(ExamPublication)
+        .where(ExamPublication.term_id == term.id)
+        .order_by(ExamPublication.version.desc())
+        .limit(1)
+    )
+    based_on = sent_before.version if sent_before is not None and sent_before.smarttt_response.get("sent") else None
+    payload = smarttt_payload(db, term, rec, version, based_on, identity.actor)
     try:
-        response = (
-            _send(db, smarttt, term, payload) if _smarttt_can_place(term) else {"sent": False, "reason": NO_TERM_DATES}
-        )
-    except (SmartttUnavailable, SmartttMisconfigured) as down:
-        response = {"sent": False, "reason": getattr(down, "message", None) or str(down) or "SMARTTT unavailable."}
+        response = _send(smarttt, term, payload)
     except SmartttRefused as refused:
         audit(
             db,
@@ -462,97 +523,35 @@ def publish(
     return {"version": version, "smarttt": response, "draft": draft_summary(db, draft)}
 
 
-def _send(db: Session, smarttt: SmartttClient, term: Term, payload: dict[str, Any]) -> dict[str, Any]:
-    """
-    Sends an exam version to SMARTTT, made from the latest exam version SMARTTT
-    received. A term SMARTTT found or created by year and semester is linked
-    to its id. Raises the client's errors; the caller commits.
-    """
-    received = [
-        p.version
-        for p in db.scalars(select(ExamPublication).where(ExamPublication.term_id == term.id))
-        if p.smarttt_response.get("sent")
-    ]
-    _status, response = smarttt.publish_exams(
-        {
-            **payload,
-            "term_id": term.smarttt_term_id,
-            "term_start": term.start_date.isoformat() if term.start_date else None,
-            "term_end": term.end_date.isoformat() if term.end_date else None,
-            "based_on_version": max(received, default=None),
-        }
-    )
-    smarttt_term = str(response.get("term_id") or "")
-    if (
-        smarttt_term
-        and not term.smarttt_term_id
-        and db.scalar(select(Term).where(Term.smarttt_term_id == smarttt_term)) is None
-    ):
-        term.smarttt_term_id = smarttt_term
-    return {"sent": True, **response}
-
-
 def send_publication(
     db: Session, smarttt: SmartttClient, identity: Identity, term: Term, version: int
 ) -> dict[str, Any]:
-    """
-    Sends an approved exam version SMARTTT didn't receive (it was down, or the
-    term had no dates), exactly as approved. Only the latest version is sent.
-    """
+    """Sends an approved exam version SMARTTT missed (it was down), exactly as approved."""
     publication = db.scalar(
         select(ExamPublication).where(ExamPublication.term_id == term.id, ExamPublication.version == version)
     )
     if publication is None:
-        raise ApiError(404, "NOT_FOUND", f"No exam version {version} for this term.")
+        raise ApiError(404, "NOT_FOUND", f"No exam version {version}.")
     if publication.smarttt_response.get("sent"):
-        raise ApiError(409, "ALREADY_SENT", f"SMARTTT already has exam version {version}.")
-    latest = db.scalar(
-        select(ExamPublication)
-        .where(ExamPublication.term_id == term.id)
-        .order_by(ExamPublication.version.desc())
-        .limit(1)
+        raise ApiError(409, "ALREADY_SENT", "SMARTTT already has this exam version.")
+    later = db.scalar(
+        select(ExamPublication).where(ExamPublication.term_id == term.id, ExamPublication.version > version).limit(1)
     )
-    if latest is not None and latest.version != version:
-        raise ApiError(409, "NOT_LATEST", f"Exam version {latest.version} replaced version {version}; send that one.")
-    if not _smarttt_can_place(term):
-        raise ApiError(409, "NO_SMARTTT_TERM", NO_TERM_DATES)
-    if not _has_class_rows(publication.payload):
-        raise ApiError(
-            409,
-            "NOT_KEPT",
-            "This version was approved before exam seating carried class rows. Copy its draft and approve the copy.",
-        )
-    try:
-        response = _send(db, smarttt, term, publication.payload)
-    except (SmartttUnavailable, SmartttMisconfigured) as down:
-        reason = getattr(down, "message", None) or str(down) or "SMARTTT unavailable."
-        raise ApiError(503, "SMARTTT_UNAVAILABLE", f"SMARTTT could not be reached: {reason} Try again later.") from down
-    except SmartttRefused as refused:
-        audit(
-            db,
-            identity,
-            "exam_publication.send_refused",
-            "exam_publication",
-            str(publication.id),
-            None,
-            {"code": refused.code},
-        )
-        db.commit()
-        raise
+    if later is not None:
+        raise ApiError(409, "NOT_LATEST", "Only the latest exam version can be sent.")
+    response = _send(smarttt, term, publication.payload)
     publication.smarttt_response = response
-    audit(db, identity, "exam_publication.send", "exam_publication", str(publication.id), None, {"version": version})
-    db.commit()
-    return next(p for p in publications(db, term) if p["version"] == version)
-
-
-def _has_class_rows(payload: dict[str, Any] | None) -> bool:
-    """Versions approved before seating carried each class row's programme can't show students their room."""
-    if not payload:
-        return False
-    seats = [s for p in payload.get("papers") or [] for s in p.get("seating") or []]
-    return all("program_code" in s for s in seats) and all(
-        isinstance(pr.get("codes"), list) for pr in payload.get("practicals") or []
+    audit(
+        db,
+        identity,
+        "exam_publication.send",
+        "term",
+        str(term.id),
+        None,
+        {"version": version, "sent": response.get("sent")},
     )
+    db.commit()
+    return {"version": version, "smarttt": response}
 
 
 def drafts_of(db: Session, term: Term) -> list[dict[str, Any]]:
@@ -584,12 +583,8 @@ def publications(db: Session, term: Term) -> list[dict[str, Any]]:
             "published_at": p.published_at.isoformat(),
             "sent_to_smarttt": bool(p.smarttt_response.get("sent")),
             "not_sent_reason": p.smarttt_response.get("reason"),
-            "can_send": (
-                not p.smarttt_response.get("sent")
-                and p.version == latest
-                and _has_class_rows(p.payload)
-                and _smarttt_can_place(term)
-            ),
+            # Only the latest version, and only to a term SMARTTT knows.
+            "can_send": not p.smarttt_response.get("sent") and p.version == latest and bool(term.smarttt_term_id),
         }
         for p in found
     ]
@@ -625,6 +620,9 @@ def allocator_draft(db: Session, term: Term) -> dict[str, Any]:
                 "start_time": sessions[p["session"]]["start"] if p["session"] is not None else None,
                 "end_time": sessions[p["session"]]["end"] if p["session"] is not None else None,
                 "rooms": sorted({s["room"] for s in p["seating"]}),
+                # The main invigilator sits in the main room; each extra room needs one of its own.
+                "main_room": p["main_room"],
+                "extra_rooms": p["extra_rooms"],
             }
             for p in rec["papers"]
         ],

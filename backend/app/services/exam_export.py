@@ -18,7 +18,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from app.models import Term
-from app.services.exam_drafts import room_sheets
+from app.services.exam_drafts import MAIN, room_sheets
 
 UNIVERSITY = "THARAKA UNIVERSITY"
 DIRECTORATE = "DIRECTORATE OF EXAMINATION & TIMETABLING"
@@ -61,25 +61,36 @@ def practical_lines(rec: dict[str, Any]) -> list[str]:
     ]
 
 
+ROSTER_HEADERS = ["Paper", "Date", "Session", "Room", "Duty", "Invigilator"]
+ROOM_HEADERS = ["Room", "Paper", "Class row", "Students", "Invigilator"]
+
+
 def roster(rec: dict[str, Any]) -> dict[str, list[list[str]]]:
-    """Per department: paper, date, session, rooms, invigilator."""
+    """Per department: each paper's main invigilator (collects every room's scripts), then one per extra room."""
     out: dict[str, list[list[str]]] = defaultdict(list)
     days = {d["date"]: d["label"] for d in rec["days"]}
     for p in rec["papers"]:
         if p["day"] is None:
             continue
-        rooms = sorted({s["room"] for s in p["seating"]})
-        inv = p["invigilators"].get("") or {}
-        out[p["department"]].append(
-            [
-                p["codes"],
-                days.get(p["day"], p["day"]),
-                _session_label(rec["sessions"][p["session"]]),
-                ", ".join(rooms),
-                inv.get("name") or "Not named",
-            ]
-        )
+        when = [days.get(p["day"], p["day"]), _session_label(rec["sessions"][p["session"]])]
+        main = p["invigilators"].get(MAIN) or {}
+        out[p["department"]].append([p["codes"], *when, p["main_room"] or "", "Main", main.get("name") or "Not named"])
+        for room in p["extra_rooms"]:
+            extra = p["invigilators"].get(room) or {}
+            out[p["department"]].append([p["codes"], *when, room, "Extra", extra.get("name") or "Not named"])
     return dict(sorted(out.items()))
+
+
+def _room_rows(slot: dict[str, Any]) -> list[list[str]]:
+    rows = []
+    for room in slot["rooms"]:
+        for paper in room["papers"]:
+            who = paper["invigilator"] or "Not named"
+            who += " (main)" if paper["main"] else f" (extra; main: {paper['main_invigilator'] or 'not named'})"
+            for row in paper["rows"]:
+                odel = " (ODEL)" if row["odel"] else ""
+                rows.append([room["room"], paper["codes"], row["row"] + odel, str(row["students"]), who])
+    return rows
 
 
 # -- Word ---------------------------------------------------------------------------------------
@@ -153,19 +164,8 @@ def rooms_docx(term: Term, rec: dict[str, Any], version: int | None, printed_by:
     for slot in room_sheets(rec):
         session = rec["sessions"][slot["session"]]
         doc.add_paragraph().add_run(f"{days.get(slot['day'], slot['day'])}  {_session_label(session)}").bold = True
-        rows = [
-            [
-                room["room"],
-                paper["codes"],
-                row["row"] + (" (ODEL)" if row["odel"] else ""),
-                str(row["students"]),
-                paper["invigilator"] or "",
-            ]
-            for room in slot["rooms"]
-            for paper in room["papers"]
-            for row in paper["rows"]
-        ]
-        _docx_table(doc, ["Room", "Paper", "Class row", "Students", "Invigilator"], rows)
+        rows = _room_rows(slot)
+        _docx_table(doc, ROOM_HEADERS, rows)
     doc.add_paragraph(_prepared(term, printed_by))
     return _save(doc)
 
@@ -175,7 +175,7 @@ def roster_docx(term: Term, rec: dict[str, Any], version: int | None, printed_by
     _docx_heading(doc, [*_title(term, version), "INVIGILATION ROSTER"])
     for department, rows in roster(rec).items():
         doc.add_paragraph().add_run(department).bold = True
-        _docx_table(doc, ["Paper", "Date", "Session", "Rooms", "Invigilator"], rows)
+        _docx_table(doc, ROSTER_HEADERS, rows)
     doc.add_paragraph(_prepared(term, printed_by))
     return _save(doc)
 
@@ -291,19 +291,8 @@ def rooms_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by: 
             out.append(
                 Paragraph(escape(f"{days.get(slot['day'], slot['day'])}  {_session_label(session)}"), st["heading"])
             )
-            rows = [
-                [
-                    room["room"],
-                    paper["codes"],
-                    row["row"] + (" (ODEL)" if row["odel"] else ""),
-                    str(row["students"]),
-                    paper["invigilator"] or "",
-                ]
-                for room in slot["rooms"]
-                for paper in room["papers"]
-                for row in paper["rows"]
-            ]
-            out.append(_pdf_table(["Room", "Paper", "Class row", "Students", "Invigilator"], rows))
+            rows = _room_rows(slot)
+            out.append(_pdf_table(ROOM_HEADERS, rows))
         out.append(Paragraph(escape(_prepared(term, printed_by)), st["body"]))
         return out
 
@@ -320,7 +309,7 @@ def roster_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by:
         out: list[Any] = [Paragraph(escape(line), st["title"]) for line in title]
         for department, rows in roster(rec).items():
             out.append(Paragraph(escape(department), st["heading"]))
-            out.append(_pdf_table(["Paper", "Date", "Session", "Rooms", "Invigilator"], rows))
+            out.append(_pdf_table(ROSTER_HEADERS, rows))
         out.append(Paragraph(escape(_prepared(term, printed_by)), st["body"]))
         return out
 

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { errorBody, errorMessage } from '@/lib/api'
+import { ExamSwitch } from '@/components/ExamSwitch'
 import { dateTime } from '@/lib/format'
 import {
   useExamDepartments,
@@ -125,6 +126,8 @@ export function ExamsTab({ termId }: { termId: string }) {
         </ul>
       </section>
 
+      {data.publications.length > 0 && <ExamSwitch termId={termId} />}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-lg border border-line bg-card p-4">
           <h2 className="mb-2 font-semibold">Exam drafts</h2>
@@ -155,6 +158,7 @@ export function ExamsTab({ termId }: { termId: string }) {
               </li>
             ))}
             {data.publications.length === 0 && <li className="text-muted">Nothing published yet.</li>}
+            {send.isError && <li role="alert" className="text-danger">{errorMessage(send.error)}</li>}
           </ul>
           {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
         </section>

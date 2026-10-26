@@ -11,7 +11,8 @@ import type {
   ExamGrid,
   ExamOverview,
   ExamPeriod,
-  ExamPublicationItem,
+  ExamSwitchAction,
+  ExamSwitchState,
   DraftSummary,
   Grid,
   Group,
@@ -348,11 +349,6 @@ function useExamMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
   })
 }
 
-/** Sends an approved exam version SMARTTT missed (it was down), exactly as approved. */
-export const useSendExamPublication = (termId: string) =>
-  useExamMutation(termId, (version: number) =>
-    post<ExamPublicationItem>(`/terms/${termId}/exam-publications/${version}/send`, {}))
-
 export const usePatchExamPeriod = (termId: string) =>
   useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
     patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
@@ -379,3 +375,19 @@ export const useExamDraftAction = (termId: string, draftId: string) =>
 
 export const examExportUrl = (draftId: string, kind: 'timetable' | 'rooms' | 'roster', format: 'docx' | 'pdf') =>
   `${import.meta.env.VITE_API_URL ?? '/api'}/exam-drafts/${draftId}/export/${kind}.${format}`
+
+export const useExamSwitch = (termId: string) =>
+  useQuery({ queryKey: ['exam-switch', termId], queryFn: () => get<ExamSwitchState>(`/terms/${termId}/exam-switch`) })
+
+export function useExamSwitchAction(termId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { action: ExamSwitchAction; at?: string }) => post<ExamSwitchState>(`/terms/${termId}/exam-switch`, body),
+    onSuccess: (state) => qc.setQueryData(['exam-switch', termId], state),
+  })
+}
+
+/** Sends an approved exam version SMARTTT missed (it was down), exactly as approved. */
+export const useSendExamPublication = (termId: string) =>
+  useExamMutation(termId, (version: number) =>
+    post<{ version: number; smarttt: { sent?: boolean; reason?: string } }>(`/terms/${termId}/exam-publications/${version}/send`, {}))
