@@ -31,6 +31,16 @@ def create_app() -> FastAPI:
         )
     install_error_handlers(app)
     app.include_router(router, prefix="/api")
+
+    @app.on_event("startup")
+    def _runs_cut_off_by_a_restart() -> None:
+        from app.services.runs import fail_interrupted_runs
+
+        try:
+            fail_interrupted_runs()
+        except Exception:  # the database may not be ready; the API still starts
+            logging.getLogger(__name__).exception("Could not check for runs cut off by a restart")
+
     return app
 
 

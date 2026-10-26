@@ -7,9 +7,11 @@ new draft the Director can review. Runs never change an existing draft.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -162,12 +164,96 @@ def create_run(
     )
     db.commit()
 
+    dispatch(db, run)
+    return run
+
+
+def dispatch(db: Session, run: Run) -> None:
+    """
+    Hands a new run (teaching or exam) to be solved: in the request (tests), to
+    the RQ worker, or, with no Redis set up or reachable, to a background
+    thread of this web process. The page polls the run either way.
+    """
+    settings = get_settings()
     if settings.run_inline:
         execute_run(str(run.id))
         db.refresh(run)
-    else:
-        _enqueue(str(run.id), limit)
-    return run
+        return
+    if settings.redis_url:
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        try:
+            _enqueue(str(run.id), run.time_limit_s)
+            return
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            logger.warning("Redis unreachable (%s); solving run %s in the web process", exc, run.id)
+    _local_runs().submit(execute_run, str(run.id))
+
+
+# Runs solved in this process when there is no queue: one at a time, in the order started.
+_local: ThreadPoolExecutor | None = None
+_local_lock = threading.Lock()
+
+
+def _local_runs() -> ThreadPoolExecutor:
+    global _local
+    with _local_lock:
+        if _local is None:
+            _local = ThreadPoolExecutor(max_workers=1, thread_name_prefix="solver")
+        return _local
+
+
+def drain_local_runs() -> None:
+    """Waits for the runs solving in this process (tests)."""
+    with _local_lock:
+        pool = _local
+    if pool is not None:
+        pool.submit(lambda: None).result()
+
+
+def queue_available() -> bool:
+    """Whether runs go to a worker through Redis (it is configured and answers)."""
+    settings = get_settings()
+    if settings.run_inline or not settings.redis_url:
+        return False
+    from redis import Redis
+    from redis.exceptions import RedisError
+
+    try:
+        return bool(Redis.from_url(settings.redis_url, socket_connect_timeout=2).ping())
+    except RedisError:
+        return False
+
+
+INTERRUPTED = "The Generator restarted while this run was being solved. Start it again."
+
+
+def fail_interrupted_runs() -> int:
+    """
+    With no worker (runs solve in the web process), a run still queued or
+    running when the process starts was cut off by a restart: it is marked
+    failed so the Director can start it again, rather than waiting forever.
+    """
+    if get_settings().run_inline or queue_available():
+        return 0
+    db = get_sessionmaker()()
+    try:
+        stuck = list(db.query(Run).filter(Run.status.in_([RunStatus.QUEUED, RunStatus.RUNNING])))
+        for run in stuck:
+            run.status = RunStatus.FAILED
+            run.failure = {
+                "stage": "internal",
+                "count": 1,
+                "reasons": [{"rule": "?", "entity": "run", "message": INTERRUPTED}],
+            }
+            run.finished_at = utcnow()
+        db.commit()
+        if stuck:
+            logger.warning("Marked %d runs cut off by a restart as failed", len(stuck))
+        return len(stuck)
+    finally:
+        db.close()
 
 
 def _enqueue(run_id: str, time_limit_s: int) -> None:
