@@ -107,8 +107,12 @@ On the term's **Exams** tab:
    and **re-solve around pins**.
 5. **Share with departments** so they name invigilators on their Teaching page in Smart Attendance.
 6. **Approve and publish**: refused while any paper has no invigilator. The
-   version is frozen with the SMARTTT payload (codes, date, times, seating
-   with invigilators); SMARTTT can't take exams yet, so it is approved here.
+   version is frozen and sent to SMARTTT (`/api/v1/integrations/generator/exams/publish/`):
+   each paper's codes, date, times and seating, with each class row's programme,
+   year and stream and its invigilator, and the practicals. Students see the
+   papers and practicals of the units they synced, with their own room, in the
+   SMARTTT app's Exams tab. When SMARTTT can't be reached the approval stands
+   and the version is sent later with **Send to SMARTTT now**.
 7. **Download** (Word, PDF): the timetable in the Directorate's layout, room
    sheets, and the invigilation roster per department.
 
@@ -132,16 +136,9 @@ Not built in these two repos; SMARTTT needs these for the department-first flow:
 
 Not built in these two repos:
 
-- **SMARTTT**
-  - an exam publication endpoint taking the Generator's exam payload: per paper,
-    its codes, date, start and end, examiner, and seating
-    `[{room_code, class_row, part, parts, students, invigilator_staff_number}]`;
-    until it exists, exam versions are approved in the Generator and marked
-    "not yet in SMARTTT";
-  - an exam view per student (each paper's date, time and *their* room) and per
-    lecturer (papers they set, invigilation duties);
-  - pushing exam sessions to Smart Attendance;
-  - an *Exams* tab in the SMARTTT app, shown first during the exam period.
+- **SMARTTT** (it now takes exam versions and shows students their exams)
+  - an exam view per lecturer (papers they set, invigilation duties);
+  - pushing exam sessions to Smart Attendance.
 - **Smart Attendance**: an *exam* session type, one per paper per room, opened
   by its invigilator; students check in only to their own paper and room; a
   sat/absent report per paper for the invigilator.

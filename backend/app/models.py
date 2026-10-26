@@ -421,6 +421,7 @@ class ExamPaper(Base):
     """
     A written exam paper a department published in Smart Attendance: one or more
     unit codes sat together ("BITE 131/COSC 130"), and the class rows that sit it.
+    `sitting` is "regular" or "odel": ODEL and part-time classes sit separate papers.
     """
 
     __tablename__ = "exam_papers"
@@ -435,12 +436,14 @@ class ExamPaper(Base):
     examiner_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     examiner_name: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(500), default="")
+    sitting: Mapped[str] = mapped_column(String(10), default="regular", server_default="regular")
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
     @property
     def label(self) -> str:
-        return "/".join(self.codes)
+        """'MATH 241', or 'MATH 241 (ODEL)' for the ODEL paper of the same unit."""
+        return "/".join(self.codes) + (" (ODEL)" if self.sitting == "odel" else "")
 
     @property
     def students(self) -> int:

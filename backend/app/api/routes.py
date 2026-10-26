@@ -576,8 +576,14 @@ def copy_exam_draft(draft_id: str, identity: Me, db: Db) -> dict[str, Any]:
 
 
 @router.post("/exam-drafts/{draft_id}/publish")
-def publish_exam_draft(draft_id: str, identity: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
-    return ok(exam_drafts.publish(db, teaching, identity, exam_drafts.get_draft(db, draft_id)))
+def publish_exam_draft(draft_id: str, identity: Me, db: Db, smarttt: Smarttt, teaching: Teaching) -> dict[str, Any]:
+    return ok(exam_drafts.publish(db, smarttt, teaching, identity, exam_drafts.get_draft(db, draft_id)))
+
+
+@router.post("/terms/{term_id}/exam-publications/{version}/send")
+def send_exam_publication(term_id: str, version: int, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Sends an approved exam version SMARTTT missed, exactly as approved."""
+    return ok(exam_drafts.send_publication(db, smarttt, identity, setup.get_term(db, term_id), version))
 
 
 @router.get("/exam-drafts/{draft_id}/export/{kind}.{fmt}")

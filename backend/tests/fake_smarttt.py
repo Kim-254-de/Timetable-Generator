@@ -152,6 +152,8 @@ class FakeSmarttt:
         self.snapshot = snapshot_data()
         self.publications: dict[int, dict[str, Any]] = {}
         self.payloads: list[dict[str, Any]] = []
+        self.exam_publications: dict[int, dict[str, Any]] = {}
+        self.exam_payloads: list[dict[str, Any]] = []
         self.refuse_publish: dict[str, Any] | None = None
         self.down = False  # True: SMARTTT can't be reached
 
@@ -194,6 +196,26 @@ class FakeSmarttt:
             }
             self.publications[body["version"]] = publication
             return httpx.Response(201, json=publication)
+        if route == "/exams/publish/":
+            self.exam_payloads.append(body)
+            missing = exam_payload_problems(body)
+            if missing:
+                return httpx.Response(400, json={"code": "invalid_payload", "detail": "Not valid.", "errors": missing})
+            latest = max(self.exam_publications, default=None)
+            if body["based_on_version"] != latest:
+                return httpx.Response(409, json={"code": "stale_base", "detail": "Stale.", "latest_version": latest})
+            if not body["term_id"] and not (body.get("term_start") and body.get("term_end")):
+                return httpx.Response(422, json={"code": "term_dates_required", "detail": "Give the term its dates."})
+            term_id = body["term_id"] or (TERM["id"] if body["academic_year"] == TERM["academic_year"] else NEW_TERM)
+            result = {
+                "term_id": term_id,
+                "version": body["version"],
+                "based_on_version": body["based_on_version"],
+                "paper_count": len(body["papers"]),
+                "practical_count": len(body.get("practicals") or []),
+            }
+            self.exam_publications[body["version"]] = result
+            return httpx.Response(201, json=result)
         return httpx.Response(404, json={"detail": f"No route {route}"})
 
 
@@ -215,4 +237,21 @@ def publish_payload_problems(body: dict[str, Any]) -> list[str]:
             problems.append(f"{s.get('key')}.class_rows")
         for row in s.get("class_rows") or []:
             problems += [f"{s.get('key')}.class_rows.{f}" for f in ROW_FIELDS if row.get(f) in (None, "")]
+    return problems
+
+
+# What SMARTTT's exam publish endpoint requires (apps/integrations/generator_exams.py there).
+PAPER_FIELDS = ("key", "codes", "date", "start_time", "end_time")
+SEAT_FIELDS = ("room_code", "class_row")
+
+
+def exam_payload_problems(body: dict[str, Any]) -> list[str]:
+    problems = [f for f in ("academic_year", "semester", "version", "published_by", "papers") if f not in body]
+    for p in body.get("papers") or []:
+        problems += [f"{p.get('key')}.{f}" for f in PAPER_FIELDS if p.get(f) in (None, "", [])]
+        for seat in p.get("seating") or []:
+            problems += [f"{p.get('key')}.seating.{f}" for f in SEAT_FIELDS if not seat.get(f)]
+    for pr in body.get("practicals") or []:
+        if not isinstance(pr.get("codes"), list) or not pr["codes"]:
+            problems.append("practicals.codes")
     return problems

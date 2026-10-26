@@ -73,7 +73,9 @@ export function ExamDraftPage() {
 
       {act.isError && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{errorMessage(act.error)}</p>}
       {act.isSuccess && act.variables === 'publish' && (
-        <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">Approved as version {act.data.version}.</p>
+        act.data.smarttt?.sent
+          ? <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">Approved as version {act.data.version} and sent to SMARTTT: students see their exams in the app.</p>
+          : <p role="status" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">Approved as version {act.data.version}, not yet in SMARTTT{act.data.smarttt?.reason ? `: ${act.data.smarttt.reason}` : ''}. Send it from the Exams tab.</p>
       )}
       {editable && draft.shared_at && unnamed > 0 && (
         <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">{unnamed} papers have no invigilator published by their department yet.</p>

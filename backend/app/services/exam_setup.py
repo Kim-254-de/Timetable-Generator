@@ -151,9 +151,10 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                 "examiner_staff_number": (examiner.get("staff_number") or "").strip().upper() or None,
                 "examiner_name": examiner.get("name") or "",
                 "notes": p.get("notes") or "",
+                "sitting": "odel" if p.get("sitting") == "odel" else "regular",
             }
             paper = existing.get(p["id"])
-            label = "/".join(p["codes"])
+            label = "/".join(p["codes"]) + (" (ODEL)" if values["sitting"] == "odel" else "")
             if paper is None:
                 paper = ExamPaper(term_id=term.id, allocator_ref=p["id"], **values)
                 db.add(paper)
