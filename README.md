@@ -36,6 +36,9 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    is downloadable on each screen):
    - **Lecture halls**: code, building, capacity, type (lecture hall, lab,
      seminar room), available or closed, blocked hours. Shared by every term.
+     **Bring in from SMARTTT** takes the rooms and capacities the admin
+     uploaded there (by code), and importing exam papers does it first;
+     exam seats, "for exams" and blocked hours set here stay.
    - **Departments**: code, name, school, number of lecturers (caps how many of
      its classes run at once). Shared by every term.
    - **Class rows**: programme, year, study semester, sub class, department,

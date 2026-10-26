@@ -169,6 +169,8 @@ class FakeSmarttt:
         self.exam_mode_calls: list[dict[str, Any]] = []
         self.exam_payloads: list[dict[str, Any]] = []
         self.refuse_exams: dict[str, Any] | None = None
+        # The rooms the admin uploaded (generator/rooms/); none unless a test adds them.
+        self.rooms: list[dict[str, Any]] = []
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -181,6 +183,8 @@ class FakeSmarttt:
         route = request.url.path[len(PREFIX) :]
         body = json.loads(request.content) if request.content else {}
         params = dict(request.url.params)
+        if route == "/rooms/":
+            return httpx.Response(200, json={"rooms": self.rooms})
         if route == "/terms/":
             return httpx.Response(200, json={"terms": [TERM]})
         if route == "/snapshot/":

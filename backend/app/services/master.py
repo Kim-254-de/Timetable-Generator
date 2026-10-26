@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import ClassRowBody, DepartmentPatch, OfferingBody, RoomBody, RoomPatch
 from app.auth import Identity
+from app.clients.smarttt import SmartttClient
 from app.errors import ApiError
 from app.models import (
     ClassRow,
@@ -120,6 +121,55 @@ def update_room(db: Session, identity: Identity, room: Room, fields: dict[str, A
     if commit:
         db.commit()
     return room
+
+
+def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[str, Any]:
+    """
+    Brings in the rooms the admin uploaded to SMARTTT, by code: building,
+    capacity, type, and whether it is in use (SMARTTT's status "active"). What
+    only the Generator keeps stays as it is: exam seats, "for exams" and the
+    slots a room is unavailable. A room only here is left alone and listed.
+    """
+    added: list[str] = []
+    updated: list[str] = []
+    seen: set[str] = set()
+    for r in smarttt.rooms():
+        code = str(r.get("code") or "").strip()
+        if not code or not r.get("capacity"):
+            continue
+        seen.add(code.upper())
+        try:
+            kind = _room_type(r.get("room_type"))
+        except ValueError:
+            kind = "lecture_hall"
+        capacity = int(r["capacity"])
+        fields: dict[str, Any] = {
+            "building": str(r.get("building") or ""),
+            "capacity": capacity,
+            "room_type": kind,
+            "active": (r.get("status") or "active") == "active",
+        }
+        room = _room_by_code(db, code)
+        if room is None:
+            room = Room(id=uuid.uuid4().hex, code=code, unavailable=[], for_exams=True, **fields)
+            db.add(room)
+            db.flush()
+            audit(db, identity, "room.create", "room", room.id, None, room_dict(room))
+            added.append(code)
+            continue
+        before = room_dict(room)
+        if room.exam_seats and room.exam_seats > capacity:
+            room.exam_seats = None  # a fixed number above the new capacity no longer holds
+        changed = {k: v for k, v in fields.items() if getattr(room, k) != v}
+        if changed:
+            for key, value in changed.items():
+                setattr(room, key, value)
+            db.flush()
+            audit(db, identity, "room.update", "room", room.id, before, room_dict(room))
+            updated.append(code)
+    only_here = sorted(r.code for r in db.scalars(select(Room)) if r.code.upper() not in seen)
+    db.commit()
+    return {"added": added, "updated": updated, "only_here": only_here}
 
 
 def delete_room(db: Session, identity: Identity, room: Room) -> None:
