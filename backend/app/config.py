@@ -16,9 +16,11 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
 
     database_url: str = "postgresql+psycopg://generator:generator@localhost:5432/generator"
+    # Solver runs go to the RQ worker through Redis. Empty (or Redis unreachable):
+    # they are solved one at a time in a background thread of the web process,
+    # for hosting with no Redis or worker (e.g. a single free web service).
     redis_url: str = "redis://localhost:6379/0"
-    # Solver runs go to the RQ worker; true runs them in the web process
-    # (tests and single-machine development only).
+    # True solves runs in the request itself (tests and single-machine development only).
     run_inline: bool = False
     run_queue: str = "generator-runs"
     # The longest run the Director may ask for, and the default.

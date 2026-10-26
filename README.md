@@ -219,7 +219,11 @@ rq worker generator-runs --url redis://localhost:6379/0     # in another termina
 ```
 
 Without Redis, `RUN_INLINE=true` solves inside the API request (development only;
-refused in production). Frontend: `cd frontend && npm install && npm run dev`
+refused in production). With `REDIS_URL` empty, or Redis unreachable, runs are
+solved one at a time in a background thread of the API process: hosting with no
+Redis or worker (a single web service) still generates, and a run cut off by a
+restart is marked failed on the next start so it can be started again. On a
+small instance keep `SOLVER_WORKERS` low (1-2) to stay within its memory. Frontend: `cd frontend && npm install && npm run dev`
 (proxies `/api` to port 8002). Everything in containers: `docker compose up --build`,
 then http://localhost:8081.
 

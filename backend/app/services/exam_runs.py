@@ -108,11 +108,7 @@ def create_exam_run(
     db.flush()
     audit(db, identity, "run.create", "run", str(run.id), None, {"mode": "exam", "time_limit_s": limit})
     db.commit()
-    if settings.run_inline:
-        runs.execute_run(str(run.id))
-        db.refresh(run)
-    else:
-        runs._enqueue(str(run.id), limit)
+    runs.dispatch(db, run)
     return run
 
 
