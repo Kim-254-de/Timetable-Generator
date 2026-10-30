@@ -1,10 +1,13 @@
 """
 "Import published departments": what departments entered and published in
-the Timetable Allocator becomes the term's class rows, units and groups.
+Smart Attendance's department Teaching page becomes the term's class rows,
+units and groups. (It used to come from the separate Timetable Allocator,
+in the same shape; `allocator_ref`, `source == "allocator"` and this
+module's name are kept from then, so rows imported before keep matching.)
 
 Each department's course becomes a class row, each unit an offering, and
 each group a group with its courses' students and its lecturer (by staff
-number). Rows imported carry `allocator_ref`, the Allocator's id, so
+number). Rows imported carry `allocator_ref`, Attendance's id, so
 importing again updates them in place and says what changed; a department's
 unit or group it no longer has is removed (with its classes in the drafts).
 A row entered here with the same label or unit code is taken over.
@@ -24,7 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import Identity
-from app.clients.allocator import AllocatorClient
+from app.clients.teaching import TeachingClient
 from app.errors import ApiError
 from app.models import (
     ClassRow,
@@ -60,9 +63,9 @@ def _imports(db: Session, term: Term) -> dict[str, DepartmentImport]:
     }
 
 
-def status(db: Session, allocator: AllocatorClient, term: Term) -> dict[str, Any]:
+def status(db: Session, teaching: TeachingClient, term: Term) -> dict[str, Any]:
     """Each department: published or not yet, when, and whether its latest publish is imported."""
-    data = allocator.submissions(str(term.id))
+    data = teaching.submissions(str(term.id))
     imported = _imports(db, term)
     rows: list[dict[str, Any]] = []
     for d in data.get("published") or []:
@@ -109,7 +112,7 @@ def _department(db: Session, identity: Identity, code: str, name: str) -> Depart
     if found is not None:
         return found
     next_id = max(int(db.scalar(select(func.max(Department.id))) or 0) + 1, FIRST_LOCAL_DEPARTMENT_ID)
-    d = Department(id=next_id, code=code, name=name or code, school="")
+    d = Department(id=next_id, code=code, name=name or code)
     db.add(d)
     db.flush()
     audit(db, identity, "department.create", "department", str(d.id), None, department_dict(d))
@@ -143,7 +146,7 @@ def upsert_class_rows(
     departments: dict[str, Department],
     changes: dict[str, list[str]],
 ) -> dict[str, ClassRow]:
-    """The Allocator's courses as the term's class rows (by the Allocator's id, else the label), by course id."""
+    """Attendance's courses as the term's class rows (by Attendance's id, else the label), by course id."""
     term_rows = list(db.scalars(select(ClassRow).where(ClassRow.term_id == term.id)))
     by_ref = {r.allocator_ref: r for r in term_rows if r.allocator_ref}
     by_label = {compact(r.label): r for r in term_rows}
@@ -176,8 +179,8 @@ def upsert_class_rows(
     return rows
 
 
-def import_departments(db: Session, allocator: AllocatorClient, identity: Identity, term: Term) -> dict[str, Any]:
-    data = allocator.submissions(str(term.id))
+def import_departments(db: Session, teaching: TeachingClient, identity: Identity, term: Term) -> dict[str, Any]:
+    data = teaching.submissions(str(term.id))
     published = list(data.get("published") or [])
     if not published:
         raise ApiError(409, "NOTHING_PUBLISHED", "No department has published its teaching for this term yet.")

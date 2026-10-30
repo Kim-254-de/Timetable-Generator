@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.models import AuditLog
 from tests.conftest import sign_in
-from tests.fake_allocator import FakeAllocator
-from tests.fake_smarttt import TERM, FakeSmarttt
+from tests.fake_smarttt import DIRECTOR, TERM, FakeSmarttt
+from tests.fake_teaching import FakeTeaching
 from tests.test_exams import ok, setup_exams
 
 
@@ -21,8 +21,8 @@ def _future_week() -> tuple[date, date]:
     return monday, monday + timedelta(days=4)
 
 
-def _smarttt_term(client: TestClient, allocator: FakeAllocator) -> tuple[str, date, date]:
-    term_id = setup_exams(client, allocator, smarttt_term_id=TERM["id"])
+def _smarttt_term(client: TestClient, teaching: FakeTeaching) -> tuple[str, date, date]:
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
     first, last = _future_week()
     ok(
         client.patch(
@@ -33,16 +33,16 @@ def _smarttt_term(client: TestClient, allocator: FakeAllocator) -> tuple[str, da
     return term_id, first, last
 
 
-def _publish_exams(client: TestClient, allocator: FakeAllocator, term_id: str, expect_ok: bool = True) -> None:
+def _publish_exams(client: TestClient, teaching: FakeTeaching, term_id: str, expect_ok: bool = True) -> None:
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
     draft_id = ok(client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 20}))["draft_id"]
     ok(client.post(f"/api/exam-drafts/{draft_id}/share"))
     shared = ok(
         client.get(
-            f"/api/integrations/allocator/terms/{term_id}/exam-draft", headers={"X-API-Key": "test-allocator-key"}
+            f"/api/integrations/attendance/terms/{term_id}/exam-draft", headers={"X-API-Key": "test-attendance-key"}
         )
     )
-    allocator.invigilators = {
+    teaching.invigilators = {
         p["paper_ref"]: {
             room: {"staff_number": f"STF/{n}{room}", "name": f"Dr. {n} {room}"} for room in ["", *p["extra_rooms"]]
         }
@@ -59,9 +59,9 @@ def _act(client: TestClient, term_id: str, action: str, at: str | None = None):
     return client.post(f"/api/terms/{term_id}/exam-switch", json={"action": action, **({"at": at} if at else {})})
 
 
-def test_the_switch_needs_a_published_exam_version(client, allocator, smarttt: FakeSmarttt):
+def test_the_switch_needs_a_published_exam_version(client, teaching, smarttt: FakeSmarttt):
     sign_in(client)
-    term_id, _first, _last = _smarttt_term(client, allocator)
+    term_id, _first, _last = _smarttt_term(client, teaching)
     for action in ("schedule_switch", "switch_now"):
         refused = _act(client, term_id, action)
         assert refused.status_code == 409 and refused.json()["error"]["code"] == "NO_EXAM_VERSION"
@@ -70,17 +70,17 @@ def test_the_switch_needs_a_published_exam_version(client, allocator, smarttt: F
     assert smarttt.exam_mode_calls == []
 
 
-def test_a_term_only_in_the_generator_cant_switch(client, allocator):
+def test_a_term_only_in_the_generator_cant_switch(client, teaching):
     sign_in(client)
-    term_id = setup_exams(client, allocator)
+    term_id = setup_exams(client, teaching)
     refused = _act(client, term_id, "switch_now")
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "NOT_IN_SMARTTT"
 
 
-def test_schedule_move_cancel_and_switch_now(client, allocator, smarttt: FakeSmarttt, db: Session):
+def test_schedule_move_cancel_and_switch_now(client, teaching, smarttt: FakeSmarttt, db: Session):
     sign_in(client)
-    term_id, first, _last = _smarttt_term(client, allocator)
-    _publish_exams(client, allocator, term_id)
+    term_id, first, _last = _smarttt_term(client, teaching)
+    _publish_exams(client, teaching, term_id)
     state = ok(client.get(f"/api/terms/{term_id}/exam-switch"))
     assert state["status"] == "teaching" and state["published_version"] == 1
     assert state["defaults"]["switch_at"] == f"{first.isoformat()}T00:00:00+03:00"
@@ -93,7 +93,7 @@ def test_schedule_move_cancel_and_switch_now(client, allocator, smarttt: FakeSma
         "term_id": TERM["id"],
         "action": "schedule_switch",
         "at": f"{first.isoformat()}T00:00:00+03:00",
-        "by": "Dee Director (STF/0900)",
+        "by": f"Dee Director ({DIRECTOR})",
     }
     # Moved to the evening before; a time in the past is refused.
     evening = datetime.combine(first - timedelta(days=1), datetime.min.time()).replace(hour=18).isoformat() + "+03:00"
@@ -103,7 +103,7 @@ def test_schedule_move_cancel_and_switch_now(client, allocator, smarttt: FakeSma
     assert ok(_act(client, term_id, "cancel_switch"))["status"] == "teaching"
     # Switched now: everyone sees exams at once.
     state = ok(_act(client, term_id, "switch_now"))
-    assert state["status"] == "switched" and state["switched_by"] == "Dee Director (STF/0900)"
+    assert state["status"] == "switched" and state["switched_by"] == f"Dee Director ({DIRECTOR})"
     assert state["label"].startswith("Switched on ") and "by Dee Director" in state["label"]
     # SMARTTT refuses cancelling a switch that has happened.
     late = _act(client, term_id, "cancel_switch")
@@ -118,10 +118,10 @@ def test_schedule_move_cancel_and_switch_now(client, allocator, smarttt: FakeSma
     ]
 
 
-def test_close_the_exam_period_scheduled_or_now(client, allocator, smarttt: FakeSmarttt):
+def test_close_the_exam_period_scheduled_or_now(client, teaching, smarttt: FakeSmarttt):
     sign_in(client)
-    term_id, _first, last = _smarttt_term(client, allocator)
-    _publish_exams(client, allocator, term_id)
+    term_id, _first, last = _smarttt_term(client, teaching)
+    _publish_exams(client, teaching, term_id)
     ok(_act(client, term_id, "schedule_switch"))
     # Scheduled for the day after the last paper unless another time is given.
     state = ok(_act(client, term_id, "schedule_close"))
@@ -131,15 +131,15 @@ def test_close_the_exam_period_scheduled_or_now(client, allocator, smarttt: Fake
     # Closed now: SMARTTT goes back to the teaching timetable.
     ok(_act(client, term_id, "switch_now"))
     state = ok(_act(client, term_id, "close_now"))
-    assert state["status"] == "closed" and state["closed_by"] == "Dee Director (STF/0900)"
+    assert state["status"] == "closed" and state["closed_by"] == f"Dee Director ({DIRECTOR})"
     assert state["label"].startswith("Closed on ")
     assert smarttt.exam_mode["mode"] == "teaching"
 
 
-def test_the_exam_version_goes_to_smarttt(client, allocator, smarttt: FakeSmarttt, db: Session):
+def test_the_exam_version_goes_to_smarttt(client, teaching, smarttt: FakeSmarttt, db: Session):
     sign_in(client)
-    term_id, first, _last = _smarttt_term(client, allocator)
-    _publish_exams(client, allocator, term_id)
+    term_id, first, _last = _smarttt_term(client, teaching)
+    _publish_exams(client, teaching, term_id)
     [payload] = smarttt.exam_payloads
     assert payload["term_id"] == TERM["id"] and payload["version"] == 1 and payload["based_on_version"] is None
     assert payload["exam_start"] == first.isoformat()
@@ -149,12 +149,12 @@ def test_the_exam_version_goes_to_smarttt(client, allocator, smarttt: FakeSmartt
     assert exams["publications"][0]["sent_to_smarttt"] is True
 
 
-def test_smarttt_down_leaves_the_version_approved_to_send_later(client, allocator, smarttt: FakeSmarttt):
+def test_smarttt_down_leaves_the_version_approved_to_send_later(client, teaching, smarttt: FakeSmarttt):
     sign_in(client)
-    term_id, _first, _last = _smarttt_term(client, allocator)
+    term_id, _first, _last = _smarttt_term(client, teaching)
     smarttt.down = True
     try:
-        _publish_exams(client, allocator, term_id)
+        _publish_exams(client, teaching, term_id)
     finally:
         smarttt.down = False
     publication = ok(client.get(f"/api/terms/{term_id}/exams"))["publications"][0]
@@ -165,16 +165,16 @@ def test_smarttt_down_leaves_the_version_approved_to_send_later(client, allocato
     assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_SENT"
 
 
-def test_smarttt_refusing_the_exam_version_approves_nothing(client, allocator, smarttt: FakeSmarttt):
+def test_smarttt_refusing_the_exam_version_approves_nothing(client, teaching, smarttt: FakeSmarttt):
     sign_in(client)
-    term_id, _first, _last = _smarttt_term(client, allocator)
+    term_id, _first, _last = _smarttt_term(client, teaching)
     smarttt.refuse_exams = {
         "code": "unknown_lecturer",
         "detail": "SMARTTT doesn't know 1 staff numbers.",
         "staff_numbers": ["STF/0"],
     }
     try:
-        _publish_exams(client, allocator, term_id, expect_ok=False)
+        _publish_exams(client, teaching, term_id, expect_ok=False)
     finally:
         smarttt.refuse_exams = None
     assert ok(client.get(f"/api/terms/{term_id}/exams"))["publications"] == []

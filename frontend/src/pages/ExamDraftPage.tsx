@@ -73,7 +73,9 @@ export function ExamDraftPage() {
 
       {act.isError && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{errorMessage(act.error)}</p>}
       {act.isSuccess && act.variables === 'publish' && (
-        <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">Approved as version {act.data.version}.</p>
+        act.data.smarttt?.sent
+          ? <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">Approved as version {act.data.version} and sent to SMARTTT: students see their exams in the app.</p>
+          : <p role="status" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">Approved as version {act.data.version}, not yet in SMARTTT{act.data.smarttt?.reason ? `: ${act.data.smarttt.reason}` : ''}. Send it from the Exams tab.</p>
       )}
       {editable && draft.shared_at && unnamed > 0 && (
         <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">{unnamed} invigilators (main, or for an extra room) are still to be published by departments.</p>
@@ -141,7 +143,7 @@ function Grid({ data, search, flagged, onPick }: {
                       title={`${p.title} · ${p.students} students${p.pinned ? ' · pinned' : ''}`}
                       className={clsx('mb-1 block w-full rounded border px-1.5 py-1 text-left',
                         flagged.has(p.id) ? 'border-danger/40 bg-danger-soft' : 'border-line bg-surface', onPick && 'hover:border-brand')}>
-                      <b>{p.codes}</b> → {roomsOf(p).join(', ')}
+                      <b>{p.codes}</b> → {roomsOf(p).join(', ') || 'room to be announced (no students known)'}
                       <span className="block text-muted">{p.students} students{p.pinned ? ' · pinned' : ''}</span>
                     </button>
                   ))}

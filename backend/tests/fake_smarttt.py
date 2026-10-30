@@ -152,6 +152,8 @@ class FakeSmarttt:
         self.snapshot = snapshot_data()
         self.publications: dict[int, dict[str, Any]] = {}
         self.payloads: list[dict[str, Any]] = []
+        self.exam_publications: dict[int, dict[str, Any]] = {}
+        self.exam_payloads: list[dict[str, Any]] = []
         self.refuse_publish: dict[str, Any] | None = None
         self.down = False  # True: SMARTTT can't be reached
         # Exam mode per term, as the proposed /exam-mode/ endpoint keeps it.
@@ -167,20 +169,8 @@ class FakeSmarttt:
         self.exam_mode_calls: list[dict[str, Any]] = []
         self.exam_payloads: list[dict[str, Any]] = []
         self.refuse_exams: dict[str, Any] | None = None
-
-    def identity(self, account: str, office: bool) -> dict[str, Any]:
-        return {
-            "account": {
-                "id": account,
-                "role": "admin",
-                "university_id": "STF/0900",
-                "email": None,
-                "full_name": "Dee Director" if office else "Lee Lecturer",
-                "is_active": True,
-            },
-            "timetabling_office": office,
-            "departments": [],
-        }
+        # The rooms the admin uploaded (generator/rooms/); none unless a test adds them.
+        self.rooms: list[dict[str, Any]] = []
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -193,16 +183,8 @@ class FakeSmarttt:
         route = request.url.path[len(PREFIX) :]
         body = json.loads(request.content) if request.content else {}
         params = dict(request.url.params)
-        if route == "/authenticate/":
-            if body.get("password") != "right-password":
-                return httpx.Response(200, json={"authenticated": False})
-            office = body.get("identifier") == "director"
-            return httpx.Response(
-                200, json={"authenticated": True, **self.identity(DIRECTOR if office else LECTURER_ACCOUNT, office)}
-            )
-        if route == "/identity/":
-            office = params.get("account_id") == DIRECTOR
-            return httpx.Response(200, json=self.identity(params["account_id"], office))
+        if route == "/rooms/":
+            return httpx.Response(200, json={"rooms": self.rooms})
         if route == "/terms/":
             return httpx.Response(200, json={"terms": [TERM]})
         if route == "/snapshot/":
@@ -211,15 +193,24 @@ class FakeSmarttt:
             self.payloads.append(body)
             if self.refuse_publish:
                 return httpx.Response(409, json=self.refuse_publish)
+            missing = publish_payload_problems(body)
+            if missing:
+                return httpx.Response(400, json={"code": "invalid_payload", "detail": "Not valid.", "errors": missing})
             latest = max(self.publications, default=None)
             if body["based_on_version"] != latest:
                 return httpx.Response(409, json={"code": "stale_base", "detail": "Stale.", "latest_version": latest})
+            if not body["term_id"] and not (body.get("term_start") and body.get("term_end")):
+                return httpx.Response(422, json={"code": "term_dates_required", "detail": "Give the term its dates."})
+            # Like SMARTTT: a null term_id is found (or created) by year and semester.
+            term_id = body["term_id"] or (TERM["id"] if body["academic_year"] == TERM["academic_year"] else NEW_TERM)
             publication = {
-                "term_id": body["term_id"],
+                "term_id": term_id,
                 "version": body["version"],
                 "based_on_version": body["based_on_version"],
                 "session_count": len(body["sessions"]),
                 "changes": {"added": [s["key"] for s in body["sessions"]], "moved": [], "removed": [], "unchanged": 0},
+                # SMARTTT's id for each unit: the one sent, else a new one.
+                "units": {s["unit_code"]: s["unit_id"] or 900 + i for i, s in enumerate(body["sessions"])},
             }
             self.publications[body["version"]] = publication
             return httpx.Response(201, json=publication)
@@ -267,3 +258,24 @@ class FakeSmarttt:
         elif action == "close_now":
             state.update(mode="teaching", exam_close_at=now, exam_closed_at=now, closed_by=call["by"])
         return httpx.Response(200, json=state)
+
+
+NEW_TERM = "7d1f5c2e-0000-4000-8000-00000000a001"
+
+# What SMARTTT's publish endpoint requires of each session
+# (apps/integrations/generator_publish.py there).
+SESSION_FIELDS = ("key", "unit_code", "unit_name", "department", "room", "day_of_week", "start_time", "end_time")
+ROOM_FIELDS = ("code", "capacity", "room_type")
+ROW_FIELDS = ("label", "program_code", "year_of_study")
+
+
+def publish_payload_problems(body: dict[str, Any]) -> list[str]:
+    problems = [f for f in ("academic_year", "semester", "version", "published_by", "sessions") if f not in body]
+    for s in body.get("sessions") or []:
+        problems += [f"{s.get('key')}.{f}" for f in SESSION_FIELDS if s.get(f) in (None, "")]
+        problems += [f"{s.get('key')}.room.{f}" for f in ROOM_FIELDS if not (s.get("room") or {}).get(f)]
+        if not s.get("class_rows"):
+            problems.append(f"{s.get('key')}.class_rows")
+        for row in s.get("class_rows") or []:
+            problems += [f"{s.get('key')}.class_rows.{f}" for f in ROW_FIELDS if row.get(f) in (None, "")]
+    return problems

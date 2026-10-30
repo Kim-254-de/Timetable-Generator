@@ -234,6 +234,26 @@ def _pdf_table(header: list[str], rows: list[list[str]], widths: list[float] | N
     return table
 
 
+# Lines of `paper -> rooms` a grid row may hold and still fit a landscape A4 page.
+PDF_ROW_LINES = 40
+
+
+def _fit_pages(rows: list[list[str]]) -> list[list[str]]:
+    """A day busier than a page holds (80 papers in a session at full size) as several rows, the date repeated."""
+    out = []
+    for label, *cells in rows:
+        lines = [cell.split("\n") if cell else [] for cell in cells]
+        tallest = max((len(c) for c in lines), default=0)
+        for start in range(0, max(tallest, 1), PDF_ROW_LINES):
+            out.append(
+                [
+                    label if start == 0 else f"{label} (cont.)",
+                    *["\n".join(c[start : start + PDF_ROW_LINES]) for c in lines],
+                ]
+            )
+    return out
+
+
 def timetable_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by: str) -> bytes:
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, Spacer
@@ -243,6 +263,7 @@ def timetable_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_
 
     def story() -> list[Any]:
         header, rows = timetable_table(rec)
+        rows = _fit_pages(rows)
         first = 28 * mm
         rest = (277 * mm - first) / max(1, len(header) - 1)
         out: list[Any] = [Paragraph(escape(line), st["title"]) for line in title]

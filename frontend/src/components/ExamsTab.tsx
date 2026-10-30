@@ -19,7 +19,7 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 /**
  * The term's exam timetable: the exam period, the papers departments
- * published (imported from the Allocator), generating, drafts and versions.
+ * published (imported from Smart Attendance), generating, drafts and versions.
  */
 export function ExamsTab({ termId }: { termId: string }) {
   const exams = useExams(termId)
@@ -44,7 +44,7 @@ export function ExamsTab({ termId }: { termId: string }) {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h2 className="font-semibold">Exam papers</h2>
-              <p className="text-sm text-muted">Departments list their papers in the Allocator and publish them.</p>
+              <p className="text-sm text-muted">Departments list their papers on their Teaching page in Smart Attendance and publish them.</p>
             </div>
             <button onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending || !departments.data?.published.length}
               className="rounded-md bg-brand px-3 py-2 text-sm text-white disabled:opacity-50">
@@ -148,8 +148,8 @@ export function ExamsTab({ termId }: { termId: string }) {
               <li key={p.version}>
                 <Link to={`/terms/${termId}/exam-drafts/${p.draft_id}`} className="font-medium text-brand-ink">Version {p.version}</Link>
                 {' '}· {dateTime(p.published_at)} by {p.published_by}
-                {!p.sent_to_smarttt && <span className="block text-warning">Not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
-                {!p.sent_to_smarttt && p.version === data.publications[0]?.version && (
+                {!p.sent_to_smarttt && <span className="block text-warning">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
+                {p.can_send && (
                   <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
                     className="mt-1 rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-warning disabled:opacity-50">
                     {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
@@ -160,6 +160,7 @@ export function ExamsTab({ termId }: { termId: string }) {
             {data.publications.length === 0 && <li className="text-muted">Nothing published yet.</li>}
             {send.isError && <li role="alert" className="text-danger">{errorMessage(send.error)}</li>}
           </ul>
+          {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
         </section>
       </div>
     </div>

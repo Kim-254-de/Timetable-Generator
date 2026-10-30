@@ -6,22 +6,25 @@ Examinations and Timetabling. It decides when and where every class meets
 lets the Director review and adjust the result, approves it, and provides the
 timetable as **PDF, Word and Excel** downloads.
 
-**Departments enter their teaching first**, in the Timetable Allocator: their
-courses (class rows), units, group splits and each group's lecturer, which
-they publish to the Director. The Director **imports** what is published
-(`ALLOCATOR_BASE_URL`, `ALLOCATOR_CLIENT_KEY`), adds the lecture halls,
+**Departments enter their teaching first**, on the Teaching page of Smart
+Attendance's department portal: their courses (class rows), units, group
+splits and each group's lecturer, which they publish to the Director. The
+Director **imports** what is published (Attendance's
+`/api/v1/integrations/generator/terms/{id}/submissions`, with
+`ATTENDANCE_BASE_URL` and `ATTENDANCE_API_KEY`), adds the lecture halls,
 generates and publishes; SMARTTT receives the timetable with the lecturers in
 it, in one publish. Imported class rows, units and groups are read-only here
-("edit this in the Allocator"); a class row's unavailable hours, the rooms and
+(their department edits them in Attendance); a class row's unavailable hours, the rooms and
 the term settings stay the Director's. Rows can still be entered here for
 units no department enters.
 
 SMARTTT is optional: its data can be imported to pre-fill the same screens,
 and an approved timetable is sent to it (over SMARTTT's
 `/api/v1/integrations/generator/` endpoints, `X-API-Key`) when it is connected.
-The Timetable Allocator reads each term and, once published, each class's
-day, time and room (`/api/integrations/allocator/terms[/{id}/times]`) with its
-own key (`ALLOCATOR_API_KEY`).
+Attendance's Teaching page reads each term and, once published, each class's
+day, time and room (`/api/integrations/attendance/terms[/{id}/times]`) with the
+same shared key (`ATTENDANCE_API_KEY` here = `GENERATOR_API_KEY` there).
+(This used to be a separate app, the Timetable Allocator, which is retired.)
 See `SYSTEM_HANDOFF.md` for the whole platform.
 
 ## Workflow
@@ -33,6 +36,9 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    is downloadable on each screen):
    - **Lecture halls**: code, building, capacity, type (lecture hall, lab,
      seminar room), available or closed, blocked hours. Shared by every term.
+     **Bring in from SMARTTT** takes the rooms and capacities the admin
+     uploaded there (by code), and importing exam papers does it first;
+     exam seats, "for exams" and blocked hours set here stay.
    - **Departments**: code, name, school, number of lecturers (caps how many of
      its classes run at once). Shared by every term.
    - **Class rows**: programme, year, study semester, sub class, department,
@@ -43,7 +49,7 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    (Or, for a SMARTTT term, **import** rooms, departments, class rows and units
    from a SMARTTT snapshot; anything already entered is kept.)
    **Departments** tab: **Import published departments** brings in what
-   departments published in the Allocator (class rows, units, groups with
+   departments published in Smart Attendance (class rows, units, groups with
    lecturers); importing again updates in place and lists what changed. The
    tab shows which departments have and haven't published; you can generate
    without the missing ones.
@@ -60,10 +66,18 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    **Keep the published classes** and re-solve; its classes are added and no
    published class moves.
 6. **Approve and publish**: the draft becomes the term's next numbered version.
-   It is sent to SMARTTT when SMARTTT is connected, each session with its
-   lecturer (`lecturer_staff_number`, `lecturer_name`); otherwise it is marked
-   "not yet in SMARTTT" and still counts as approved for downloads and the
-   Allocator, where departments see each class's day, time and room.
+   It is sent to SMARTTT as the term's master timetable (SMARTTT's
+   `POST /api/v1/integrations/generator/publish/`, replacing the PDF upload):
+   students see room and time, lecturer allocations are re-applied, and Smart
+   Attendance is told which classes moved. A version updates SMARTTT's slots
+   in place, so allocated lecturers stay. A term entered here is created in
+   SMARTTT from its year, semester and dates, then linked. When SMARTTT can't
+   be reached (or the term has no dates yet) the version is marked "not yet in
+   SMARTTT", still counts as approved for downloads and the departments' pages, and can
+   be sent later. Each session carries its lecturer (`lecturer_staff_number`,
+   `lecturer_name`), and departments see each class's day, time and room on
+   their Teaching page. SMARTTT refusing it (a room clash, a department it doesn't
+   have yet, someone else published first) is reported and nothing is approved.
 7. **Download** any draft or version as **PDF**, **Word (.docx)** or
    **Excel (.xlsx)**, by class row, lecture hall or department, in the
    Directorate's layout (header, Mon–Fri × 07:00–19:00 grid, "UNIT / GR / ROOM"
@@ -84,7 +98,7 @@ On the term's **Exams** tab:
    Rooms page, never above its capacity) is only for one that can't be used at
    that share, e.g. fixed benches; "For exams" keeps a room out.
    A room's block is its building, so a big paper stays within one block.
-2. **Import exam papers** that departments published in the Allocator (with
+2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
@@ -97,17 +111,29 @@ On the term's **Exams** tab:
 4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
    as room sheets; **move** a paper (checked; both sessions re-seated; pinned)
    and **re-solve around pins**.
-5. **Share with departments** so they name invigilators in the Allocator:
-   each paper's main invigilator (in its main room, the one with most of its
-   students; collects every room's scripts) and one extra invigilator for each
-   extra room.
+5. **Share with departments** so they name invigilators on their Teaching page
+   in Smart Attendance: each paper's main invigilator (in its main room, the
+   one with most of its students; collects every room's scripts) and one extra
+   invigilator for each extra room.
+   Papers nobody is known to sit yet are still kept apart: units of one
+   subject and year ("BPPA 110", "BPPA 121") are taken to be one class, kept
+   to one paper a session and two a day (S-E4), and these papers are spread
+   evenly over the period (S-E5). Both give way rather than make a timetable
+   impossible; real numbers from the department replace the guess.
+   A main invigilator a department names before the timetable is generated
+   comes in with the papers, and the solver keeps that person's papers in
+   different sessions (rule H-E7). A paper nobody is known to sit (no class
+   rows: nobody synced it, e.g. part-time students) still gets a date and
+   session, with no room ("room to be announced") and no invigilator needed.
 6. **Approve and publish**: refused while any paper, or any extra room of a
    paper, has no invigilator. The
    version is frozen and sent to SMARTTT (`generator/exam-publish/`: papers
-   with their codes, date and session, each class row's room with its main or
-   extra invigilator, the rooms, practicals). SMARTTT refusing it (e.g. a staff
-   number it doesn't know) approves nothing; SMARTTT down leaves it approved
-   here, and **Send to SMARTTT now** sends it later.
+   with their codes, sitting (regular or ODEL), date and session, each class
+   row's room with its main or extra invigilator, the rooms, practicals).
+   Students see the papers and practicals of the units they synced, with their
+   own room, in the SMARTTT app. SMARTTT refusing it (e.g. a staff number it
+   doesn't know) approves nothing; SMARTTT down leaves it approved here, and
+   **Send to SMARTTT now** sends it later.
 7. **Download** (Word, PDF): the timetable in the Directorate's layout, room
    sheets (each room's invigilator, main or extra), and the invigilation
    roster per department (main and extra duties).
@@ -146,7 +172,8 @@ class reminders, notifies changes to the people affected, and pushes exam
 sessions and the mode to Smart Attendance, which refuses teaching classes and
 lets invigilators open exam sessions.
 
-The SMARTTT app's *Exams* tab is still to be built.
+SMARTTT shows students their exams and lecturers their duties, and sends
+Smart Attendance the exam sessions its invigilators open.
 
 ## Rules
 
@@ -224,7 +251,11 @@ rq worker generator-runs --url redis://localhost:6379/0     # in another termina
 ```
 
 Without Redis, `RUN_INLINE=true` solves inside the API request (development only;
-refused in production). Frontend: `cd frontend && npm install && npm run dev`
+refused in production). With `REDIS_URL` empty, or Redis unreachable, runs are
+solved one at a time in a background thread of the API process: hosting with no
+Redis or worker (a single web service) still generates, and a run cut off by a
+restart is marked failed on the next start so it can be started again. On a
+small instance keep `SOLVER_WORKERS` low (1-2) to stay within its memory. Frontend: `cd frontend && npm install && npm run dev`
 (proxies `/api` to port 8002). Everything in containers: `docker compose up --build`,
 then http://localhost:8081.
 
@@ -233,7 +264,7 @@ then http://localhost:8081.
 On a Linux server with Docker and the Compose plugin:
 
 ```bash
-cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ALLOCATOR_API_KEY, ALLOCATOR_BASE_URL, ALLOCATOR_CLIENT_KEY;
+cp .env.example .env     # fill in POSTGRES_PASSWORD, SMARTTT_*, ATTENDANCE_BASE_URL, ATTENDANCE_API_KEY;
                          # SOLVER_WORKERS = the server's cores
 docker compose up -d --build
 ```
@@ -244,7 +275,7 @@ worker and the web app on port 8081, all restarting on their own. Then:
 - Put an HTTPS proxy (Caddy, nginx, Traefik, or the host's) in front of port 8081;
   sign-in cookies are `Secure` and need HTTPS. Add `Strict-Transport-Security` there.
 - Back up the `db-data` volume (or `pg_dump`) on a schedule.
-- The Allocator reaches the Generator through this web address
+- Smart Attendance reaches the Generator through this web address
   (`GENERATOR_BASE_URL` there), so the URL must be reachable from its server.
 - Update: `git pull && docker compose up -d --build`.
 
@@ -267,5 +298,13 @@ cd backend && uv pip compile pyproject.toml --python-version 3.12 \n  --python-p
 
 ## Access
 
-Only members of SMARTTT's `timetabling_office` group (the Directorate) can sign
-in. Sessions, CSRF and rate limiting work as in the Allocator.
+Only the Directorate of Examinations and Timetabling (the timetabling office)
+can sign in. An administrator invites each person from Smart Attendance's admin
+console (Officers, role "Timetabling office"), like any other officer; they
+choose a password from the emailed link and sign in here with that email and
+password. The Generator checks the login with Attendance
+(`POST /api/v1/integrations/generator/authenticate`, the shared key) and
+re-checks the account every `IDENTITY_REFRESH_SECONDS` (`GET .../identity`), so
+someone the administrator removes loses access within minutes. Set
+`GENERATOR_WEB_URL` in Attendance to this web app's address, for the
+invitation email.

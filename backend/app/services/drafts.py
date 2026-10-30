@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth import Identity
 from app.clients.smarttt import SmartttClient, SmartttMisconfigured, SmartttRefused, SmartttUnavailable
 from app.errors import ApiError
-from app.models import Draft, DraftSession, DraftStatus, Publication, RunMode, Term
+from app.models import Department, Draft, DraftSession, DraftStatus, Publication, RunMode, Term, UnitOffering
 from app.services.problem import Built, build_problem, placements_of, times
 from app.services.setup import audit, latest_snapshot
 from app.solver.model import DAYS, Placement, Weights, slot, valid_start
@@ -312,62 +312,29 @@ def publish(
         select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()).limit(1)
     )
     version = (last.version if last else 0) + 1
-    sessions = []
-    for ds in draft.sessions:
-        group = built.groups[ds.key]
-        offering = built.offerings[ds.key]
-        day, start, end = times(ds.start_slot, ds.length)
-        room = built.rooms.get(ds.smarttt_room_id, {})
-        sessions.append(
-            {
-                "key": ds.key,
-                "unit_id": offering.smarttt_unit_id,
-                # Codes as well as ids, so SMARTTT can match (or create) units,
-                # rooms and class rows entered in the Generator.
-                "unit_code": offering.unit_code,
-                "unit_name": offering.unit_name,
-                "room_code": room.get("code"),
-                "class_row_labels": [built.rows[m.class_row_id].label for m in group.members],
-                "group_label": group.label or None,
-                "class_rows": [
-                    {
-                        "program_id": built.rows[m.class_row_id].smarttt_program_id,
-                        "year_of_study": built.rows[m.class_row_id].study_year,
-                        "study_semester": built.rows[m.class_row_id].study_semester,
-                        "stream": built.rows[m.class_row_id].sub_class,
-                    }
-                    for m in group.members
-                ],
-                "room_id": ds.smarttt_room_id,
-                "day_of_week": day,
-                "start_time": start,
-                "end_time": end,
-                # The department's lecturer for the group, as SMARTTT knows them.
-                "lecturer_staff_number": group.lecturer_staff_number,
-                "lecturer_name": group.lecturer_name or None,
-            }
-        )
-    payload = {
+    sessions = _sessions_payload(db, draft, built)
+    payload: dict[str, Any] = {
         "term_id": term.smarttt_term_id,
         "academic_year": term.academic_year,
         "semester": term.semester,
+        # SMARTTT creates the term from these when it doesn't have it yet.
+        "term_start": term.start_date.isoformat() if term.start_date else None,
+        "term_end": term.end_date.isoformat() if term.end_date else None,
         "version": version,
-        "based_on_version": last.version if last else None,
+        "based_on_version": None,  # set when sent: the latest version SMARTTT has
         "published_by": identity.actor,
         "replace_unpublished": replace_unpublished,
         "sessions": sessions,
     }
-    # The Director's approval stands even when SMARTTT can't be told yet (a
-    # term created in the Generator, or SMARTTT down): the version is recorded
-    # here, downloads and the Allocator use it, and `sent` says it still has to
-    # reach SMARTTT. SMARTTT refusing the timetable (409/422) is different: it
-    # is reported and nothing is published.
+    # The Director's approval stands even when SMARTTT can't be told yet
+    # (SMARTTT down): the version is recorded here, downloads and the departments' Teaching pages
+    # use it, and `sent` says it still has to reach SMARTTT. SMARTTT refusing
+    # the timetable (409/422) is different: it is reported and nothing is
+    # published.
     try:
-        if not term.smarttt_term_id:
-            response: dict[str, Any] = {"sent": False, "reason": "This term exists only in the Generator."}
-        else:
-            _status, response = smarttt.publish(payload)
-            response = {"sent": True, **response}
+        response = (
+            _send(db, smarttt, term, payload) if _smarttt_can_place(term) else {"sent": False, "reason": NO_TERM_DATES}
+        )
     except (SmartttUnavailable, SmartttMisconfigured) as down:
         response = {"sent": False, "reason": getattr(down, "message", None) or str(down) or "SMARTTT unavailable."}
     except SmartttRefused as refused:
@@ -412,6 +379,116 @@ def publish(
     return {"version": version, "smarttt": response, "draft": draft_summary(db, draft)}
 
 
+NO_TERM_DATES = "SMARTTT doesn't have this term yet: give it its start and end dates, then send this version."
+
+
+def _smarttt_can_place(term: Term) -> bool:
+    """SMARTTT has the term, or can create it from its dates."""
+    return bool(term.smarttt_term_id or (term.start_date and term.end_date))
+
+
+def _sessions_payload(db: Session, draft: Draft, built: Built) -> list[dict[str, Any]]:
+    """
+    Each session as SMARTTT's publish endpoint takes it: ids where the
+    Generator has SMARTTT's, and always the codes, names, owning department,
+    room details and class rows, so SMARTTT can match (or create) units, rooms
+    and programmes entered in the Generator.
+    """
+    departments = {d.id: d for d in db.scalars(select(Department))}
+
+    def department(department_id: int | None) -> dict[str, Any]:
+        d = departments.get(department_id) if department_id is not None else None
+        if d is None:
+            return {"smarttt_id": None, "code": "", "name": ""}
+        return {"smarttt_id": d.smarttt_department_id, "code": d.code, "name": d.name}
+
+    sessions = []
+    for ds in draft.sessions:
+        group = built.groups[ds.key]
+        offering = built.offerings[ds.key]
+        day, start, end = times(ds.start_slot, ds.length)
+        room = built.rooms.get(ds.smarttt_room_id, {})
+        rows = [built.rows[m.class_row_id] for m in group.members]
+        sessions.append(
+            {
+                "key": ds.key,
+                "unit_id": offering.smarttt_unit_id,
+                "unit_code": offering.unit_code,
+                "unit_name": offering.unit_name,
+                "weekly_hours": offering.weekly_hours,
+                "department": department(offering.owning_department_id),
+                "group_label": group.label or None,
+                "room_id": ds.smarttt_room_id,
+                "room": {
+                    "code": room.get("code") or str(ds.smarttt_room_id),
+                    "building": room.get("building") or "",
+                    "capacity": room.get("capacity") or 1,
+                    "room_type": room.get("room_type") or "lecture_hall",
+                },
+                "class_rows": [
+                    {
+                        "label": r.label,
+                        "program_id": r.smarttt_program_id,
+                        "program_code": r.program_code,
+                        "year_of_study": r.study_year,
+                        "study_semester": r.study_semester,
+                        "stream": r.sub_class,
+                        "department_smarttt_id": department(r.department_id)["smarttt_id"],
+                    }
+                    for r in rows
+                ],
+                "day_of_week": day,
+                "start_time": start,
+                "end_time": end,
+                # The department's lecturer for the group, as SMARTTT knows them.
+                "lecturer_staff_number": group.lecturer_staff_number,
+                "lecturer_name": group.lecturer_name or None,
+            }
+        )
+    return sessions
+
+
+def _send(db: Session, smarttt: SmartttClient, term: Term, payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Sends a version to SMARTTT, made from the latest version SMARTTT has
+    received (a version it missed is not its base). A term created here is
+    found or created there by year and semester, then linked to SMARTTT's id,
+    and units SMARTTT matched or created are linked to theirs. Raises the
+    client's errors; the caller commits.
+    """
+    received = [
+        p.version
+        for p in db.scalars(select(Publication).where(Publication.term_id == term.id))
+        if p.smarttt_response.get("sent", True)
+    ]
+    _status, response = smarttt.publish(
+        {
+            **payload,
+            "term_id": term.smarttt_term_id,
+            "term_start": term.start_date.isoformat() if term.start_date else None,
+            "term_end": term.end_date.isoformat() if term.end_date else None,
+            "based_on_version": max(received, default=None),
+        }
+    )
+    smarttt_term = str(response.get("term_id") or "")
+    if (
+        smarttt_term
+        and not term.smarttt_term_id
+        and db.scalar(select(Term).where(Term.smarttt_term_id == smarttt_term)) is None
+    ):
+        term.smarttt_term_id = smarttt_term
+    unit_ids: dict[str, Any] = response.get("units") or {}
+    linked = {o.smarttt_unit_id for o in db.scalars(select(UnitOffering).where(UnitOffering.term_id == term.id))}
+    for offering in db.scalars(
+        select(UnitOffering).where(UnitOffering.term_id == term.id, UnitOffering.smarttt_unit_id.is_(None))
+    ):
+        unit_id = unit_ids.get(offering.unit_code)
+        if isinstance(unit_id, int) and unit_id not in linked:
+            offering.smarttt_unit_id = unit_id
+            linked.add(unit_id)
+    return {"sent": True, **response}
+
+
 def publications(db: Session, term: Term) -> list[dict[str, Any]]:
     rows = list(
         db.scalars(select(Publication).where(Publication.term_id == term.id).order_by(Publication.version.desc()))
@@ -430,8 +507,8 @@ def publications(db: Session, term: Term) -> list[dict[str, Any]]:
             "can_send": (
                 not p.smarttt_response.get("sent", True)
                 and p.version == latest
-                and bool(term.smarttt_term_id)
                 and p.payload is not None
+                and _smarttt_can_place(term)
             ),
         }
         for p in rows
@@ -456,19 +533,16 @@ def send_publication(
     )
     if latest is not None and latest.version != version:
         raise ApiError(409, "NOT_LATEST", f"Version {latest.version} replaced version {version}; send that one.")
-    if not term.smarttt_term_id:
-        raise ApiError(
-            409, "NO_SMARTTT_TERM", "This term exists only in the Generator, so SMARTTT has nowhere to put it."
-        )
+    if not _smarttt_can_place(term):
+        raise ApiError(409, "NO_SMARTTT_TERM", NO_TERM_DATES)
     if publication.payload is None:
         raise ApiError(
             409,
             "NOT_KEPT",
             "This version was approved before versions were kept as approved. Copy its draft and approve the copy.",
         )
-    payload = {**publication.payload, "term_id": term.smarttt_term_id}
     try:
-        _status, response = smarttt.publish(payload)
+        response = _send(db, smarttt, term, publication.payload)
     except (SmartttUnavailable, SmartttMisconfigured) as down:
         reason = getattr(down, "message", None) or str(down) or "SMARTTT unavailable."
         raise ApiError(503, "SMARTTT_UNAVAILABLE", f"SMARTTT could not be reached: {reason} Try again later.") from down
@@ -478,7 +552,7 @@ def send_publication(
         )
         db.commit()
         raise
-    publication.smarttt_response = {"sent": True, **response}
+    publication.smarttt_response = response
     audit(db, identity, "publication.send", "publication", str(publication.id), None, {"version": version})
     db.commit()
     return next(p for p in publications(db, term) if p["version"] == version)

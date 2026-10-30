@@ -15,7 +15,6 @@ from app.api.schemas import (
     ClassRowBody,
     ClassRowPatch,
     CopyTermBody,
-    DepartmentBody,
     DepartmentPatch,
     ExamMoveBody,
     ExamPeriodBody,
@@ -37,14 +36,16 @@ from app.api.schemas import (
     TermPatch,
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
-from app.clients.allocator import AllocatorClient, get_allocator
-from app.clients.smarttt import SmartttClient, get_smarttt
+from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
+from app.clients.smarttt import SmartttClient, SmartttError, get_smarttt
+from app.clients.teaching import TeachingClient, get_teaching
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError, ok
 from app.models import ClassRow, Group, Room, Run, RunMode, Term, UnitOffering
 from app.services import (
     allocator_import,
+    departments,
     drafts,
     exam_drafts,
     exam_export,
@@ -64,7 +65,8 @@ router = APIRouter()
 
 Db = Annotated[Session, Depends(get_db)]
 Smarttt = Annotated[SmartttClient, Depends(get_smarttt)]
-Allocator = Annotated[AllocatorClient, Depends(get_allocator)]
+Attendance = Annotated[AttendanceClient, Depends(get_attendance)]
+Teaching = Annotated[TeachingClient, Depends(get_teaching)]
 Me = Annotated[Identity, Depends(current_identity)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
@@ -104,9 +106,9 @@ async def read_spreadsheet(request: Request, identity: Me) -> dict[str, Any]:
 
 @router.post("/auth/login")
 def login(
-    body: LoginBody, request: Request, response: Response, db: Db, smarttt: Smarttt, settings: Cfg
+    body: LoginBody, request: Request, response: Response, db: Db, attendance: Attendance, settings: Cfg
 ) -> dict[str, Any]:
-    return ok(sign_in(db, response, request, body.identifier, body.password, smarttt, settings).public())
+    return ok(sign_in(db, response, request, body.identifier, body.password, attendance, settings).public())
 
 
 @router.post("/auth/logout")
@@ -198,6 +200,12 @@ def bulk_rooms(body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
     return ok(master.bulk_rooms(db, identity, body.rows))
 
 
+@router.post("/rooms/sync")
+def sync_rooms(identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """The rooms and capacities the admin uploaded to SMARTTT."""
+    return ok(master.sync_rooms(db, smarttt, identity))
+
+
 @router.patch("/rooms/{room_id}")
 def patch_room(room_id: str, body: RoomPatch, identity: Me, db: Db) -> dict[str, Any]:
     room = master.update_room(db, identity, _room(db, room_id), body.model_dump(exclude_unset=True))
@@ -211,13 +219,23 @@ def delete_room(room_id: str, identity: Me, db: Db) -> dict[str, Any]:
 
 
 @router.get("/departments")
-def list_departments(_me: Me, db: Db) -> dict[str, Any]:
-    return ok(master.list_departments(db))
+def list_departments(identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    """Departments come from Smart Attendance: read from there first (at most every DEPARTMENT_SYNC_SECONDS)."""
+    return ok(departments.list_departments(db, attendance, identity))
 
 
-@router.post("/departments")
-def create_department(body: DepartmentBody, identity: Me, db: Db) -> dict[str, Any]:
-    return ok(master.department_dict(master.create_department(db, identity, body.model_dump())))
+@router.post("/departments/sync")
+def sync_departments(identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    """Reads the departments from Smart Attendance now. 503 when it can't be reached."""
+    if not attendance.enabled:
+        raise ApiError(
+            409, "ATTENDANCE_NOT_CONNECTED", "Smart Attendance is not connected (ATTENDANCE_BASE_URL is unset)."
+        )
+    try:
+        report = departments.sync_departments(db, attendance, identity, force=True)
+    except AttendanceError as exc:
+        raise ApiError(503, "ATTENDANCE_UNAVAILABLE", exc.message) from exc
+    return ok({"report": report, **departments.list_departments(db, attendance, identity)})
 
 
 @router.post("/departments/bulk")
@@ -245,19 +263,21 @@ def take_snapshot(term_id: str, identity: Me, db: Db, smarttt: Smarttt) -> dict[
 
 
 @router.get("/terms/{term_id}/departments")
-def department_submissions(term_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
-    """Which departments have published their teaching in the Allocator, and whether it's imported."""
-    return ok(allocator_import.status(db, allocator, setup.get_term(db, term_id)))
+def department_submissions(term_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
+    """Which departments have published their teaching in Smart Attendance, and whether it's imported."""
+    return ok(allocator_import.status(db, teaching, setup.get_term(db, term_id)))
 
 
 @router.post("/terms/{term_id}/departments/import")
-def import_departments(term_id: str, identity: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
+def import_departments(term_id: str, identity: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
     """Brings in what departments have published: class rows, units and groups with lecturers."""
-    return ok(allocator_import.import_departments(db, allocator, identity, setup.get_term(db, term_id)))
+    return ok(allocator_import.import_departments(db, teaching, identity, setup.get_term(db, term_id)))
 
 
 @router.post("/terms/{term_id}/setup/import")
-def import_setup(term_id: str, identity: Me, db: Db) -> dict[str, Any]:
+def import_setup(term_id: str, identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    # The units SMARTTT names belong to departments, which come from Attendance: read them in first.
+    departments.sync_departments(db, attendance, identity)
     return ok(setup.import_setup(db, identity, setup.get_term(db, term_id)))
 
 
@@ -509,9 +529,9 @@ def exam_period(term_id: str, body: ExamPeriodBody, identity: Me, db: Db) -> dic
 
 
 @router.get("/terms/{term_id}/exam-departments")
-def exam_departments(term_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
-    """Which departments have published their exam papers in the Allocator."""
-    data = allocator.exams(str(setup.get_term(db, term_id).id))
+def exam_departments(term_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
+    """Which departments have published their exam papers in Smart Attendance."""
+    data = teaching.exams(str(setup.get_term(db, term_id).id))
     return ok(
         {
             "published": [
@@ -524,8 +544,14 @@ def exam_departments(term_id: str, _me: Me, db: Db, allocator: Allocator) -> dic
 
 
 @router.post("/terms/{term_id}/exams/import")
-def import_exams(term_id: str, identity: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
-    return ok(exam_setup.import_exams(db, allocator, identity, setup.get_term(db, term_id)))
+def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching, smarttt: Smarttt) -> dict[str, Any]:
+    """Departments' published papers, after bringing the admin's rooms in from SMARTTT (best effort)."""
+    try:
+        rooms: dict[str, Any] = master.sync_rooms(db, smarttt, identity)
+    except SmartttError as down:
+        db.rollback()
+        rooms = {"error": getattr(down, "message", None) or "SMARTTT can't be reached; the rooms here were used."}
+    return ok({**exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id)), "rooms": rooms})
 
 
 @router.post("/exam-runs")
@@ -535,8 +561,8 @@ def start_exam_run(body: ExamRunBody, identity: Me, db: Db) -> dict[str, Any]:
 
 
 @router.get("/exam-drafts/{draft_id}")
-def get_exam_draft(draft_id: str, _me: Me, db: Db, allocator: Allocator) -> dict[str, Any]:
-    return ok(exam_drafts.grid(db, exam_drafts.get_draft(db, draft_id), allocator))
+def get_exam_draft(draft_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
+    return ok(exam_drafts.grid(db, exam_drafts.get_draft(db, draft_id), teaching))
 
 
 @router.patch("/exam-drafts/{draft_id}/papers/{paper_id}")
@@ -564,8 +590,8 @@ def copy_exam_draft(draft_id: str, identity: Me, db: Db) -> dict[str, Any]:
 
 
 @router.post("/exam-drafts/{draft_id}/publish")
-def publish_exam_draft(draft_id: str, identity: Me, db: Db, allocator: Allocator, smarttt: Smarttt) -> dict[str, Any]:
-    return ok(exam_drafts.publish(db, allocator, smarttt, identity, exam_drafts.get_draft(db, draft_id)))
+def publish_exam_draft(draft_id: str, identity: Me, db: Db, smarttt: Smarttt, teaching: Teaching) -> dict[str, Any]:
+    return ok(exam_drafts.publish(db, smarttt, teaching, identity, exam_drafts.get_draft(db, draft_id)))
 
 
 @router.post("/terms/{term_id}/exam-publications/{version}/send")
@@ -575,12 +601,12 @@ def send_exam_publication(term_id: str, version: int, identity: Me, db: Db, smar
 
 
 @router.get("/exam-drafts/{draft_id}/export/{kind}.{fmt}")
-def export_exam_draft(draft_id: str, kind: str, fmt: str, identity: Me, db: Db, allocator: Allocator) -> Response:
+def export_exam_draft(draft_id: str, kind: str, fmt: str, identity: Me, db: Db, teaching: Teaching) -> Response:
     """The exam timetable, room sheets or invigilation roster as Word (.docx) or PDF."""
     if (kind, fmt) not in exam_export.BUILDERS:
         raise ApiError(404, "NOT_FOUND", "Downloads are timetable, rooms or roster, as .docx or .pdf.")
     draft = exam_drafts.get_draft(db, draft_id)
-    data = exam_drafts.grid(db, draft, allocator)
+    data = exam_drafts.grid(db, draft, teaching)
     term = setup.get_term(db, str(draft.term_id))
     content = exam_export.BUILDERS[(kind, fmt)](term, data, data["version"], identity.full_name)
     filename = f"exam-{kind}-{term.academic_year.replace('/', '-')}-S{term.semester}.{fmt}"
@@ -604,22 +630,22 @@ def exam_switch_act(term_id: str, body: ExamSwitchBody, identity: Me, db: Db, sm
     return ok(exam_switch.act(db, smarttt, identity, term, body.action, body.at))
 
 
-# -- for the Timetable Allocator (shared key, no user session) ------------------------------
+# -- for Smart Attendance's department Teaching page (shared key, no user session) ----------
 
-AllocatorKey = Depends(integration.require_allocator_key)
-
-
-@router.get("/integrations/allocator/terms", dependencies=[AllocatorKey])
-def allocator_terms(db: Db) -> dict[str, Any]:
-    return ok(integration.allocator_terms(db))
+AttendanceKey = Depends(integration.require_attendance_key)
 
 
-@router.get("/integrations/allocator/terms/{term_id}/times", dependencies=[AllocatorKey])
-def allocator_times(term_id: str, db: Db) -> dict[str, Any]:
-    return ok(integration.allocator_times(db, setup.get_term(db, term_id)))
+@router.get("/integrations/attendance/terms", dependencies=[AttendanceKey])
+def attendance_terms(db: Db) -> dict[str, Any]:
+    return ok(integration.teaching_terms(db))
 
 
-@router.get("/integrations/allocator/terms/{term_id}/exam-draft", dependencies=[AllocatorKey])
-def allocator_exam_draft(term_id: str, db: Db) -> dict[str, Any]:
+@router.get("/integrations/attendance/terms/{term_id}/times", dependencies=[AttendanceKey])
+def attendance_times(term_id: str, db: Db) -> dict[str, Any]:
+    return ok(integration.teaching_times(db, setup.get_term(db, term_id)))
+
+
+@router.get("/integrations/attendance/terms/{term_id}/exam-draft", dependencies=[AttendanceKey])
+def attendance_exam_draft(term_id: str, db: Db) -> dict[str, Any]:
     """The exam draft the Director shared: each paper's date, session and rooms, for departments' invigilators."""
     return ok(exam_drafts.allocator_draft(db, setup.get_term(db, term_id)))

@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.auth import Identity
-from app.clients.allocator import AllocatorClient
+from app.clients.teaching import TeachingClient
 from app.errors import ApiError
 from app.exam_solver.model import ExamRoom
 from app.models import (
@@ -114,13 +114,13 @@ def update_period(db: Session, identity: Identity, term: Term, fields: dict[str,
 # -- importing published papers ----------------------------------------------------------------
 
 
-def import_exams(db: Session, allocator: AllocatorClient, identity: Identity, term: Term) -> dict[str, Any]:
+def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term: Term) -> dict[str, Any]:
     """
     Brings in every department's published exam papers (creating or updating
-    by the Allocator's ids) and practicals. A published department's paper it
+    by Attendance's ids) and practicals. A published department's paper it
     no longer has is removed, with its places in the drafts.
     """
-    data = allocator.exams(str(term.id))
+    data = teaching.exams(str(term.id))
     published = list(data.get("published") or [])
     if not published:
         raise ApiError(409, "NOTHING_PUBLISHED", "No department has published its exam papers for this term yet.")
@@ -144,6 +144,7 @@ def import_exams(db: Session, allocator: AllocatorClient, identity: Identity, te
                 if r["course_id"] in rows
             )
             examiner = p.get("examiner") or {}
+            invigilator = p.get("invigilator") or {}
             values = {
                 "department_id": dept.id,
                 "codes": list(p["codes"]),
@@ -151,9 +152,11 @@ def import_exams(db: Session, allocator: AllocatorClient, identity: Identity, te
                 "examiner_staff_number": (examiner.get("staff_number") or "").strip().upper() or None,
                 "examiner_name": examiner.get("name") or "",
                 "notes": p.get("notes") or "",
+                "sitting": "odel" if p.get("sitting") == "odel" else "regular",
+                "invigilator_staff_number": (invigilator.get("staff_number") or "").strip().upper() or None,
             }
             paper = existing.get(p["id"])
-            label = "/".join(p["codes"])
+            label = "/".join(p["codes"]) + (" (ODEL)" if values["sitting"] == "odel" else "")
             if paper is None:
                 paper = ExamPaper(term_id=term.id, allocator_ref=p["id"], **values)
                 db.add(paper)

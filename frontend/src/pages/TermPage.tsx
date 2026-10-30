@@ -212,7 +212,7 @@ function RowsTab({ termId }: { termId: string }) {
             )}
             {shown.map((r) => (
               <tr key={r.id} className="border-t border-line">
-                <td className="px-3 py-2 font-medium">{r.label}{r.from_allocator && <span className="ml-1 rounded bg-brand-soft px-1 text-xs text-brand-ink" title="Entered by its department; edit it in the Allocator">from the Allocator</span>}</td>
+                <td className="px-3 py-2 font-medium">{r.label}{r.from_allocator && <span className="ml-1 rounded bg-brand-soft px-1 text-xs text-brand-ink" title="Entered by its department in Smart Attendance; the department edits it there">from its department</span>}</td>
                 <td className="px-3 py-2 text-muted">{r.department_id != null ? deptCode.get(r.department_id) ?? '?' : '—'}</td>
                 <td className="px-3 py-2">
                   {r.from_allocator ? r.student_count : <input type="number" min={0} defaultValue={r.student_count ?? ''} aria-label={`Students in ${r.label}`}
@@ -319,7 +319,7 @@ function UnitsTab({ termId }: { termId: string }) {
             )}
             {shown.map((o) => (
               <tr key={o.id} className="border-t border-line">
-                <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span>{o.from_allocator && <span className="ml-1 rounded bg-brand-soft px-1 text-xs text-brand-ink" title="Entered by its department; edit it in the Allocator">from the Allocator</span>}<span className="block text-muted">{o.unit_name}</span></td>
+                <td className="px-3 py-2"><span className="font-medium">{o.unit_code}</span>{o.from_allocator && <span className="ml-1 rounded bg-brand-soft px-1 text-xs text-brand-ink" title="Entered by its department in Smart Attendance; the department edits it there">from its department</span>}<span className="block text-muted">{o.unit_name}</span></td>
                 <td className="px-3 py-2 text-muted">{deptCode.get(o.department_id) ?? '?'}</td>
                 <td className="px-3 py-2 text-muted">{o.class_rows.join(', ')}</td>
                 <td className="px-3 py-2">
@@ -381,7 +381,7 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
         <h2 className="text-lg font-semibold">{offering.unit_code} groups</h2>
         <p className="text-sm text-muted">
           {offering.from_allocator
-            ? 'Its department decided the split and the lecturers in the Allocator; change them there.'
+            ? 'Its department decided the split and the lecturers in Smart Attendance; the department changes them there.'
             : 'You decide the split. Each group is one class with its own room and lecturer.'}
         </p>
         <ul className="mt-3 space-y-2">
