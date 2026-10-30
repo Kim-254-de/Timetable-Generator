@@ -91,3 +91,69 @@ def test_an_impossible_session_is_explained():
     assert status == "INFEASIBLE" and slots == {}
     reasons = sessions.explain(problem, 5)
     assert reasons and reasons[0]["rule"] == "H-E3"
+
+
+def test_a_main_invigilator_named_before_generating_has_one_paper_per_slot():
+    # Three papers of different classes, all with Dr. Otieno as main invigilator; a day of three sessions.
+    papers = [Paper(id=f"P{i}", label=f"P{i}", rows=(Sitting(f"R{i}", 30),), invigilator="STF/0001") for i in range(3)]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 200)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert sorted(result.slots.values()) == [0, 1, 2]
+    assert check(problem, result.slots, result.seats) == []
+    clash = check(problem, {"P0": 0, "P1": 0, "P2": 1})
+    assert [v.rule for v in clash] == ["H-E7"] and "STF/0001 invigilates P0 and P1" in clash[0].message
+
+
+def test_a_paper_nobody_is_known_to_sit_gets_a_slot_and_no_room():
+    papers = [_paper("SEATED", ("R1", 40)), Paper(id="NOBODY", label="NOBODY", rows=())]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=2, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert set(result.slots) == {"SEATED", "NOBODY"}
+    assert [s.paper_id for s in result.seats] == ["SEATED"]
+    assert check(problem, result.slots, result.seats) == []
+
+
+def test_the_class_is_guessed_from_the_code():
+    from app.exam_solver.model import guessed_class
+
+    assert guessed_class("BPPA 110") == "BPPA year 1"
+    assert guessed_class("bppa221") == "BPPA year 2"
+    assert guessed_class("COSC 0172") == "COSC year 1"
+    assert guessed_class("Math 446") == "MATH year 4"
+    assert guessed_class("123") is None
+
+
+def test_papers_nobody_is_known_to_sit_are_spread_and_their_guessed_classes_kept_apart():
+    # A department's whole list with no students known yet: four papers per year of BPPA, years 1-3.
+    papers = [
+        Paper(id=f"BPPA {y}1{i}", label=f"BPPA {y}1{i}", rows=(), codes=(f"BPPA {y}1{i}",))
+        for y in (1, 2, 3)
+        for i in range(4)
+    ]
+    problem = ExamProblem(papers=papers, days=DAYS[:2], sessions=3, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    per_slot = defaultdict(int)
+    for t in result.slots.values():
+        per_slot[t] += 1
+    assert max(per_slot.values()) == 2  # 12 papers over 6 sessions: an even share, not all in one
+    for year in (1, 2, 3):
+        mine = [result.slots[f"BPPA {year}1{i}"] for i in range(4)]
+        assert len(set(mine)) == 4  # one paper of the year a session
+        by_day = defaultdict(int)
+        for t in mine:
+            by_day[problem.day_of(t)] += 1
+        assert max(by_day.values()) <= 2
+    assert result.soft_scores["guessed_clashes"] == 0
+    assert check(problem, result.slots, result.seats) == []
+
+
+def test_a_guess_never_makes_the_timetable_impossible():
+    # Five year-1 papers but only three sessions: the guess gives way.
+    papers = [Paper(id=f"P{i}", label=f"P{i}", rows=(), codes=(f"BPPA 11{i}",)) for i in range(5)]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert len(set(result.slots.values())) == 3

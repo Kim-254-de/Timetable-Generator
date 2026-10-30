@@ -16,9 +16,11 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
 
     database_url: str = "postgresql+psycopg://generator:generator@localhost:5432/generator"
+    # Solver runs go to the RQ worker through Redis. Empty (or Redis unreachable):
+    # they are solved one at a time in a background thread of the web process,
+    # for hosting with no Redis or worker (e.g. a single free web service).
     redis_url: str = "redis://localhost:6379/0"
-    # Solver runs go to the RQ worker; true runs them in the web process
-    # (tests and single-machine development only).
+    # True solves runs in the request itself (tests and single-machine development only).
     run_inline: bool = False
     run_queue: str = "generator-runs"
     # The longest run the Director may ask for, and the default.
@@ -63,6 +65,17 @@ class Settings(BaseSettings):
     login_window_seconds: int = 900
 
     log_level: str = "INFO"
+
+    @field_validator("smarttt_api_key", "attendance_api_key", mode="before")
+    @classmethod
+    def _clean_key(cls, value: object) -> object:
+        # Compared byte for byte by the other system: spaces, line breaks or
+        # quotes pasted into a hosting dashboard would make an equal key differ.
+        if isinstance(value, str):
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1].strip()
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod

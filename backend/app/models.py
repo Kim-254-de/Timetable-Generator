@@ -104,6 +104,14 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
+    # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:
+    # when the switch is set for (or happened), by whom, and the close of the exam period.
+    exam_switch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exam_switched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exam_switched_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    exam_close_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exam_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exam_closed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -148,7 +156,9 @@ class Room(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Slots (0-59) the room can't be used, e.g. maintenance.
     unavailable: Mapped[list[int]] = mapped_column(JSON, default=list)
-    # Exam seats: capacity x the term's spacing unless set here; some rooms are never used for exams.
+    # Exam seats are capacity x the term's spacing (0.9) in every room. This
+    # fixed number is only for a room that can't be used at that share (fixed
+    # benches); it is never more than the capacity.
     exam_seats: Mapped[int | None] = mapped_column(Integer, nullable=True)
     for_exams: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -421,6 +431,7 @@ class ExamPaper(Base):
     """
     A written exam paper a department published in Smart Attendance: one or more
     unit codes sat together ("BITE 131/COSC 130"), and the class rows that sit it.
+    `sitting` is "regular" or "odel": ODEL and part-time classes sit separate papers.
     """
 
     __tablename__ = "exam_papers"
@@ -435,12 +446,16 @@ class ExamPaper(Base):
     examiner_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     examiner_name: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(500), default="")
+    sitting: Mapped[str] = mapped_column(String(10), default="regular", server_default="regular")
+    # The main invigilator a department named before the timetable is generated: their papers go in different sessions.
+    invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
     @property
     def label(self) -> str:
-        return "/".join(self.codes)
+        """'MATH 241', or 'MATH 241 (ODEL)' for the ODEL paper of the same unit."""
+        return "/".join(self.codes) + (" (ODEL)" if self.sitting == "odel" else "")
 
     @property
     def students(self) -> int:

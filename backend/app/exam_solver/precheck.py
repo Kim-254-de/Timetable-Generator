@@ -28,6 +28,10 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
         if len(papers) > 2 * days:
             label = problem.row_label(row)
             add("H-E2", label, f"{label} sits {len(papers)} papers; at most 2 a day over {days} days is {2 * days}.")
+    for staff, papers in problem.invigilators().items():
+        if len(papers) > problem.slots:
+            message = f"{staff} is the main invigilator of {len(papers)} papers; the period has {problem.slots} slots."
+            add("H-E7", staff, message)
     total = sum(p.students for p in problem.papers)
     if total > seats * problem.slots:
         add("H-E3", "period", f"{total} student entries need more seats than the period has ({seats * problem.slots}).")

@@ -29,7 +29,7 @@ from fastapi import Depends, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
+from app.clients.attendance import AttendanceClient, AttendanceError, AttendanceSignInError, get_attendance
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError
@@ -124,6 +124,8 @@ def sign_in(
 
     try:
         data = attendance.authenticate(identifier.strip(), password)
+    except AttendanceSignInError as exc:
+        raise ApiError(503, "ATTENDANCE_UNAVAILABLE", exc.message) from exc
     except AttendanceError as exc:
         raise ApiError(
             503, "ATTENDANCE_UNAVAILABLE", "Sign-in is unavailable right now. Try again in a minute."

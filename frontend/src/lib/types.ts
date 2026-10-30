@@ -355,6 +355,8 @@ export interface ExamPublicationItem {
   published_at: string
   sent_to_smarttt: boolean
   not_sent_reason: string | null
+  /** Not yet in SMARTTT, the latest version, and SMARTTT has the term: it can be sent now. */
+  can_send: boolean
 }
 
 export interface ExamOverview {
@@ -389,7 +391,10 @@ export interface ExamGridPaper {
   session: number | null
   pinned: boolean
   seating: ExamSeatItem[]
+  /** "" is the main invigilator; a room code, that extra room's invigilator. */
   invigilators: Record<string, { staff_number: string | null; name: string }>
+  main_room: string | null
+  extra_rooms: string[]
 }
 
 export interface ExamRoomSheet {
@@ -398,7 +403,15 @@ export interface ExamRoomSheet {
   rooms: {
     room: string
     students: number
-    papers: { codes: string; title: string; invigilator: string | null; rows: { row: string; students: number; odel: boolean }[] }[]
+    papers: {
+      codes: string
+      title: string
+      /** Who invigilates the paper in this room: its main invigilator in the main room, else this room's extra one. */
+      invigilator: string | null
+      main: boolean
+      main_invigilator: string | null
+      rows: { row: string; students: number; odel: boolean }[]
+    }[]
   }[]
 }
 
@@ -426,3 +439,20 @@ export interface ExamGrid {
   practicals: ExamPracticalItem[]
   rooms: ExamRoomSheet[]
 }
+
+export interface ExamSwitchState {
+  status: 'teaching' | 'scheduled' | 'switched' | 'closed'
+  label: string
+  switch_at: string | null
+  switched_at: string | null
+  switched_by: string | null
+  close_at: string | null
+  closed_at: string | null
+  closed_by: string | null
+  published_version: number | null
+  in_smarttt: boolean
+  smarttt_reachable: boolean | null
+  defaults: { switch_at: string | null; close_at: string | null }
+}
+
+export type ExamSwitchAction = 'schedule_switch' | 'cancel_switch' | 'switch_now' | 'schedule_close' | 'cancel_close' | 'close_now'

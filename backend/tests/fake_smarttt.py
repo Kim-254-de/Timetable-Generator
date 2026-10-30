@@ -152,8 +152,25 @@ class FakeSmarttt:
         self.snapshot = snapshot_data()
         self.publications: dict[int, dict[str, Any]] = {}
         self.payloads: list[dict[str, Any]] = []
+        self.exam_publications: dict[int, dict[str, Any]] = {}
+        self.exam_payloads: list[dict[str, Any]] = []
         self.refuse_publish: dict[str, Any] | None = None
         self.down = False  # True: SMARTTT can't be reached
+        # Exam mode per term, as the proposed /exam-mode/ endpoint keeps it.
+        self.exam_mode: dict[str, Any] = {
+            "mode": "teaching",
+            "exam_switch_at": None,
+            "switched_at": None,
+            "switched_by": None,
+            "exam_close_at": None,
+            "exam_closed_at": None,
+            "closed_by": None,
+        }
+        self.exam_mode_calls: list[dict[str, Any]] = []
+        self.exam_payloads: list[dict[str, Any]] = []
+        self.refuse_exams: dict[str, Any] | None = None
+        # The rooms the admin uploaded (generator/rooms/); none unless a test adds them.
+        self.rooms: list[dict[str, Any]] = []
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -165,6 +182,9 @@ class FakeSmarttt:
             return httpx.Response(403, json={"detail": "A valid X-API-Key header is required."})
         route = request.url.path[len(PREFIX) :]
         body = json.loads(request.content) if request.content else {}
+        params = dict(request.url.params)
+        if route == "/rooms/":
+            return httpx.Response(200, json={"rooms": self.rooms})
         if route == "/terms/":
             return httpx.Response(200, json={"terms": [TERM]})
         if route == "/snapshot/":
@@ -194,7 +214,50 @@ class FakeSmarttt:
             }
             self.publications[body["version"]] = publication
             return httpx.Response(201, json=publication)
+        if route == "/exam-mode/":
+            return httpx.Response(200, json=self.exam_mode)
+        if route in ("/exam-switch/", "/exam-close/"):
+            return self._exam_mode_action(route, request.method, body, params)
+        if route == "/exam-publish/":
+            self.exam_payloads.append(body)
+            if self.refuse_exams:
+                return httpx.Response(422, json=self.refuse_exams)
+            return httpx.Response(201, json={"version": body["version"], "papers": len(body["papers"])})
         return httpx.Response(404, json={"detail": f"No route {route}"})
+
+    def _exam_mode_action(
+        self, route: str, method: str, body: dict[str, Any], params: dict[str, Any]
+    ) -> httpx.Response:
+        """SMARTTT's exam-switch/ and exam-close/: POST {term_id, at | now, by}; DELETE ?term=&by= cancels."""
+        from datetime import UTC, datetime
+
+        switch = route == "/exam-switch/"
+        if method == "DELETE":
+            action = "cancel_switch" if switch else "cancel_close"
+            call = {"term_id": params.get("term"), "action": action, "at": None, "by": params.get("by")}
+        else:
+            action = ("switch" if switch else "close") + ("_now" if body.get("now") else "")
+            action = {"switch": "schedule_switch", "close": "schedule_close"}.get(action, action)
+            call = {"term_id": body["term_id"], "action": action, "at": body.get("at"), "by": body.get("by")}
+        self.exam_mode_calls.append(call)
+        state, now = self.exam_mode, datetime.now(UTC).isoformat()
+        if action == "schedule_switch":
+            state["exam_switch_at"] = call["at"]
+        elif action == "cancel_switch":
+            if state["switched_at"]:
+                return httpx.Response(
+                    409, json={"code": "already_switched", "detail": "The term is already in exam mode."}
+                )
+            state["exam_switch_at"] = None
+        elif action == "switch_now":
+            state.update(mode="exams", exam_switch_at=now, switched_at=now, switched_by=call["by"])
+        elif action == "schedule_close":
+            state["exam_close_at"] = call["at"]
+        elif action == "cancel_close":
+            state["exam_close_at"] = None
+        elif action == "close_now":
+            state.update(mode="teaching", exam_close_at=now, exam_closed_at=now, closed_by=call["by"])
+        return httpx.Response(200, json=state)
 
 
 NEW_TERM = "7d1f5c2e-0000-4000-8000-00000000a001"

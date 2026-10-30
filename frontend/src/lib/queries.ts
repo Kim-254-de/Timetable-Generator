@@ -11,6 +11,8 @@ import type {
   ExamGrid,
   ExamOverview,
   ExamPeriod,
+  ExamSwitchAction,
+  ExamSwitchState,
   DraftSummary,
   Grid,
   Group,
@@ -151,6 +153,9 @@ export const useSaveRoom = () =>
     id ? patch<RoomRecord>(`/rooms/${id}`, body) : post<RoomRecord>('/rooms', body),
   )
 export const useDeleteRoom = () => useMasterMutation(keys.roomList, (id: string) => api.delete(`/rooms/${id}`))
+/** The rooms and capacities the admin uploaded to SMARTTT, brought in by code. */
+export const useSyncRooms = () =>
+  useMasterMutation(keys.roomList, () => post<{ added: string[]; updated: string[]; only_here: string[] }>('/rooms/sync', {}))
 export const useBulkRooms = () =>
   useMasterMutation(keys.roomList, (rows: Record<string, string>[]) => post<BulkResult>('/rooms/bulk', { rows }))
 
@@ -369,7 +374,23 @@ export const useMoveExamPaper = (termId: string, draftId: string) =>
 
 export const useExamDraftAction = (termId: string, draftId: string) =>
   useExamMutation(termId, (action: 'share' | 'copy' | 'publish' | 'resolve') =>
-    post<ExamDraftSummary & { version?: number; id: string; draft_id?: string }>(`/exam-drafts/${draftId}/${action}`, action === 'resolve' ? { time_limit_s: 120 } : {}))
+    post<ExamDraftSummary & { version?: number; id: string; draft_id?: string; smarttt?: { sent?: boolean; reason?: string } }>(`/exam-drafts/${draftId}/${action}`, action === 'resolve' ? { time_limit_s: 120 } : {}))
 
 export const examExportUrl = (draftId: string, kind: 'timetable' | 'rooms' | 'roster', format: 'docx' | 'pdf') =>
   `${import.meta.env.VITE_API_URL ?? '/api'}/exam-drafts/${draftId}/export/${kind}.${format}`
+
+export const useExamSwitch = (termId: string) =>
+  useQuery({ queryKey: ['exam-switch', termId], queryFn: () => get<ExamSwitchState>(`/terms/${termId}/exam-switch`) })
+
+export function useExamSwitchAction(termId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { action: ExamSwitchAction; at?: string }) => post<ExamSwitchState>(`/terms/${termId}/exam-switch`, body),
+    onSuccess: (state) => qc.setQueryData(['exam-switch', termId], state),
+  })
+}
+
+/** Sends an approved exam version SMARTTT missed (it was down), exactly as approved. */
+export const useSendExamPublication = (termId: string) =>
+  useExamMutation(termId, (version: number) =>
+    post<{ version: number; smarttt: { sent?: boolean; reason?: string } }>(`/terms/${termId}/exam-publications/${version}/send`, {}))

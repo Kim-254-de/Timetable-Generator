@@ -4,7 +4,9 @@ Phase 1: each paper to one slot (a session of a day), with CP-SAT.
 x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
 class row and day at most two; H-E3 per slot the students fit all exam seats.
-Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late.
+Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
+S-E4 a guessed class (papers with no students known) one paper a session and
+two a day, S-E5 papers with no students known spread over the period.
 
 When it is infeasible, it is solved again with one assumption per class row
 and per slot's seats, to name the ones that cannot all hold.
@@ -96,12 +98,23 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
                 m.add(sum(day_terms) - 1 <= c)
                 mm.penalties.append(w.same_day * c)
 
+    # H-E7: one main invigilator, one paper per slot.
+    for staff, papers in problem.invigilators().items():
+        if len(papers) < 2:
+            continue
+        for t in slots:
+            terms = [x[p.id, t] for p in papers if (p.id, t) in x]
+            if len(terms) > 1:
+                mm.limit(terms, 1, f"H-E7|{staff}")
+
     seats = problem.total_seats
     if sum(p.students for p in problem.papers) > seats:
         for t in slots:
             load = [p.students * x[p.id, t] for p in problem.papers if (p.id, t) in x]
             if load:
                 mm.limit(load, seats, f"H-E3|{t}")
+    if not families:
+        _guesses(mm, problem)
     if not families and w.big_late:
         for p in problem.papers:
             hundreds = (p.students + 99) // 100
@@ -111,6 +124,37 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     if mm.penalties:
         m.minimize(sum(mm.penalties))
     return mm
+
+
+def _guesses(mm: _Model, problem: ExamProblem) -> None:
+    """S-E4 and S-E5, for papers nobody is known to sit: soft, so a wrong guess can't make it infeasible."""
+    m, x, w = mm.m, mm.x, problem.weights
+    slots = range(problem.slots)
+    for group, papers in problem.guessed_classes().items():
+        if len(papers) < 2:
+            continue
+        for t in slots:
+            terms = [x[p.id, t] for p in papers if (p.id, t) in x]
+            if len(terms) > 1 and w.guessed_clash:
+                over = m.new_int_var(0, len(terms), f"guess[{group},{t}]")
+                m.add(sum(terms) - 1 <= over)
+                mm.penalties.append(w.guessed_clash * over)
+        for d in range(len(problem.days)):
+            day = range(d * problem.sessions, (d + 1) * problem.sessions)
+            terms = [x[p.id, t] for p in papers for t in day if (p.id, t) in x]
+            if len(terms) > 2 and w.guessed_day:
+                over = m.new_int_var(0, len(terms), f"guessday[{group},{d}]")
+                m.add(sum(terms) - 2 <= over)
+                mm.penalties.append(w.guessed_day * over)
+    unknown = [p for p in problem.papers if p.unknown_students]
+    if len(unknown) > 1 and problem.slots and w.spread:
+        share = -(-len(unknown) // problem.slots)  # an even share of the sessions, rounded up
+        for t in slots:
+            terms = [x[p.id, t] for p in unknown if (p.id, t) in x]
+            if len(terms) > share:
+                over = m.new_int_var(0, len(terms), f"spread[{t}]")
+                m.add(sum(terms) - share <= over)
+                mm.penalties.append(w.spread * over)
 
 
 def solve(problem: ExamProblem, time_limit_s: float, workers: int) -> tuple[str, dict[str, int], float | None]:
@@ -158,6 +202,10 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
                     }
                 )
             else:
+                if rule == "H-E7":
+                    message = f"{entity}: their papers can't each have a session."
+                    reasons.append({"rule": rule, "entity": entity, "message": message})
+                    continue
                 label = problem.row_label(entity)
                 what = "one paper per session" if rule == "H-E1" else "at most 2 papers a day"
                 reasons.append({"rule": rule, "entity": label, "message": f"{label}: its papers can't all fit {what}."})

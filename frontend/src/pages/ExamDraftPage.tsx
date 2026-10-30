@@ -30,7 +30,7 @@ export function ExamDraftPage() {
   const draft = data.draft
   const editable = draft.status === 'draft'
   const flagged = new Set(draft.violations.flatMap((v) => v.paper_ids))
-  const unnamed = data.papers.filter((p) => !p.invigilators['']).length
+  const unnamed = data.papers.reduce((n, p) => n + (p.invigilators[''] ? 0 : 1) + p.extra_rooms.filter((r) => !p.invigilators[r]).length, 0)
 
   return (
     <div className="space-y-4">
@@ -73,10 +73,12 @@ export function ExamDraftPage() {
 
       {act.isError && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{errorMessage(act.error)}</p>}
       {act.isSuccess && act.variables === 'publish' && (
-        <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">Approved as version {act.data.version}.</p>
+        act.data.smarttt?.sent
+          ? <p role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">Approved as version {act.data.version} and sent to SMARTTT: students see their exams in the app.</p>
+          : <p role="status" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">Approved as version {act.data.version}, not yet in SMARTTT{act.data.smarttt?.reason ? `: ${act.data.smarttt.reason}` : ''}. Send it from the Exams tab.</p>
       )}
       {editable && draft.shared_at && unnamed > 0 && (
-        <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">{unnamed} papers have no invigilator published by their department yet.</p>
+        <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">{unnamed} invigilators (main, or for an extra room) are still to be published by departments.</p>
       )}
       {draft.violations.length > 0 && (
         <ul className="list-disc rounded-md bg-danger-soft py-2 pl-8 pr-3 text-sm text-danger">
@@ -141,7 +143,7 @@ function Grid({ data, search, flagged, onPick }: {
                       title={`${p.title} · ${p.students} students${p.pinned ? ' · pinned' : ''}`}
                       className={clsx('mb-1 block w-full rounded border px-1.5 py-1 text-left',
                         flagged.has(p.id) ? 'border-danger/40 bg-danger-soft' : 'border-line bg-surface', onPick && 'hover:border-brand')}>
-                      <b>{p.codes}</b> → {roomsOf(p).join(', ')}
+                      <b>{p.codes}</b> → {roomsOf(p).join(', ') || 'room to be announced (no students known)'}
                       <span className="block text-muted">{p.students} students{p.pinned ? ' · pinned' : ''}</span>
                     </button>
                   ))}
@@ -173,7 +175,8 @@ function RoomSheets({ data, search }: { data: ExamGrid; search: string }) {
                 {rooms.flatMap((room) => room.papers.flatMap((p) => p.rows.map((row, i) => (
                   <tr key={`${room.room}-${p.codes}-${i}`} className="border-t border-line">
                     <td className="py-1">{room.room}</td><td>{p.codes}</td>
-                    <td>{row.row}{row.odel ? ' (ODEL)' : ''}</td><td>{row.students}</td><td>{p.invigilator ?? '—'}</td>
+                    <td>{row.row}{row.odel ? ' (ODEL)' : ''}</td><td>{row.students}</td>
+                    <td>{p.invigilator ?? '—'}{p.main ? ' (main)' : ` (extra; main: ${p.main_invigilator ?? '—'})`}</td>
                   </tr>
                 ))))}
               </tbody>

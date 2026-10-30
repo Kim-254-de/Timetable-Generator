@@ -20,6 +20,7 @@ from app.api.schemas import (
     ExamPeriodBody,
     ExamResolveBody,
     ExamRunBody,
+    ExamSwitchBody,
     GroupBody,
     LoginBody,
     MoveBody,
@@ -36,7 +37,7 @@ from app.api.schemas import (
 )
 from app.auth import Identity, current_identity, sign_in, sign_out
 from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
-from app.clients.smarttt import SmartttClient, get_smarttt
+from app.clients.smarttt import SmartttClient, SmartttError, get_smarttt
 from app.clients.teaching import TeachingClient, get_teaching
 from app.config import Settings, get_settings
 from app.db import get_db
@@ -50,6 +51,7 @@ from app.services import (
     exam_export,
     exam_runs,
     exam_setup,
+    exam_switch,
     export,
     grouping,
     integration,
@@ -196,6 +198,12 @@ def create_room(body: RoomBody, identity: Me, db: Db) -> dict[str, Any]:
 @router.post("/rooms/bulk")
 def bulk_rooms(body: BulkBody, identity: Me, db: Db) -> dict[str, Any]:
     return ok(master.bulk_rooms(db, identity, body.rows))
+
+
+@router.post("/rooms/sync")
+def sync_rooms(identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """The rooms and capacities the admin uploaded to SMARTTT."""
+    return ok(master.sync_rooms(db, smarttt, identity))
 
 
 @router.patch("/rooms/{room_id}")
@@ -536,8 +544,14 @@ def exam_departments(term_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[
 
 
 @router.post("/terms/{term_id}/exams/import")
-def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
-    return ok(exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id)))
+def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching, smarttt: Smarttt) -> dict[str, Any]:
+    """Departments' published papers, after bringing the admin's rooms in from SMARTTT (best effort)."""
+    try:
+        rooms: dict[str, Any] = master.sync_rooms(db, smarttt, identity)
+    except SmartttError as down:
+        db.rollback()
+        rooms = {"error": getattr(down, "message", None) or "SMARTTT can't be reached; the rooms here were used."}
+    return ok({**exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id)), "rooms": rooms})
 
 
 @router.post("/exam-runs")
@@ -576,8 +590,14 @@ def copy_exam_draft(draft_id: str, identity: Me, db: Db) -> dict[str, Any]:
 
 
 @router.post("/exam-drafts/{draft_id}/publish")
-def publish_exam_draft(draft_id: str, identity: Me, db: Db, teaching: Teaching) -> dict[str, Any]:
-    return ok(exam_drafts.publish(db, teaching, identity, exam_drafts.get_draft(db, draft_id)))
+def publish_exam_draft(draft_id: str, identity: Me, db: Db, smarttt: Smarttt, teaching: Teaching) -> dict[str, Any]:
+    return ok(exam_drafts.publish(db, smarttt, teaching, identity, exam_drafts.get_draft(db, draft_id)))
+
+
+@router.post("/terms/{term_id}/exam-publications/{version}/send")
+def send_exam_publication(term_id: str, version: int, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Sends an approved exam version SMARTTT missed (it was down)."""
+    return ok(exam_drafts.send_publication(db, smarttt, identity, setup.get_term(db, term_id), version))
 
 
 @router.get("/exam-drafts/{draft_id}/export/{kind}.{fmt}")
@@ -595,6 +615,19 @@ def export_exam_draft(draft_id: str, kind: str, fmt: str, identity: Me, db: Db, 
         media_type=exam_export.MEDIA[fmt],
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/terms/{term_id}/exam-switch")
+def exam_switch_state(term_id: str, _me: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Whether SMARTTT shows teaching or exams: scheduled, switched, closed."""
+    return ok(exam_switch.state(db, smarttt, setup.get_term(db, term_id)))
+
+
+@router.post("/terms/{term_id}/exam-switch")
+def exam_switch_act(term_id: str, body: ExamSwitchBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Schedule, move, cancel or do the switch to exams, or the close of the exam period."""
+    term = setup.get_term(db, term_id)
+    return ok(exam_switch.act(db, smarttt, identity, term, body.action, body.at))
 
 
 # -- for Smart Attendance's department Teaching page (shared key, no user session) ----------

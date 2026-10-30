@@ -29,7 +29,15 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int]) -> dict[str, float]
                 same_day += 1
             back_to_back += sum(1 for a, b in itertools.pairwise(day_sessions) if b == a + 1)
     late = sum(p.students * problem.day_of(slots[p.id]) for p in problem.papers if p.id in slots)
-    return {"back_to_back": back_to_back, "same_day": same_day, "student_days": late}
+    # S-E4: papers nobody is known to sit that share a guessed class and a session.
+    guessed = 0
+    for papers in problem.guessed_classes().values():
+        per_slot: dict[int, int] = defaultdict(int)
+        for p in papers:
+            if p.id in slots:
+                per_slot[slots[p.id]] += 1
+        guessed += sum(n - 1 for n in per_slot.values() if n > 1)
+    return {"back_to_back": back_to_back, "same_day": same_day, "student_days": late, "guessed_clashes": guessed}
 
 
 def seat_all(problem: ExamProblem, slots: dict[str, int]) -> list[Seat]:

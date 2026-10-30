@@ -36,6 +36,9 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
    is downloadable on each screen):
    - **Lecture halls**: code, building, capacity, type (lecture hall, lab,
      seminar room), available or closed, blocked hours. Shared by every term.
+     **Bring in from SMARTTT** takes the rooms and capacities the admin
+     uploaded there (by code), and importing exam papers does it first;
+     exam seats, "for exams" and blocked hours set here stay.
    - **Departments**: code, name, school, number of lecturers (caps how many of
      its classes run at once). Shared by every term.
    - **Class rows**: programme, year, study semester, sub class, department,
@@ -89,8 +92,11 @@ On the term's **Exams** tab:
 
 1. **Exam period**: first and last day, weekdays used, days off, and the
    sessions of each day (default 08:30-10:30, 11:30-13:30, 14:30-16:30).
-   **Spacing**: exam seats are 0.9 x each room's capacity unless changed for
-   the term, or set per room on the Rooms page ("Exam seats", "For exams").
+   **Spacing**: exam seats are 0.9 x the teaching capacity in every room, big
+   halls included (110 seats -> 99; 200 -> 180); the Director can change the
+   0.9 for the exam period. A room's own number ("Fixed exam seats" on the
+   Rooms page, never above its capacity) is only for one that can't be used at
+   that share, e.g. fixed benches; "For exams" keeps a room out.
    A room's block is its building, so a big paper stays within one block.
 2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
@@ -105,12 +111,38 @@ On the term's **Exams** tab:
 4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
    as room sheets; **move** a paper (checked; both sessions re-seated; pinned)
    and **re-solve around pins**.
-5. **Share with departments** so they name invigilators on their Teaching page in Smart Attendance.
-6. **Approve and publish**: refused while any paper has no invigilator. The
-   version is frozen with the SMARTTT payload (codes, date, times, seating
-   with invigilators); SMARTTT can't take exams yet, so it is approved here.
+5. **Share with departments** so they name invigilators on their Teaching page
+   in Smart Attendance: each paper's main invigilator (in its main room, the
+   one with most of its students; collects every room's scripts) and one extra
+   invigilator for each extra room.
+   Papers nobody is known to sit yet are still kept apart: units of one
+   subject and year ("BPPA 110", "BPPA 121") are taken to be one class, kept
+   to one paper a session and two a day (S-E4), and these papers are spread
+   evenly over the period (S-E5). Both give way rather than make a timetable
+   impossible; real numbers from the department replace the guess.
+   A main invigilator a department names before the timetable is generated
+   comes in with the papers, and the solver keeps that person's papers in
+   different sessions (rule H-E7). A paper nobody is known to sit (no class
+   rows: nobody synced it, e.g. part-time students) still gets a date and
+   session, with no room ("room to be announced") and no invigilator needed.
+6. **Approve and publish**: refused while any paper, or any extra room of a
+   paper, has no invigilator. The
+   version is frozen and sent to SMARTTT (`generator/exam-publish/`: papers
+   with their codes, sitting (regular or ODEL), date and session, each class
+   row's room with its main or extra invigilator, the rooms, practicals).
+   Students see the papers and practicals of the units they synced, with their
+   own room, in the SMARTTT app. SMARTTT refusing it (e.g. a staff number it
+   doesn't know) approves nothing; SMARTTT down leaves it approved here, and
+   **Send to SMARTTT now** sends it later.
 7. **Download** (Word, PDF): the timetable in the Directorate's layout, room
-   sheets, and the invigilation roster per department.
+   sheets (each room's invigilator, main or extra), and the invigilation
+   roster per department (main and extra duties).
+8. **Switch SMARTTT to exams** (on a published exam version): schedule the
+   switch (default: the first exam day at 00:00, campus time), move or cancel
+   it, or switch now; then schedule or do **Close exam period** (default: the
+   day after the last exam day). Each action calls SMARTTT and is audited; the
+   tab shows "Scheduled for ...", "Switched on ... by ..." or "Closed". Refused
+   with no published exam version, or for a term that exists only here.
 
 Benchmark at the April 2026 size: `python -m tools.exam_benchmark` (a
 generated fixture of the same shape until the real data is supplied).
@@ -128,23 +160,20 @@ Not built in these two repos; SMARTTT needs these for the department-first flow:
   departments and the Director, so SMARTTT matches them by code (`unit_code`,
   `room_code`, programme code and year/semester), not by SMARTTT ids.
 
-### Exams: needs from SMARTTT and Smart Attendance
+### Exams in SMARTTT and Smart Attendance
 
-Not built in these two repos:
+SMARTTT's side is on its `exam-timetable` branch (Generator API key):
+`POST generator/exam-publish/` (the exam version), `GET generator/exam-mode/?term=`
+(the state), `POST`/`DELETE generator/exam-switch/` and `generator/exam-close/`
+(`{term_id, at | now: true, by}`; DELETE `?term=&by=` cancels). In exam mode
+SMARTTT hides the teaching timetable, shows students their papers and *their*
+room and lecturers their papers and duties, sends exam reminders instead of
+class reminders, notifies changes to the people affected, and pushes exam
+sessions and the mode to Smart Attendance, which refuses teaching classes and
+lets invigilators open exam sessions.
 
-- **SMARTTT**
-  - an exam publication endpoint taking the Generator's exam payload: per paper,
-    its codes, date, start and end, examiner, and seating
-    `[{room_code, class_row, part, parts, students, invigilator_staff_number}]`;
-    until it exists, exam versions are approved in the Generator and marked
-    "not yet in SMARTTT";
-  - an exam view per student (each paper's date, time and *their* room) and per
-    lecturer (papers they set, invigilation duties);
-  - pushing exam sessions to Smart Attendance;
-  - an *Exams* tab in the SMARTTT app, shown first during the exam period.
-- **Smart Attendance**: an *exam* session type, one per paper per room, opened
-  by its invigilator; students check in only to their own paper and room; a
-  sat/absent report per paper for the invigilator.
+SMARTTT shows students their exams and lecturers their duties, and sends
+Smart Attendance the exam sessions its invigilators open.
 
 ## Rules
 
@@ -222,7 +251,11 @@ rq worker generator-runs --url redis://localhost:6379/0     # in another termina
 ```
 
 Without Redis, `RUN_INLINE=true` solves inside the API request (development only;
-refused in production). Frontend: `cd frontend && npm install && npm run dev`
+refused in production). With `REDIS_URL` empty, or Redis unreachable, runs are
+solved one at a time in a background thread of the API process: hosting with no
+Redis or worker (a single web service) still generates, and a run cut off by a
+restart is marked failed on the next start so it can be started again. On a
+small instance keep `SOLVER_WORKERS` low (1-2) to stay within its memory. Frontend: `cd frontend && npm install && npm run dev`
 (proxies `/api` to port 8002). Everything in containers: `docker compose up --build`,
 then http://localhost:8081.
 
