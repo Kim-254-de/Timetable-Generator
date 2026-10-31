@@ -48,14 +48,15 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
                 codes=tuple(p.codes or ()),
             )
         )
-    labels = {str(r.id): r.label for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
+    class_rows = list(db.scalars(select(ClassRow).where(ClassRow.term_id == term.id)))
     return ExamProblem(
         papers=papers,
         days=days,
         sessions=sessions,
         rooms=exam_rooms(db, term),
         weights=weights or ExamWeights(),
-        row_labels=labels,
+        row_labels={str(r.id): r.label for r in class_rows},
+        row_programmes={str(r.id): r.program_code.strip().upper() for r in class_rows},
     )
 
 

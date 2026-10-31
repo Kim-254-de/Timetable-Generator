@@ -3,10 +3,12 @@ Phase 1: each paper to one slot (a session of a day), with CP-SAT.
 
 x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
-class row and day at most two; H-E3 per slot the students fit all exam seats.
+class row and day at most two; H-E3 per slot the students fit all exam seats;
+H-E8 only common papers on the second day (the others get no slot there).
 Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
 S-E4 a guessed class (papers with no students known) one paper a session and
-two a day, S-E5 papers with no students known spread over the period.
+two a day, S-E5 papers with no students known spread over the period, S-E6
+each common paper not on the second day (by its hundreds of students).
 
 When it is infeasible, it is solved again with one assumption per class row
 and per slot's seats, to name the ones that cannot all hold.
@@ -57,8 +59,15 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     mm = _Model(problem, families)
     m, x = mm.m, mm.x
     slots = range(problem.slots)
+    common_slots = set(problem.common_day_slots())
+    common = {p.id for p in problem.papers if common_slots and problem.is_common(p)}
     for p in problem.papers:
-        allowed = [p.pinned] if p.pinned is not None else list(slots)
+        if p.pinned is not None:
+            allowed = [p.pinned]
+        elif p.id in common:
+            allowed = list(slots)
+        else:
+            allowed = [t for t in slots if t not in common_slots]
         for t in allowed:
             x[p.id, t] = m.new_bool_var(f"x[{p.id},{t}]")
         m.add_exactly_one(x[p.id, t] for t in allowed)
@@ -114,7 +123,13 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
             if load:
                 mm.limit(load, seats, f"H-E3|{t}")
     if not families:
-        _guesses(mm, problem)
+        _guesses(mm, problem, common_slots)
+        # S-E6: per common paper not on the second day, by its hundreds of students: the biggest stay there.
+        for p in problem.papers:
+            if p.id in common:
+                on_day = [x[p.id, t] for t in common_slots if (p.id, t) in x]
+                hundreds = max(1, (p.students + 99) // 100)
+                mm.penalties.append(w.common_day * hundreds * (1 - sum(on_day)))
     if not families and w.big_late:
         for p in problem.papers:
             hundreds = (p.students + 99) // 100
@@ -126,7 +141,7 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     return mm
 
 
-def _guesses(mm: _Model, problem: ExamProblem) -> None:
+def _guesses(mm: _Model, problem: ExamProblem, common_slots: set[int]) -> None:
     """S-E4 and S-E5, for papers nobody is known to sit: soft, so a wrong guess can't make it infeasible."""
     m, x, w = mm.m, mm.x, problem.weights
     slots = range(problem.slots)
@@ -146,9 +161,11 @@ def _guesses(mm: _Model, problem: ExamProblem) -> None:
                 over = m.new_int_var(0, len(terms), f"guessday[{group},{d}]")
                 m.add(sum(terms) - 2 <= over)
                 mm.penalties.append(w.guessed_day * over)
-    unknown = [p for p in problem.papers if p.unknown_students]
-    if len(unknown) > 1 and problem.slots and w.spread:
-        share = -(-len(unknown) // problem.slots)  # an even share of the sessions, rounded up
+    # The second day is for common papers: the others spread over the rest of the period.
+    unknown = [p for p in problem.papers if p.unknown_students and not (common_slots and problem.is_common(p))]
+    open_slots = problem.slots - len(common_slots)
+    if len(unknown) > 1 and open_slots > 0 and w.spread:
+        share = -(-len(unknown) // open_slots)  # an even share of the sessions, rounded up
         for t in slots:
             terms = [x[p.id, t] for p in unknown if (p.id, t) in x]
             if len(terms) > share:
