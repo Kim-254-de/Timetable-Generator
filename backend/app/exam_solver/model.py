@@ -12,7 +12,8 @@ Hard rules:
   H-E4 papers only in the period's slots, pinned papers stay;
   H-E6 every class row (or part of one) sits in one room, rooms within their
        exam seats, a paper's ODEL students apart from its other students;
-  H-E7 a main invigilator named before generating is in one paper per slot.
+  H-E7 a main invigilator named before generating is in one paper per slot;
+  H-E8 the second day of the period is for common units only.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
 
@@ -22,6 +23,16 @@ still kept apart, by a guess: units of one subject and year ("BPPA 110",
 guessed class to one paper a session and two a day, and S-E5 spreads these
 papers evenly over the period instead of stacking them in one session. Both
 are soft (heavily weighted): a guess must never make a timetable impossible.
+
+Common units, papers sat by more than one programme (or, with nobody known to
+sit them, papers whose codes come from more than one programme: "BITE 131/
+COSC 130"), carry the most students and are all sat on the second day of the
+period, which has nothing else (H-E8). Every common paper goes there unless
+a hard rule can't allow it (a class row with three common papers, more common
+students than the day's seats); S-E6 weighs each one left out by its
+hundreds of students, so the biggest keep the day and the rest go to
+others. A period of one day, a term with no common papers, or weight
+common_day 0 turns this off.
 """
 
 from __future__ import annotations
@@ -31,6 +42,8 @@ from dataclasses import dataclass, field
 from datetime import date
 
 _CODE = re.compile(r"^\s*([A-Za-z]{2,6})\s*-?\s*0*([1-9])\d*")
+_LETTERS = re.compile(r"^\s*([A-Za-z]{2,6})")
+COMMON_DAY = 1  # the second day of the period
 
 
 def guessed_class(code: str) -> str | None:
@@ -87,6 +100,7 @@ class ExamWeights:
     guessed_clash: int = 1000  # S-E4 per extra paper of a guessed class in one session
     guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
     spread: int = 20  # S-E5 per paper with no students known over an even share of a session
+    common_day: int = 5000  # S-E6 per 100 students of a common paper not on day 2; 0 turns H-E8/S-E6 off
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
@@ -112,6 +126,7 @@ class ExamProblem:
     rooms: list[ExamRoom]
     weights: ExamWeights = field(default_factory=ExamWeights)
     row_labels: dict[str, str] = field(default_factory=dict)  # for messages
+    row_programmes: dict[str, str] = field(default_factory=dict)  # class row -> programme code, for common units
 
     def row_label(self, row_id: str) -> str:
         return self.row_labels.get(row_id, row_id)
@@ -129,6 +144,23 @@ class ExamProblem:
     @property
     def total_seats(self) -> int:
         return sum(r.seats for r in self.rooms)
+
+    def is_common(self, paper: Paper) -> bool:
+        """Sat by more than one programme; with no class rows, codes from more than one programme."""
+        if paper.rows:
+            return len({self.row_programmes[r] for r in paper.row_ids if r in self.row_programmes}) > 1
+        return len({m.group(1).upper() for m in map(_LETTERS.match, paper.codes) if m}) > 1
+
+    @property
+    def common_day(self) -> int | None:
+        """The day kept for common papers (H-E8), or None when the rule is off."""
+        if len(self.days) <= COMMON_DAY or not self.weights.common_day:
+            return None
+        return COMMON_DAY if any(self.is_common(p) for p in self.papers) else None
+
+    def common_day_slots(self) -> range:
+        d = self.common_day
+        return range(0) if d is None else range(d * self.sessions, (d + 1) * self.sessions)
 
     def invigilators(self) -> dict[str, list[Paper]]:
         """Each main invigilator's papers, for those named before generating."""

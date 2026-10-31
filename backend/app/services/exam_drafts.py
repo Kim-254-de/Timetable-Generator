@@ -23,7 +23,7 @@ from app.clients.smarttt import SmartttClient, SmartttMisconfigured, SmartttRefu
 from app.clients.teaching import TeachingClient
 from app.errors import ApiError
 from app.exam_solver import rooms as seating
-from app.exam_solver.model import ExamProblem, Seat
+from app.exam_solver.model import ExamProblem, ExamWeights, Seat
 from app.exam_solver.solve import soft_scores
 from app.exam_solver.validate import check
 from app.models import (
@@ -37,6 +37,7 @@ from app.models import (
     ExamPublication,
     ExamSeat,
     Room,
+    Run,
     Term,
     utcnow,
 )
@@ -100,7 +101,12 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
     term = db.get(Term, draft.term_id)
     if term is None:
         raise ApiError(404, "NOT_FOUND", "No such term.")
-    problem = build(db, term, draft)
+    # The run's weights: a run with common_day 0, or made before the common-units day, is checked without H-E8.
+    run = db.get(Run, draft.run_id) if draft.run_id else None
+    weights = None
+    if run is not None and run.weights is not None:
+        weights = ExamWeights.from_dict({"common_day": 0, **run.weights})
+    problem = build(db, term, draft, weights)
     slots: dict[str, int] = {}
     seats: list[Seat] = []
     for pl in draft.placements:
@@ -283,16 +289,19 @@ def move_paper(
     new = days.index(day) * problem.sessions + session
     slots = {**built.slots, paper_id: new}
     unpinned = ExamProblem(
-        papers=[p if p.id != paper_id else type(p)(p.id, p.label, p.rows) for p in problem.papers],
+        papers=[p if p.id != paper_id else type(p)(p.id, p.label, p.rows, codes=p.codes) for p in problem.papers],
         days=problem.days,
         sessions=problem.sessions,
         rooms=problem.rooms,
+        weights=problem.weights,
         row_labels=problem.row_labels,
+        row_programmes=problem.row_programmes,
     )
     broken = [
         v
         for v in check(unpinned, slots)
-        if (v.rule in ("H-E1", "H-E2", "H-E7") and paper_id in v.paper_ids) or (v.rule == "H-E3" and not v.paper_ids)
+        if (v.rule in ("H-E1", "H-E2", "H-E7", "H-E8") and paper_id in v.paper_ids)
+        or (v.rule == "H-E3" and not v.paper_ids)
     ]
     if broken:
         raise ApiError(409, "BREAKS_RULE", broken[0].message, {"violations": [v.__dict__ for v in broken]})
@@ -333,7 +342,10 @@ def share(db: Session, identity: Identity, draft: ExamDraft) -> dict[str, Any]:
 def copy_draft(db: Session, identity: Identity, draft: ExamDraft) -> ExamDraft:
     count = len(list(db.scalars(select(ExamDraft.id).where(ExamDraft.term_id == draft.term_id))))
     new = ExamDraft(
-        term_id=draft.term_id, name=f"Exam draft {count + 1} (copy of {draft.name})", soft_scores=draft.soft_scores
+        term_id=draft.term_id,
+        run_id=draft.run_id,  # its run's weights still say which rules it's checked by
+        name=f"Exam draft {count + 1} (copy of {draft.name})",
+        soft_scores=draft.soft_scores,
     )
     for pl in draft.placements:
         new.placements.append(
