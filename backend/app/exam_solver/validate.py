@@ -1,4 +1,4 @@
-"""Every hard-rule violation (H-E1 to H-E7) in an exam timetable and its seating."""
+"""Every hard-rule violation (H-E1 to H-E8) in an exam timetable and its seating."""
 
 from __future__ import annotations
 
@@ -23,6 +23,13 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
             out.append(ExamViolation("H-E4", f"{p.label} is outside the exam period.", (p.id,)))
         elif p.pinned is not None and p.pinned != t:
             out.append(ExamViolation("H-E4", f"{p.label} is pinned and was moved.", (p.id,)))
+
+    common_slots = problem.common_day_slots()
+    for p in problem.papers:
+        if slots.get(p.id) in common_slots and not problem.is_common(p):
+            day = problem.days[problem.day_of(slots[p.id])]
+            message = f"{p.label} isn't a common unit; {day:%a %d %b} is for common units only."
+            out.append(ExamViolation("H-E8", message, (p.id,)))
 
     by_row_slot: dict[tuple[str, int], list[str]] = defaultdict(list)
     by_row_day: dict[tuple[str, int], list[str]] = defaultdict(list)

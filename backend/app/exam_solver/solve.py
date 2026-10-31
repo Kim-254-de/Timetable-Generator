@@ -12,7 +12,7 @@ from app.exam_solver.validate import check
 
 
 def soft_scores(problem: ExamProblem, slots: dict[str, int]) -> dict[str, float]:
-    """S-E1 back-to-back class rows, S-E2 class rows with two papers a day, S-E3 student-days into the period."""
+    """S-E1 back-to-back class rows, S-E2 two papers a day, S-E3 student-days into the period, S-E4, S-E6."""
     taken: dict[str, set[int]] = defaultdict(set)
     for p in problem.papers:
         if p.id in slots:
@@ -37,7 +37,20 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int]) -> dict[str, float]
             if p.id in slots:
                 per_slot[slots[p.id]] += 1
         guessed += sum(n - 1 for n in per_slot.values() if n > 1)
-    return {"back_to_back": back_to_back, "same_day": same_day, "student_days": late, "guessed_clashes": guessed}
+    # S-E6: common papers not on the second day, the day kept for them.
+    common_slots = problem.common_day_slots()
+    common_elsewhere = (
+        sum(1 for p in problem.papers if p.id in slots and problem.is_common(p) and slots[p.id] not in common_slots)
+        if common_slots
+        else 0
+    )
+    return {
+        "back_to_back": back_to_back,
+        "same_day": same_day,
+        "student_days": late,
+        "guessed_clashes": guessed,
+        "common_elsewhere": common_elsewhere,
+    }
 
 
 def seat_all(problem: ExamProblem, slots: dict[str, int]) -> list[Seat]:

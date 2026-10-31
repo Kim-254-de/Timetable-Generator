@@ -116,7 +116,8 @@ export function ExamsTab({ termId }: { termId: string }) {
               </div>
               {r.status === 'succeeded' && r.draft_id && (
                 <p className="mt-1">
-                  Back-to-back: {r.soft_scores.back_to_back ?? 0} · Two a day: {r.soft_scores.same_day ?? 0}{' '}
+                  Back-to-back: {r.soft_scores.back_to_back ?? 0} · Two a day: {r.soft_scores.same_day ?? 0}
+                  {r.soft_scores.common_elsewhere ? ` · Common units not on day 2: ${r.soft_scores.common_elsewhere}` : ''}{' '}
                   <Link to={`/terms/${termId}/exam-drafts/${r.draft_id}`} className="text-brand-ink">Review the draft →</Link>
                 </p>
               )}

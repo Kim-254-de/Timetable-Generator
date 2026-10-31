@@ -157,3 +157,86 @@ def test_a_guess_never_makes_the_timetable_impossible():
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
     assert len(set(result.slots.values())) == 3
+
+
+def _common_problem(papers: list[Paper], days: int = 3) -> ExamProblem:
+    programmes = {"BIT1": "BIT", "BIT2": "BIT", "BSC1": "BSC", "BED1": "BED", "BCOM1": "BCOM"}
+    return ExamProblem(
+        papers=papers,
+        days=DAYS[:days],
+        sessions=3,
+        rooms=[_room("A", 400), _room("B", 400)],
+        row_programmes=programmes,
+    )
+
+
+def test_common_units_are_all_sat_on_the_second_day_and_nothing_else_is():
+    papers = [
+        _paper("COMS 101", ("BIT1", 120), ("BSC1", 90), ("BED1", 200)),  # three programmes: common
+        _paper("UCU 102", ("BIT1", 120), ("BCOM1", 150)),
+        Paper(id="BITE 131/COSC 130", label="BITE 131/COSC 130", rows=(), codes=("BITE 131", "COSC 130")),
+        _paper("BIT 110", ("BIT1", 120)),  # one programme, two of its class rows: not common
+        _paper("BIT 111", ("BIT1", 120), ("BIT2", 40)),
+        _paper("BSC 110", ("BSC1", 90)),
+        Paper(id="BPPA 110", label="BPPA 110", rows=(), codes=("BPPA 110",)),
+    ]
+    problem = _common_problem(papers)
+    assert [p.id for p in papers if problem.is_common(p)] == ["COMS 101", "UCU 102", "BITE 131/COSC 130"]
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    on_day_two = {pid for pid, t in result.slots.items() if problem.day_of(t) == 1}
+    assert on_day_two == {"COMS 101", "UCU 102", "BITE 131/COSC 130"}
+    assert result.soft_scores["common_elsewhere"] == 0
+    assert check(problem, result.slots, result.seats) == []
+
+
+def test_a_common_unit_the_second_day_cant_hold_goes_to_another_day():
+    # BIT1 sits three common papers: at most two a day, so one is left for another day.
+    papers = [_paper(f"C{i}", ("BIT1", 50), ("BSC1", 50)) for i in range(3)] + [_paper("BIT 110", ("BIT1", 50))]
+    problem = _common_problem(papers)
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert sum(1 for i in range(3) if problem.day_of(result.slots[f"C{i}"]) == 1) == 2
+    assert problem.day_of(result.slots["BIT 110"]) != 1
+    assert result.soft_scores["common_elsewhere"] == 1
+    assert check(problem, result.slots, result.seats) == []
+
+
+def test_only_common_units_may_be_moved_or_pinned_onto_the_second_day():
+    papers = [_paper("COMS 101", ("BIT1", 50), ("BSC1", 50)), _paper("BIT 110", ("BIT1", 50))]
+    problem = _common_problem(papers)
+    broken = check(problem, {"COMS 101": 3, "BIT 110": 4})
+    assert [v.rule for v in broken] == ["H-E8"] and "BIT 110 isn't a common unit" in broken[0].message
+    pinned = _common_problem([papers[0], _paper("BIT 110", ("BIT1", 50), pinned=4)])
+    result = solve(pinned, time_limit_s=10, workers=2)
+    assert result.failure and result.failure["reasons"][0]["rule"] == "H-E8"
+
+
+def test_the_common_units_day_is_off_without_common_units_or_a_second_day_or_by_weight():
+    from app.exam_solver.model import ExamWeights
+
+    plain = _common_problem([_paper(f"P{i}", (f"BIT{1 + i % 2}", 50)) for i in range(4)])
+    assert plain.common_day is None
+    common = [_paper("COMS 101", ("BIT1", 50), ("BSC1", 50)), _paper("BIT 110", ("BIT1", 50))]
+    assert _common_problem(common, days=1).common_day is None
+    off = _common_problem(common)
+    off.weights = ExamWeights(common_day=0)
+    assert off.common_day is None and check(off, {"COMS 101": 0, "BIT 110": 3}) == []
+
+
+def test_when_the_second_day_is_full_the_biggest_common_units_keep_it():
+    # 800 seats a session: three 700-student papers fill day 2; three 150-student ones would fit only beside two.
+    big = [_paper(f"BIG{i}", (f"A{i}", 350), (f"B{i}", 350)) for i in range(3)]
+    small = [_paper(f"SMALL{i}", (f"C{i}", 75), (f"D{i}", 75)) for i in range(3)]
+    programmes = {f"{k}{i}": k for k in "ABCD" for i in range(3)}
+    problem = ExamProblem(
+        papers=big + small,
+        days=DAYS[:3],
+        sessions=3,
+        rooms=[_room("A", 400), _room("B", 400)],
+        row_programmes=programmes,
+    )
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert {pid for pid, t in result.slots.items() if problem.day_of(t) == 1} == {"BIG0", "BIG1", "BIG2"}
+    assert result.soft_scores["common_elsewhere"] == 3

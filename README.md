@@ -102,9 +102,16 @@ On the term's **Exams** tab:
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
-   per day, each session's students fit the exam seats, pinned papers stay.
+   per day, each session's students fit the exam seats, pinned papers stay,
+   and the second day of the period is for common units only (H-E8).
    Soft: back-to-back sessions (heavily weighted), two papers on one day, big
-   papers late. Phase 2 seats each session: every class row (or part of one
+   papers late, and every common unit on the second day (S-E6). A common
+   unit is a paper sat by class rows of more than one programme (with no
+   class rows yet: codes of more than one programme, "BITE 131/COSC 130").
+   All of them go on day 2 unless a hard rule stops it (a class sitting three
+   common papers, more common students than the day's seats); then the
+   biggest keep day 2 and the draft shows how many went to other days. Weight
+   `common_day: 0` turns it off. Phase 2 seats each session: every class row (or part of one
    bigger than any room) gets one room; small papers share rooms, a big paper
    uses few rooms in one block, a paper's ODEL students sit apart. The
    pre-check and conflict explanations name the class row or session at fault.

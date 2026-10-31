@@ -42,6 +42,7 @@ export function ExamDraftPage() {
             {draft.placed} of {draft.papers} papers placed · {draft.pinned} pinned · <span className="capitalize">{draft.status}</span>
             {draft.shared_at && ` · shared with departments ${dateTime(draft.shared_at)}`}
             {' '}· back-to-back {draft.soft_scores.back_to_back ?? 0} · two a day {draft.soft_scores.same_day ?? 0}
+            {draft.soft_scores.common_elsewhere ? ` · ${draft.soft_scores.common_elsewhere} common units not on day 2` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
