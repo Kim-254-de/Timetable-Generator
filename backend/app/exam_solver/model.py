@@ -17,8 +17,9 @@ Hard rules:
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
 
-Papers nobody is known to sit (no class rows: nobody synced the unit yet) are
-still kept apart, by a guess: units of one subject and year ("BPPA 110",
+Papers nobody is known to sit (no class rows, or only a class the department's
+page guessed so it could take a number: nobody synced the unit yet) are still
+kept apart, by a guess: units of one subject and year ("BPPA 110",
 "BPPA 121": BPPA, year 1) are usually sat by the same class. S-E4 keeps such a
 guessed class to one paper a session and two a day, and S-E5 spreads these
 papers evenly over the period instead of stacking them in one session. Both
@@ -67,6 +68,7 @@ class Sitting:
     row_id: str
     students: int
     odel: bool = False
+    guessed: bool = False  # the class is a guess from the code: it takes seats, but no hard rule holds it
 
 
 @dataclass(frozen=True)
@@ -81,7 +83,7 @@ class Paper:
 
     @property
     def unknown_students(self) -> bool:
-        return not self.rows
+        return not self.row_ids
 
     @property
     def students(self) -> int:
@@ -89,7 +91,8 @@ class Paper:
 
     @property
     def row_ids(self) -> frozenset[str]:
-        return frozenset(r.row_id for r in self.rows)
+        """The classes known to sit it: the ones the hard rules hold apart."""
+        return frozenset(r.row_id for r in self.rows if not r.guessed)
 
 
 @dataclass(frozen=True)
@@ -147,7 +150,7 @@ class ExamProblem:
 
     def is_common(self, paper: Paper) -> bool:
         """Sat by more than one programme; with no class rows, codes from more than one programme."""
-        if paper.rows:
+        if paper.row_ids:
             return len({self.row_programmes[r] for r in paper.row_ids if r in self.row_programmes}) > 1
         return len({m.group(1).upper() for m in map(_LETTERS.match, paper.codes) if m}) > 1
 

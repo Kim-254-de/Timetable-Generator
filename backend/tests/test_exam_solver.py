@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 
+from app.exam_solver import precheck, sessions
 from app.exam_solver import rooms as seating
-from app.exam_solver import sessions
 from app.exam_solver.model import ExamProblem, ExamRoom, Paper, Sitting
 from app.exam_solver.solve import solve
 from app.exam_solver.validate import check
@@ -240,3 +240,62 @@ def test_when_the_second_day_is_full_the_biggest_common_units_keep_it():
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
     assert {pid for pid, t in result.slots.items() if problem.day_of(t) == 1} == {"BIG0", "BIG1", "BIG2"}
     assert result.soft_scores["common_elsewhere"] == 3
+
+
+def _guessed(pid: str, code: str, row: str = "COSC Y1S1", students: int = 10) -> Paper:
+    return Paper(id=pid, label=pid, rows=(Sitting(row, students, guessed=True),), codes=(code,))
+
+
+def test_a_guessed_class_never_makes_the_timetable_impossible():
+    # Six papers one guessed class "sits" over one day: as a known class that breaks H-E2.
+    papers = [_guessed(f"P{i}", f"COSC 10{i}") for i in range(6)]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100)])
+    assert precheck.run(problem) == []
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert check(problem, result.slots, result.seats) == []
+
+
+def test_a_guessed_class_still_takes_seats_and_is_kept_apart_softly():
+    papers = [_guessed(f"P{i}", f"COSC 10{i}", students=30 + i) for i in range(3)]
+    problem = ExamProblem(papers=papers, days=DAYS[:3], sessions=3, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert {s.paper_id: s.students for s in result.seats} == {"P0": 30, "P1": 31, "P2": 32}
+    assert len(set(result.slots.values())) == 3  # S-E4
+    assert result.soft_scores["guessed_clashes"] == 0
+
+
+def test_seats_still_limit_guessed_papers():
+    papers = [_guessed("P0", "COSC 100", students=120)]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100)])
+    assert [f["rule"] for f in precheck.run(problem)] == ["H-E3"]
+
+
+def test_a_known_class_stays_hard_beside_a_guessed_one():
+    # R1 is known on all three papers, so two a day holds; the guess adds nothing to it.
+    papers = [
+        Paper(
+            id=f"P{i}",
+            label=f"P{i}",
+            rows=(Sitting("R1", 20), Sitting("GUESS", 5, guessed=True)),
+            codes=(f"COSC 10{i}",),
+        )
+        for i in range(3)
+    ]
+    problem = ExamProblem(papers=papers, days=DAYS[:2], sessions=3, rooms=[_room("A", 100)])
+    assert sorted(problem.rows()) == ["R1"]
+    result = solve(problem, time_limit_s=20, workers=2)
+    per_day = defaultdict(int)
+    for t in result.slots.values():
+        per_day[problem.day_of(t)] += 1
+    assert max(per_day.values()) == 2
+
+
+def test_a_joint_paper_with_a_guessed_class_is_common_by_its_codes():
+    joint = Paper(id="J", label="J", rows=(Sitting("BITE Y1S1", 40, guessed=True),), codes=("BITE 110", "COSC 110"))
+    single = _guessed("S", "BITE 111", row="BITE Y1S1")
+    problem = ExamProblem(
+        papers=[joint, single], days=DAYS[:3], sessions=3, rooms=[_room("A", 100)], row_programmes={"BITE Y1S1": "BITE"}
+    )
+    assert problem.is_common(joint) and not problem.is_common(single)

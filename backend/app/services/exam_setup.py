@@ -139,7 +139,7 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
         for p in d.get("papers") or []:
             kept.add(p["id"])
             sitting = sorted(
-                (rows[r["course_id"]].id, int(r["students"]), r.get("mode") == "odel")
+                (rows[r["course_id"]].id, int(r["students"]), r.get("mode") == "odel", bool(r.get("guessed")))
                 for r in p.get("rows") or []
                 if r["course_id"] in rows
             )
@@ -164,12 +164,13 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                 added.append(label)
             else:
                 differs = any(getattr(paper, k) != v for k, v in values.items())
-                differs = differs or sorted((r.class_row_id, r.students, r.odel) for r in paper.rows) != sitting
+                had = sorted((r.class_row_id, r.students, r.odel, r.guessed) for r in paper.rows)
+                differs = differs or had != sitting
                 if differs:
                     changed.append(label)
                 for k, v in values.items():
                     setattr(paper, k, v)
-            paper.rows = [ExamPaperRow(class_row_id=i, students=n, odel=o) for i, n, o in sitting]
+            paper.rows = [ExamPaperRow(class_row_id=i, students=n, odel=o, guessed=g) for i, n, o, g in sitting]
         for ref, paper in list(existing.items()):
             if paper.department_id == dept.id and ref not in kept:
                 db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))

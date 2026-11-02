@@ -356,3 +356,28 @@ def test_a_paper_nobody_synced_is_timetabled_and_published_without_a_room(client
     assert ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))["smarttt"]["sent"] is True
     sent = next(p for p in smarttt.exam_payloads[-1]["papers"] if p["key"] == "p-nobody")
     assert sent["seating"] == [] and sent["date"]
+
+
+def test_a_class_guessed_from_the_code_is_seated_but_cant_stop_a_run(client, teaching, smarttt, db: Session):
+    sign_in(client)
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
+    # Nine papers of one guessed class over four days: more than two a day allows for a known class.
+    teaching.exam_courses.append(course("c-guess", "CS", "COSC", 10))
+    for i in range(9):
+        guessed = paper(f"p-g{i}", [f"COSC 10{i}"], [("c-guess", 10, "regular")])
+        guessed["rows"][0]["guessed"] = True
+        teaching.exam_published[0]["papers"].append(guessed)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    stored = db.scalar(select(ExamPaper).where(ExamPaper.allocator_ref == "p-g0"))
+    assert stored is not None and [r.guessed for r in stored.rows] == [True]
+    grid = ok(client.get(f"/api/exam-drafts/{_generate(client, term_id)}"))
+    assert grid["draft"]["violations"] == []
+    placed = next(p for p in grid["papers"] if p["codes"] == "COSC 100")
+    assert placed["day"] is not None and sum(s["students"] for s in placed["seating"]) == 10
+
+    # The department corrects the class: re-importing clears the mark.
+    guessed = next(p for p in teaching.exam_published[0]["papers"] if p["id"] == "p-g0")
+    guessed["rows"][0]["guessed"] = False
+    changed = ok(client.post(f"/api/terms/{term_id}/exams/import"))["papers"]["changed"]
+    db.expire_all()
+    assert changed == ["COSC 100"] and [r.guessed for r in stored.rows] == [False]
