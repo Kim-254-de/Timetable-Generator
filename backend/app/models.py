@@ -36,6 +36,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -471,6 +472,8 @@ class ExamPaperRow(Base):
     class_row_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("class_rows.id", ondelete="CASCADE"), primary_key=True)
     students: Mapped[int] = mapped_column(Integer)
     odel: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The class is a guess from the paper's code, not who is known to sit it: it takes seats, no hard rule holds it.
+    guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class ExamPractical(Base):

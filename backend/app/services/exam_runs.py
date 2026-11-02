@@ -41,7 +41,7 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
             Paper(
                 id=str(p.id),
                 label=p.label,
-                rows=tuple(Sitting(str(r.class_row_id), r.students, r.odel) for r in p.rows),
+                rows=tuple(Sitting(str(r.class_row_id), r.students, r.odel, r.guessed) for r in p.rows),
                 pinned=slot if pl is not None and pl.pinned else None,
                 previous=slot,
                 invigilator=p.invigilator_staff_number,
