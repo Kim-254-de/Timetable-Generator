@@ -406,3 +406,33 @@ def test_a_class_with_no_number_yet_keeps_its_papers_apart_and_waits_for_a_room(
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
     db.expire_all()
     assert row.student_count == 120
+
+
+def test_set_as_current_links_the_term_so_exams_can_be_sent(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    assert ok(client.get(f"/api/terms/{term_id}"))["smarttt_term_id"] is None
+    result = ok(client.post(f"/api/terms/{term_id}/set-current"))
+    assert result["is_current"] is True and result["smarttt_term_id"] == "smarttt-term-new"
+    assert smarttt.set_current_calls[0]["academic_year"]
+    assert ok(client.get(f"/api/terms/{term_id}"))["smarttt_term_id"] == "smarttt-term-new"
+
+
+def test_the_director_sets_a_papers_category_and_the_prefix_list_makes_health_papers(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/terms/{term_id}/exams"))["papers"]}
+    assert papers["BITE 131/COSC 130"]["category"] == "common" and papers["COSC 200"]["category"] == "regular"
+    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": "postgraduate"}))
+    ok(client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_health_prefixes": ["epsc ", "EPSC"]}))
+    data = ok(client.get(f"/api/terms/{term_id}/exams"))
+    assert data["period"]["exam_health_prefixes"] == ["EPSC"]
+    papers = {p["codes"]: p for p in data["papers"]}
+    assert papers["COSC 200"]["category"] == "postgraduate" and papers["EPSC 121"]["category"] == "health"
+    bad = client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": "x"})
+    assert bad.status_code == 422
+    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": None}))
+    # Health papers need health rooms, and the pre-check says so.
+    run = client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 30})
+    assert run.status_code < 300

@@ -90,30 +90,37 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
 
 On the term's **Exams** tab:
 
+0. **Set as current term in SMARTTT** (an administrator can too) also links a
+   term made here to SMARTTT's, so its exam timetable can be sent there.
 1. **Exam period**: first and last day, weekdays used, days off, and the
    sessions of each day (default 08:30-10:30, 11:30-13:30, 14:30-16:30).
    **Spacing**: exam seats are 0.9 x the teaching capacity in every room, big
    halls included (110 seats -> 99; 200 -> 180); the Director can change the
    0.9 for the exam period. A room's own number ("Fixed exam seats" on the
    Rooms page, never above its capacity) is only for one that can't be used at
-   that share, e.g. fixed benches; "For exams" keeps a room out.
+   that share, e.g. fixed benches. "Used for exams" and "Health unit" are set by
+   the administrator under Venues in the admin console and read on each room
+   sync; the Director's own "Used for exams" overrules the administrator's.
    A room's block is its building, so a big paper stays within one block.
 2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
    per day, each session's students fit the exam seats, pinned papers stay,
-   and the second day of the period is for common units only (H-E8).
-   Soft: back-to-back sessions (heavily weighted), two papers on one day, big
-   papers late, and every common unit on the second day (S-E6). A common
-   unit is a paper sat by class rows of more than one programme (with no
-   class rows yet: codes of more than one programme, "BITE 131/COSC 130").
-   All of them go on day 2 unless a hard rule stops it (a class sitting three
-   common papers, more common students than the day's seats); then the
-   biggest keep day 2 and the draft shows how many went to other days. Weight
-   `common_day: 0` turns it off. Phase 2 seats each session: every class row (or part of one
-   bigger than any room) gets one room; small papers share rooms, a big paper
-   uses few rooms in one block, a paper's ODEL students sit apart. The
+   common, postgraduate and health papers sit only in the first or last session
+   of a day, on any exam day (H-E8), and health papers sit only in the health
+   unit (H-E9). Soft: back-to-back sessions (heavily weighted), two papers on
+   one day, big papers late, and common units spread over the days (S-E7).
+   A common unit is a paper sat by class rows of more than one programme (with
+   no class rows yet: codes of more than one programme, "BITE 131/COSC 130").
+   A postgraduate paper has a code numbered 7xx to 9xx. A health paper has a code
+   prefix on the exam period's list; health wins when a paper is more than one.
+   The Director can set any paper's category on the Exams tab. Phase 2 seats
+   each session: every class row (or part of one bigger than any room) gets one
+   room; small papers share rooms, a big paper uses few rooms in one block, a
+   paper's ODEL students sit apart, health papers take the health unit first,
+   and all of a session's postgraduate papers share one room when they fit, with
+   undergraduates kept out of it while another room is free (S-E8). The
    pre-check and conflict explanations name the class row or session at fault.
 4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
    as room sheets; **move** a paper (checked; both sessions re-seated; pinned)

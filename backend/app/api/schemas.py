@@ -203,6 +203,13 @@ class ExamPeriodBody(_Strict):
     exam_sessions: Annotated[list[ExamSession], Field(min_length=1, max_length=6)] | None = None
     # Exam seats as a share of each room's teaching capacity.
     exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
+    # Code prefixes of health and nursing papers.
+    exam_health_prefixes: Annotated[list[Annotated[str, StringConstraints(max_length=8)]], Field(max_length=60)] | None = None
+
+
+class PaperCategoryBody(_Strict):
+    # health | postgraduate | common | regular; null: work it out from the codes and class rows.
+    category: str | None = None
 
 
 class ExamRunBody(_Strict):

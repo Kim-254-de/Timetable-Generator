@@ -1,10 +1,10 @@
-"""Every hard-rule violation (H-E1 to H-E8) in an exam timetable and its seating."""
+"""Every hard-rule violation (H-E1 to H-E9) in an exam timetable and its seating."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 
-from app.exam_solver.model import ExamProblem, ExamViolation, Seat
+from app.exam_solver.model import HEALTH, ExamProblem, ExamViolation, Seat
 
 
 def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None = None) -> list[ExamViolation]:
@@ -24,11 +24,10 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         elif p.pinned is not None and p.pinned != t:
             out.append(ExamViolation("H-E4", f"{p.label} is pinned and was moved.", (p.id,)))
 
-    common_slots = problem.common_day_slots()
     for p in problem.papers:
-        if slots.get(p.id) in common_slots and not problem.is_common(p):
-            day = problem.days[problem.day_of(slots[p.id])]
-            message = f"{p.label} isn't a common unit; {day:%a %d %b} is for common units only."
+        t = slots.get(p.id, -1)
+        if problem.edges_only(p) and 0 <= t < problem.slots and not problem.is_edge(t):
+            message = f"{p.label} is a {problem.category(p)} paper: it sits in the first or last session of a day."
             out.append(ExamViolation("H-E8", message, (p.id,)))
 
     by_row_slot: dict[tuple[str, int], list[str]] = defaultdict(list)
@@ -85,6 +84,8 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
                 )
                 continue
             used[(s.room_id, slots.get(s.paper_id, -1))] += s.students
+            if not room.health and problem.rules_on and problem.category(papers[s.paper_id]) == HEALTH:
+                out.append(ExamViolation("H-E9", f"{papers[s.paper_id].label} is a health paper in {room.code}, outside the health unit.", (s.paper_id,)))
             seated[(s.paper_id, s.row_id)] += s.students
             kinds[(s.paper_id, s.room_id)].add(odel.get((s.paper_id, s.row_id), False))
         for (room_id, t), students in used.items():

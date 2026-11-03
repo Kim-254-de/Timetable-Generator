@@ -11,9 +11,11 @@ import {
   usePatchExamPeriod,
   useRuns,
   useSendExamPublication,
+  useSetCurrentTerm,
+  useSetPaperCategory,
   useStartExamRun,
 } from '@/lib/queries'
-import type { ExamPeriod, ExamSessionTime } from '@/lib/types'
+import type { ExamCategory, ExamPeriod, ExamSessionTime } from '@/lib/types'
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -26,6 +28,8 @@ export function ExamsTab({ termId }: { termId: string }) {
   const departments = useExamDepartments(termId)
   const importExams = useImportExams(termId)
   const start = useStartExamRun(termId)
+  const category = useSetPaperCategory(termId)
+  const setCurrent = useSetCurrentTerm(termId)
   const send = useSendExamPublication(termId)
   const runs = useRuns(termId)
   const [minutes, setMinutes] = useState(5)
@@ -38,6 +42,14 @@ export function ExamsTab({ termId }: { termId: string }) {
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <button type="button" disabled={setCurrent.isPending} className="rounded-md border border-line px-3 py-1.5 disabled:opacity-50"
+          onClick={() => { if (window.confirm('Make this the current term in SMARTTT? Students and lecturers will see this term from now on.')) setCurrent.mutate() }}>
+          Set as current term in SMARTTT
+        </button>
+        {setCurrent.isSuccess && <span role="status" className="text-muted">This is now SMARTTT's current term, and exam timetables can be sent to it.</span>}
+        {setCurrent.isError && <span role="alert" className="text-danger">{errorMessage(setCurrent.error)}</span>}
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <PeriodForm termId={termId} period={data.period} />
         <section className="space-y-3 rounded-lg border border-line bg-card p-4">
@@ -76,9 +88,16 @@ export function ExamsTab({ termId }: { termId: string }) {
               <summary className="cursor-pointer text-brand-ink">Show the papers</summary>
               <ul className="mt-2 max-h-64 overflow-y-auto">
                 {data.papers.map((p) => (
-                  <li key={p.id} className="flex justify-between gap-2 border-b border-line py-1 last:border-0">
+                  <li key={p.id} className="flex items-center justify-between gap-2 border-b border-line py-1 last:border-0">
                     <span><b>{p.codes}</b> {p.title} <span className="text-muted">· {p.department}</span></span>
-                    <span className="text-muted">{p.students}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <select aria-label={`Category of ${p.codes}`} value={p.category_override ?? ''} className="rounded-md border border-line px-1 py-0.5 text-xs"
+                        onChange={(e) => category.mutate({ paperId: p.id, category: (e.target.value || null) as ExamCategory | null })}>
+                        <option value="">{`Auto: ${CATEGORY_NAMES[p.category]}`}</option>
+                        {(Object.keys(CATEGORY_NAMES) as ExamCategory[]).map((c) => <option key={c} value={c}>{CATEGORY_NAMES[c]}</option>)}
+                      </select>
+                      <span className="text-muted">{p.students}</span>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -117,7 +136,7 @@ export function ExamsTab({ termId }: { termId: string }) {
               {r.status === 'succeeded' && r.draft_id && (
                 <p className="mt-1">
                   Back-to-back: {r.soft_scores.back_to_back ?? 0} · Two a day: {r.soft_scores.same_day ?? 0}
-                  {r.soft_scores.common_elsewhere ? ` · Common units not on day 2: ${r.soft_scores.common_elsewhere}` : ''}{' '}
+                  {r.soft_scores.postgraduate_extra_rooms ? ` · Postgraduate extra rooms: ${r.soft_scores.postgraduate_extra_rooms}` : ''}{' '}
                   <Link to={`/terms/${termId}/exam-drafts/${r.draft_id}`} className="text-brand-ink">Review the draft →</Link>
                 </p>
               )}
@@ -168,6 +187,8 @@ export function ExamsTab({ termId }: { termId: string }) {
   )
 }
 
+const CATEGORY_NAMES: Record<ExamCategory, string> = { regular: 'Regular', common: 'Common', postgraduate: 'Postgraduate', health: 'Health' }
+
 function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) {
   const save = usePatchExamPeriod(termId)
   const [start, setStart] = useState(period.exam_start ?? '')
@@ -176,6 +197,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
   const [daysOff, setDaysOff] = useState(period.exam_days_off.join(', '))
   const [sessions, setSessions] = useState<ExamSessionTime[]>(period.exam_sessions)
   const [spacing, setSpacing] = useState(period.exam_spacing)
+  const [health, setHealth] = useState((period.exam_health_prefixes ?? []).join(', '))
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -186,6 +208,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       exam_days_off: daysOff.split(/[,\s]+/).filter(Boolean),
       exam_sessions: sessions,
       exam_spacing: spacing,
+      exam_health_prefixes: health.split(/[,\s]+/).filter(Boolean),
     })
   }
 
@@ -228,6 +251,15 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
         <input type="number" min={0.3} max={1} step={0.05} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))}
           className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
       </label>
+      <label className="block">Health and nursing unit code prefixes, separated by commas (e.g. NURS, HPA)
+        <input value={health} onChange={(e) => setHealth(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1" />
+        <span className="text-xs text-muted">
+          These papers sit only in the health unit ({period.health_seats} exam seats; rooms are marked under Venues in the admin console).
+        </span>
+      </label>
+      <p className="text-xs text-muted">
+        Common, postgraduate (7xx to 9xx) and health papers sit only in the first or last session of a day.
+      </p>
       <p className="text-muted">
         {period.days.length} exam days · {period.slots} sessions · {period.rooms} rooms with {period.exam_seats.toLocaleString()} exam seats.
         A room's own exam seats are set on the Rooms page.

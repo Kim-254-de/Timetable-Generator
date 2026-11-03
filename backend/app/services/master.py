@@ -55,7 +55,10 @@ def room_dict(room: Room, in_use: int = 0) -> dict[str, Any]:
         "unavailable": sorted(room.unavailable or []),
         "in_use": in_use,
         "exam_seats": room.exam_seats,
-        "for_exams": room.for_exams,
+        "for_exams": room.used_for_exams,  # what applies
+        "admin_for_exams": room.for_exams,  # the administrator's say in SMARTTT
+        "exam_override": room.exam_override,  # the Director's, when they made one
+        "health_unit": room.health_unit,
         "block": room.block,
     }
 
@@ -91,7 +94,9 @@ def _apply_room(db: Session, room: Room, fields: dict[str, Any]) -> None:
         clash = _room_by_code(db, fields["code"])
         if clash is not None and clash.id != room.id:
             raise ApiError(409, "CODE_TAKEN", f"There is already a lecture hall {clash.code}.")
-    for key in ("code", "building", "capacity", "room_type", "active", "for_exams"):
+    if "for_exams" in fields:  # the Director's choice; None goes back to the administrator's
+        room.exam_override = fields["for_exams"]
+    for key in ("code", "building", "capacity", "room_type", "active"):
         if key in fields and fields[key] is not None:
             setattr(room, key, fields[key])
     if "exam_seats" in fields:
@@ -105,6 +110,7 @@ def create_room(db: Session, identity: Identity, fields: dict[str, Any], commit:
         id=uuid.uuid4().hex, code="", building="", capacity=1, room_type="lecture_hall", unavailable=[], for_exams=True
     )
     _apply_room(db, room, fields)
+    room.exam_override = False if room.exam_override is False else None  # a new room follows the administrator unless kept out
     db.add(room)
     db.flush()
     audit(db, identity, "room.create", "room", room.id, None, room_dict(room))
@@ -127,8 +133,10 @@ def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[
     """
     Brings in the rooms the admin uploaded to SMARTTT, by code: building,
     capacity, type, and whether it is in use (SMARTTT's status "active"). What
-    only the Generator keeps stays as it is: exam seats, "for exams" and the
-    slots a room is unavailable. A room only here is left alone and listed.
+    only the Generator keeps stays as it is: exam seats, the Director's own
+    choice of "for exams" (which overrules the administrator's, read here with
+    "health unit") and the slots a room is unavailable. A room only here is
+    left alone and listed.
     """
     added: list[str] = []
     updated: list[str] = []
@@ -148,10 +156,12 @@ def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[
             "capacity": capacity,
             "room_type": kind,
             "active": (r.get("status") or "active") == "active",
+            "for_exams": r.get("for_exams") is not False,
+            "health_unit": r.get("health_unit") is True,
         }
         room = _room_by_code(db, code)
         if room is None:
-            room = Room(id=uuid.uuid4().hex, code=code, unavailable=[], for_exams=True, **fields)
+            room = Room(id=uuid.uuid4().hex, code=code, unavailable=[], **fields)
             db.add(room)
             db.flush()
             audit(db, identity, "room.create", "room", room.id, None, room_dict(room))
