@@ -162,7 +162,9 @@ def _guesses(mm: _Model, problem: ExamProblem, common_slots: set[int]) -> None:
                 m.add(sum(terms) - 2 <= over)
                 mm.penalties.append(w.guessed_day * over)
     # The second day is for common papers: the others spread over the rest of the period.
-    unknown = [p for p in problem.papers if p.unknown_students and not (common_slots and problem.is_common(p))]
+    unknown = [
+        p for p in problem.papers if (p.unknown_students or p.no_numbers) and not (common_slots and problem.is_common(p))
+    ]
     open_slots = problem.slots - len(common_slots)
     if len(unknown) > 1 and open_slots > 0 and w.spread:
         share = -(-len(unknown) // open_slots)  # an even share of the sessions, rounded up

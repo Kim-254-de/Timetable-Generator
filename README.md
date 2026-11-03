@@ -122,6 +122,9 @@ On the term's **Exams** tab:
    in Smart Attendance: each paper's main invigilator (in its main room, the
    one with most of its students; collects every room's scripts) and one extra
    invigilator for each extra room.
+   A class that takes a unit on SMARTTT's master timetable comes in with the
+   paper even before anyone has synced: it holds to every hard rule, so its
+   papers never clash, and gets its room once it has a number.
    Papers nobody is known to sit yet are still kept apart: units of one
    subject and year ("BPPA 110", "BPPA 121") are taken to be one class, kept
    to one paper a session and two a day (S-E4), and these papers are spread

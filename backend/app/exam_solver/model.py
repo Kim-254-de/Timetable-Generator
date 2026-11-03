@@ -86,6 +86,11 @@ class Paper:
         return not self.row_ids
 
     @property
+    def no_numbers(self) -> bool:
+        """No student number yet (S-E5): nothing but this keeps such papers out of one session."""
+        return self.students == 0
+
+    @property
     def students(self) -> int:
         return sum(r.students for r in self.rows)
 

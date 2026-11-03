@@ -39,7 +39,9 @@ class _Block:
 def _blocks(paper: Paper, biggest: int) -> list[_Block]:
     out: list[_Block] = []
     for r in paper.rows:
-        parts = max(1, math.ceil(r.students / biggest))
+        if r.students == 0:  # a class known to sit it, number not known yet: held apart, nothing to seat
+            continue
+        parts = math.ceil(r.students / biggest)
         base, extra = divmod(r.students, parts)
         for i in range(parts):
             out.append(_Block(paper, r.row_id, base + (1 if i < extra else 0), r.odel, i + 1, parts))
