@@ -299,3 +299,34 @@ def test_a_joint_paper_with_a_guessed_class_is_common_by_its_codes():
         papers=[joint, single], days=DAYS[:3], sessions=3, rooms=[_room("A", 100)], row_programmes={"BITE Y1S1": "BITE"}
     )
     assert problem.is_common(joint) and not problem.is_common(single)
+
+
+def test_a_class_with_no_number_yet_is_held_apart_and_needs_no_seat():
+    """A class the master timetable names, before anyone syncs: every hard rule, nothing to seat."""
+    papers = [_paper(f"P{i}", ("BCOM Y2S1", 0)) for i in range(4)] + [_paper("BIG", ("BCOM Y2S1", 0), ("BIT Y1S1", 90))]
+    problem = ExamProblem(papers=papers, days=DAYS[:3], sessions=3, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert check(problem, result.slots, result.seats) == []
+    assert len(set(result.slots.values())) == 5  # one class: never two papers in a session
+    per_day = defaultdict(int)
+    for t in result.slots.values():
+        per_day[problem.day_of(t)] += 1
+    assert max(per_day.values()) <= 2
+    assert [(s.paper_id, s.row_id, s.students) for s in result.seats] == [("BIG", "BIT Y1S1", 90)]
+
+
+def test_the_precheck_counts_classes_with_no_number_yet():
+    papers = [_paper(f"P{i}", ("BCOM Y2S1", 0)) for i in range(5)]
+    problem = ExamProblem(papers=papers, days=DAYS[:2], sessions=3, rooms=[_room("A", 100)])
+    assert [f["rule"] for f in precheck.run(problem)] == ["H-E2"]
+
+
+def test_papers_of_different_classes_with_no_numbers_are_spread():
+    papers = [_paper(f"P{i}", (f"R{i}", 0)) for i in range(12)]
+    problem = ExamProblem(papers=papers, days=DAYS[:2], sessions=3, rooms=[_room("A", 100)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    per_slot = defaultdict(int)
+    for t in result.slots.values():
+        per_slot[t] += 1
+    assert max(per_slot.values()) == 2  # 12 papers over 6 sessions, though nothing has to be seated

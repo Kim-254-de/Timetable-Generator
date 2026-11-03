@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ExamPaper, ExamPublication
+from app.models import ClassRow, ExamPaper, ExamPublication
 from tests.conftest import sign_in
 from tests.fake_smarttt import TERM
 from tests.fake_teaching import FakeTeaching, course, paper
@@ -381,3 +381,28 @@ def test_a_class_guessed_from_the_code_is_seated_but_cant_stop_a_run(client, tea
     changed = ok(client.post(f"/api/terms/{term_id}/exams/import"))["papers"]["changed"]
     db.expire_all()
     assert changed == ["COSC 100"] and [r.guessed for r in stored.rows] == [False]
+
+
+def test_a_class_with_no_number_yet_keeps_its_papers_apart_and_waits_for_a_room(client, teaching, smarttt, db: Session):
+    """The master timetable names the class before anyone syncs: no clash, no seat, no invigilator needed yet."""
+    sign_in(client)
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
+    teaching.exam_courses.append(course("listed:BCOM|2|2|", "CS", "BCOM", 0, year=2))
+    for code in ("BCOM 201", "BCOM 202", "BCOM 203"):
+        teaching.exam_published[0]["papers"].append(paper(f"p-{code}", [code], [("listed:BCOM|2|2|", 0, "regular")]))
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    grid = ok(client.get(f"/api/exam-drafts/{_generate(client, term_id)}"))
+    assert grid["draft"]["violations"] == []
+    placed = [p for p in grid["papers"] if p["codes"].startswith("BCOM")]
+    assert all(p["seating"] == [] for p in placed)
+    assert len({(p["day"], p["session"]) for p in placed}) == 3
+
+    # A department's number for a class row doesn't get wiped by a later read with none.
+    row = db.scalar(select(ClassRow).where(ClassRow.allocator_ref == "c-cs1"))
+    assert row is not None and row.student_count == 120
+    teaching.exam_courses = [
+        {**c, "students": 0} if c["id"] == "c-cs1" else c for c in teaching.exam_courses
+    ]
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    db.expire_all()
+    assert row.student_count == 120

@@ -167,6 +167,9 @@ def upsert_class_rows(
             "department_id": owner.id,
             "allocator_ref": c["id"],
         }
+        # A class known from the master timetable with no number yet doesn't wipe the number the row has.
+        if row is not None and not values["student_count"]:
+            values["student_count"] = row.student_count
         if row is None:
             row = ClassRow(term_id=term.id, unavailable=[], **values)
             db.add(row)
