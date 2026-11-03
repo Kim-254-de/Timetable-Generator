@@ -10,6 +10,7 @@ import type {
   ExamDraftSummary,
   ExamGrid,
   ExamOverview,
+  ExamCategory,
   ExamPeriod,
   ExamSwitchAction,
   ExamSwitchState,
@@ -145,7 +146,8 @@ export interface RoomInput {
   unavailable?: number[]
   /** 0 or empty: capacity x the term's exam spacing. */
   exam_seats?: number | null
-  for_exams?: boolean
+  /** The Director's choice: true or false overrules the administrator, null follows them. */
+  for_exams?: boolean | null
 }
 export const useRoomList = () => useQuery({ queryKey: keys.roomList, queryFn: () => get<RoomRecord[]>('/rooms') })
 export const useSaveRoom = () =>
@@ -353,8 +355,15 @@ function useExamMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
 }
 
 export const usePatchExamPeriod = (termId: string) =>
-  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
+  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing' | 'exam_health_prefixes'>>) =>
     patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
+
+export const useSetPaperCategory = (termId: string) =>
+  useExamMutation(termId, ({ paperId, category }: { paperId: string; category: ExamCategory | null }) =>
+    patch(`/terms/${termId}/exam-papers/${paperId}/category`, { category }))
+
+export const useSetCurrentTerm = (termId: string) =>
+  useExamMutation(termId, () => post<{ is_current: boolean; smarttt_term_id: string | null }>(`/terms/${termId}/set-current`))
 
 export const useImportExams = (termId: string) =>
   useExamMutation(termId, () =>

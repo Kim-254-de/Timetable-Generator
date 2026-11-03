@@ -52,3 +52,25 @@ def test_exam_import_brings_the_rooms_in_first(client, teaching: FakeTeaching, s
     smarttt.down = True
     result = ok(client.post(f"/api/terms/{term_id}/exams/import"))
     assert "error" in result["rooms"] and result["papers"] is not None
+
+
+def test_the_administrators_exam_use_and_health_unit_are_read_and_the_director_overrules(client, smarttt: FakeSmarttt):
+    sign_in(client)
+    smarttt.rooms = [room("TC 1", 100), {**room("NURS 1", 60), "health_unit": True}, {**room("TC 2", 80), "for_exams": False}]
+    ok(client.post("/api/rooms/sync"))
+    rooms = {r["code"]: r for r in ok(client.get("/api/rooms"))}
+    assert rooms["TC 2"]["for_exams"] is False and rooms["TC 2"]["admin_for_exams"] is False
+    assert rooms["NURS 1"]["health_unit"] is True and rooms["TC 1"]["health_unit"] is False
+
+    # The Director uses a room the administrator kept out, and keeps out one they allowed.
+    ok(client.patch(f"/api/rooms/{rooms['TC 2']['id']}", json={"for_exams": True}))
+    ok(client.patch(f"/api/rooms/{rooms['TC 1']['id']}", json={"for_exams": False}))
+    smarttt.rooms = [{**room("TC 1", 100), "for_exams": True}, {**room("TC 2", 80), "for_exams": False}]
+    ok(client.post("/api/rooms/sync"))
+    rooms = {r["code"]: r for r in ok(client.get("/api/rooms"))}
+    assert (rooms["TC 2"]["for_exams"], rooms["TC 2"]["exam_override"]) == (True, True)
+    assert (rooms["TC 1"]["for_exams"], rooms["TC 1"]["exam_override"]) == (False, False)
+
+    # Back to following the administrator.
+    ok(client.patch(f"/api/rooms/{rooms['TC 2']['id']}", json={"for_exams": None}))
+    assert next(r for r in ok(client.get("/api/rooms")) if r["code"] == "TC 2")["for_exams"] is False

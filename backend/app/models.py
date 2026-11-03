@@ -105,6 +105,8 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
+    # Code prefixes of health and nursing papers ("NURS", "HPA").
+    exam_health_prefixes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:
     # when the switch is set for (or happened), by whom, and the close of the exam period.
     exam_switch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -161,7 +163,15 @@ class Room(Base):
     # fixed number is only for a room that can't be used at that share (fixed
     # benches); it is never more than the capacity.
     exam_seats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The administrator's say in SMARTTT (synced). The Director's choice, when they made one, overrules it.
     for_exams: Mapped[bool] = mapped_column(Boolean, default=True)
+    exam_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # In the health unit, as set in SMARTTT: health and nursing papers sit only in these rooms.
+    health_unit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+    @property
+    def used_for_exams(self) -> bool:
+        return self.for_exams if self.exam_override is None else self.exam_override
 
     @property
     def block(self) -> str:
@@ -450,6 +460,8 @@ class ExamPaper(Base):
     sitting: Mapped[str] = mapped_column(String(10), default="regular", server_default="regular")
     # The main invigilator a department named before the timetable is generated: their papers go in different sessions.
     invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The Director's choice of category; empty: worked out from the codes and class rows.
+    category_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

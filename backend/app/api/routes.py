@@ -27,6 +27,7 @@ from app.api.schemas import (
     OfferingBody,
     OfferingPatch,
     OpenTermBody,
+    PaperCategoryBody,
     ProposeBody,
     PublishBody,
     ResolveBody,
@@ -526,6 +527,17 @@ def term_exams(term_id: str, _me: Me, db: Db) -> dict[str, Any]:
 def exam_period(term_id: str, body: ExamPeriodBody, identity: Me, db: Db) -> dict[str, Any]:
     term = setup.get_term(db, term_id)
     return ok(exam_setup.update_period(db, identity, term, body.model_dump(exclude_unset=True)))
+
+
+@router.patch("/terms/{term_id}/exam-papers/{paper_id}/category")
+def exam_paper_category(term_id: str, paper_id: str, body: PaperCategoryBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok(exam_setup.set_category(db, identity, setup.get_term(db, term_id), paper_id, body.category))
+
+
+@router.post("/terms/{term_id}/set-current")
+def term_set_current(term_id: str, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    """Makes this term SMARTTT's current one (an administrator can too), and links it."""
+    return ok(setup.set_current(db, smarttt, identity, setup.get_term(db, term_id)))
 
 
 @router.get("/terms/{term_id}/exam-departments")

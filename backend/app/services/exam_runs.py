@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import Identity
 from app.config import get_settings
 from app.errors import ApiError
-from app.exam_solver.model import ExamProblem, ExamWeights, Paper, Sitting
+from app.exam_solver.model import ExamProblem, ExamWeights, Paper, Sitting, paper_kind
 from app.exam_solver.solve import solve
 from app.models import ClassRow, ExamDraft, ExamPaper, ExamPlacement, ExamSeat, Run, RunMode, RunStatus, Term, utcnow
 from app.services.exam_setup import exam_days, exam_rooms
@@ -46,6 +46,7 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
                 previous=slot,
                 invigilator=p.invigilator_staff_number,
                 codes=tuple(p.codes or ()),
+                kind=paper_kind(p.codes or (), term.exam_health_prefixes or [], p.category_override),
             )
         )
     class_rows = list(db.scalars(select(ClassRow).where(ClassRow.term_id == term.id)))

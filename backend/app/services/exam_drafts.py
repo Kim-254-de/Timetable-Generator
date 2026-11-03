@@ -3,7 +3,7 @@ Exam drafts: the date x session grid, room sheets, moving a paper, sharing
 the draft with departments (so they name invigilators), and publishing.
 
 A published version is frozen (`record`) so later edits never change it, and
-`payload` is what SMARTTT is sent (its generator/exams/publish/): each paper's
+`payload` is what SMARTTT is sent (its generator/exam-publish/): each paper's
 codes, date, times and seating, with each class row's programme, year and
 stream so SMARTTT can show students their own room, and the practicals.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy import select, update
@@ -101,11 +101,11 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
     term = db.get(Term, draft.term_id)
     if term is None:
         raise ApiError(404, "NOT_FOUND", "No such term.")
-    # The run's weights: a run with common_day 0, or made before the common-units day, is checked without H-E8.
+    # The run's weights: a run with category_rules 0, or made before those rules, is checked without H-E8 and H-E9.
     run = db.get(Run, draft.run_id) if draft.run_id else None
     weights = None
     if run is not None and run.weights is not None:
-        weights = ExamWeights.from_dict({"common_day": 0, **run.weights})
+        weights = ExamWeights.from_dict({"category_rules": 0, **run.weights})
     problem = build(db, term, draft, weights)
     slots: dict[str, int] = {}
     seats: list[Seat] = []
@@ -134,7 +134,7 @@ def draft_summary(db: Session, draft: ExamDraft, built: _Built | None = None) ->
         "papers": len(built.problem.papers),
         "placed": sum(1 for p in built.problem.papers if built.slots.get(p.id, -1) >= 0),
         "pinned": sum(1 for pl in draft.placements if pl.pinned),
-        "soft_scores": soft_scores(built.problem, {k: v for k, v in built.slots.items() if v >= 0}),
+        "soft_scores": soft_scores(built.problem, {k: v for k, v in built.slots.items() if v >= 0}, built.seats),
         "violations": [v.__dict__ for v in violations[:100]],
         "publishable": not violations and draft.status == DraftStatus.DRAFT,
     }
@@ -289,7 +289,7 @@ def move_paper(
     new = days.index(day) * problem.sessions + session
     slots = {**built.slots, paper_id: new}
     unpinned = ExamProblem(
-        papers=[p if p.id != paper_id else type(p)(p.id, p.label, p.rows, codes=p.codes) for p in problem.papers],
+        papers=[p if p.id != paper_id else replace(p, pinned=None) for p in problem.papers],
         days=problem.days,
         sessions=problem.sessions,
         rooms=problem.rooms,

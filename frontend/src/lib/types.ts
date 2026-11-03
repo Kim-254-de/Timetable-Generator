@@ -45,7 +45,11 @@ export interface RoomRecord {
   in_use: number
   /** Seats for exams when set; otherwise capacity x the term's spacing. */
   exam_seats: number | null
+  /** What applies: the Director's choice when they made one, else the administrator's. */
   for_exams: boolean
+  admin_for_exams: boolean
+  exam_override: boolean | null
+  health_unit: boolean
   block: string
 }
 
@@ -321,14 +325,21 @@ export interface ExamPeriod {
   exam_days_off: string[]
   exam_sessions: ExamSessionTime[]
   exam_spacing: number
+  exam_health_prefixes: string[]
+  health_seats: number
   days: string[]
   slots: number
   rooms: number
   exam_seats: number
 }
 
+export type ExamCategory = 'health' | 'postgraduate' | 'common' | 'regular'
+
 export interface ExamPaperItem {
   id: string
+  category: ExamCategory
+  /** The Director's choice; null when worked out from the codes and class rows. */
+  category_override: ExamCategory | null
   codes: string
   title: string
   department: string
