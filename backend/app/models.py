@@ -495,7 +495,7 @@ class ExamPaperRow(Base):
     odel: Mapped[bool] = mapped_column(Boolean, default=False)
     # The class is a guess from the paper's code, not who is known to sit it: it takes seats, no hard rule holds it.
     guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
-    # On a paper the Director uploaded: their number or class, kept when SMARTTT is read again. 0 here: it doesn't sit it.
+    # The Director's number or class, kept on import until the department sends a number for that class.
     edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 

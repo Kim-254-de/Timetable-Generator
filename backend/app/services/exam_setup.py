@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+import uuid
 from datetime import date, timedelta
 from typing import Any
 
@@ -156,6 +157,7 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                 "invigilator_staff_number": (invigilator.get("staff_number") or "").strip().upper() or None,
             }
             paper = existing.get(p["id"])
+            sitting = _with_directors_numbers(paper, sitting)
             label = "/".join(p["codes"]) + (" (ODEL)" if values["sitting"] == "odel" else "")
             if paper is None:
                 paper = ExamPaper(term_id=term.id, allocator_ref=p["id"], **values)
@@ -170,7 +172,11 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                     changed.append(label)
                 for k, v in values.items():
                     setattr(paper, k, v)
-            paper.rows = [ExamPaperRow(class_row_id=i, students=n, odel=o, guessed=g) for i, n, o, g in sitting]
+            mine = {r.class_row_id: r.students for r in paper.rows if r.edited}
+            paper.rows = [
+                ExamPaperRow(class_row_id=i, students=n, odel=o, guessed=g, edited=mine.get(i) == n and n > 0)
+                for i, n, o, g in sitting
+            ]
         for ref, paper in list(existing.items()):
             if paper.department_id == dept.id and ref not in kept and not paper.is_director_paper:
                 db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
@@ -216,6 +222,25 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
         **summary,
         "not_published": [{"code": d["code"], "name": d["name"]} for d in data.get("not_published") or []],
     }
+
+
+def _with_directors_numbers(
+    paper: ExamPaper | None, sitting: list[tuple[uuid.UUID, int, bool, bool]]
+) -> list[tuple[uuid.UUID, int, bool, bool]]:
+    """
+    What a department sent, with the numbers the Director entered where it sent none.
+    A number from the department (its letter, or who synced) replaces the Director's.
+    """
+    if paper is None:
+        return sitting
+    entered = {r.class_row_id: r for r in paper.rows if r.edited and r.students > 0}
+    sent = {i for i, _, _, _ in sitting}
+    out = [
+        (i, entered[i].students, o, g) if n == 0 and i in entered else (i, n, o, g)
+        for i, n, o, g in sitting
+    ]
+    out += [(i, r.students, r.odel, r.guessed) for i, r in entered.items() if i not in sent]
+    return sorted(out)
 
 
 def papers_of(db: Session, term: Term) -> list[dict[str, Any]]:

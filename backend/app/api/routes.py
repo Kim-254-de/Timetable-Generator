@@ -30,6 +30,7 @@ from app.api.schemas import (
     ExamVenueBody,
     PaperCategoryBody,
     PaperInvigilatorsBody,
+    PaperRowsBody,
     ProposeBody,
     PublishBody,
     ResolveBody,
@@ -535,6 +536,12 @@ def exam_period(term_id: str, body: ExamPeriodBody, identity: Me, db: Db) -> dic
 @router.patch("/terms/{term_id}/exam-papers/{paper_id}/category")
 def exam_paper_category(term_id: str, paper_id: str, body: PaperCategoryBody, identity: Me, db: Db) -> dict[str, Any]:
     return ok(exam_setup.set_category(db, identity, setup.get_term(db, term_id), paper_id, body.category))
+
+
+@router.put("/terms/{term_id}/exam-papers/{paper_id}/rows")
+def exam_paper_rows(term_id: str, paper_id: str, body: PaperRowsBody, identity: Me, db: Db) -> dict[str, Any]:
+    rows = [r.model_dump() for r in body.rows]
+    return ok(exam_director_papers.set_rows(db, identity, setup.get_term(db, term_id), paper_id, rows))
 
 
 @router.put("/terms/{term_id}/director-papers/{paper_id}/invigilators")
