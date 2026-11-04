@@ -29,6 +29,7 @@ from app.api.schemas import (
     OpenTermBody,
     ExamVenueBody,
     PaperCategoryBody,
+    PaperIdsBody,
     PaperInvigilatorsBody,
     PaperRowsBody,
     ProposeBody,
@@ -548,6 +549,11 @@ def exam_paper_rows(term_id: str, paper_id: str, body: PaperRowsBody, identity: 
 def director_paper_invigilators(term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db) -> dict[str, Any]:
     named = {room: v.model_dump() for room, v in body.invigilators.items()}
     return ok(exam_director_papers.set_invigilators(db, identity, setup.get_term(db, term_id), paper_id, named))
+
+
+@router.post("/terms/{term_id}/director-papers/remove")
+def remove_director_papers(term_id: str, body: PaperIdsBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok({"deleted": exam_director_papers.remove_many(db, identity, setup.get_term(db, term_id), body.paper_ids)})
 
 
 @router.delete("/terms/{term_id}/director-papers/{paper_id}")

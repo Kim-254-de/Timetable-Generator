@@ -100,6 +100,17 @@ def remove(db: Session, identity: Identity, term: Term, paper_id: str) -> None:
     db.commit()
 
 
+def remove_many(db: Session, identity: Identity, term: Term, paper_ids: list[str]) -> int:
+    """Several of the Director's papers at once, all or none: an id that isn't one of them removes nothing."""
+    papers = [_director_paper(db, term, paper_id) for paper_id in dict.fromkeys(paper_ids)]
+    for paper in papers:
+        db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
+        db.delete(paper)
+    audit(db, identity, "exam_director_paper.delete_many", "exam_paper", str(term.id), {"codes": [p.codes for p in papers]}, None)
+    db.commit()
+    return len(papers)
+
+
 def set_invigilators(db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]) -> dict[str, Any]:
     """Who invigilates: "" is the main invigilator, a room code that extra room's. SMARTTT checks the staff numbers on publishing."""
     paper = _director_paper(db, term, paper_id)

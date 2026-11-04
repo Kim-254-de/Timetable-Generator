@@ -153,3 +153,26 @@ def test_the_director_enters_numbers_on_any_paper_and_import_keeps_them_until_th
     assert client.put(f"/api/terms/{term_id}/exam-papers/{uuid.uuid4()}/rows", json={"rows": []}).status_code == 404
     ok(client.put(f"/api/terms/{term_id}/exam-papers/{other}/rows", json={"rows": []}))
     assert _papers(client, term_id)["COSC 200"]["students"] == 0
+
+
+def test_the_director_removes_several_earlier_papers_at_once_all_or_none(client, teaching, smarttt, db: Session):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    first = _earlier_upload(db, term_id, ["NURS 101"])
+    second = _earlier_upload(db, term_id, ["NURS 102"])
+    kept = _earlier_upload(db, term_id, ["NURS 103"])
+    department_paper = _papers(client, term_id)["COSC 200"]["id"]
+    url = f"/api/terms/{term_id}/director-papers/remove"
+
+    # A department's paper among them: nothing goes.
+    assert client.post(url, json={"paper_ids": [first, department_paper]}).status_code == 404
+    assert {"NURS 101", "COSC 200"} <= set(_papers(client, term_id))
+    assert client.post(url, json={"paper_ids": []}).status_code == 422
+
+    draft = _generate(client, term_id)
+    assert "NURS 101" in {p["codes"] for p in ok(client.get(f"/api/exam-drafts/{draft}"))["papers"]}
+    assert ok(client.post(url, json={"paper_ids": [first, second, first]}))["deleted"] == 2
+    left = _papers(client, term_id)
+    assert "NURS 101" not in left and "NURS 102" not in left and left["NURS 103"]["id"] == kept
+    assert "NURS 101" not in {p["codes"] for p in ok(client.get(f"/api/exam-drafts/{draft}"))["papers"]}
