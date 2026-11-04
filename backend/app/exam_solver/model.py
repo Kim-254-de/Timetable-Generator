@@ -14,7 +14,7 @@ Hard rules:
        exam seats, a paper's ODEL students apart from its other students;
   H-E7 a main invigilator named before generating is in one room per slot: their
        papers go in different sessions, except postgraduate ones, which share a room;
-  H-E8 common and postgraduate papers only in the first or last session
+  H-E8 postgraduate papers only in the first or last session
        of a day;
   H-E10 postgraduate papers only in the first week of the period.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
@@ -28,13 +28,12 @@ guessed class to one paper a session and two a day, and S-E5 spreads these
 papers evenly over the period instead of stacking them in one session. Both
 are soft (heavily weighted): a guess must never make a timetable impossible.
 
-Papers of two kinds sit only in the first or last session of a day, on any
-exam day (H-E8): common units (sat by more than one programme, or with nobody
-known to sit them, codes from more than one programme: "BITE 131/COSC 130")
-and postgraduate papers (a code numbered 7xx to 9xx).
-Some shared units have no programmes on record, so a paper of more than
-COMMON_STUDENTS students also counts as common. Those are kept to the first or
-last session softly (S-E9): a number is only a sign that a unit is shared.
+Postgraduate papers (a code numbered 7xx to 9xx) sit only in the first or last
+session of a day, on any exam day (H-E8). Common units (sat by more than one
+programme, or with nobody known to sit them, codes from more than one programme:
+"BITE 131/COSC 130") prefer those sessions, and take a middle one when the
+timetable needs it (S-E9). Some shared units have no programmes on record, so a
+paper of more than COMMON_STUDENTS students also counts as common.
 Postgraduate papers also sit only in the first week: from the first exam day to
 the Friday of that week, so Tuesday to Friday when exams start on a Tuesday (a
 Saturday or Sunday start runs to the next Friday) (H-E10).
@@ -155,7 +154,7 @@ class ExamWeights:
     guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
     spread: int = 20  # S-E5 per paper with no students known over an even share of a session
     common_spread: int = 30  # S-E7 per common paper over an even share of a day
-    common_by_numbers: int = 1000  # S-E9 per paper common by its numbers outside the first and last sessions
+    common_midday: int = 1000  # S-E9 per common paper outside the first and last sessions
     category_rules: int = 1  # 0 turns H-E8 and H-E10 off
     postgraduate_first_week: int = 1  # 0 turns H-E10 off
 
@@ -163,7 +162,7 @@ class ExamWeights:
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
         if not data:
             return cls()
-        data = {k: v for k, v in data.items() if k != "common_day"}  # retired with the common-units day
+        data = {k: v for k, v in data.items() if k not in ("common_day", "common_by_numbers")}  # retired rules
         known = set(cls.__dataclass_fields__)
         unknown = set(data) - known
         if unknown:
@@ -214,17 +213,13 @@ class ExamProblem:
             return paper.kind
         return COMMON if self.is_common(paper) or paper.students > COMMON_STUDENTS else REGULAR
 
-    def common_by_numbers(self, paper: Paper) -> bool:
-        """Common only because of its numbers: its first or last session is a preference (S-E9)."""
-        return not paper.kind and paper.students > COMMON_STUDENTS and not self.is_common(paper)
-
     @property
     def rules_on(self) -> bool:
         return bool(self.weights.category_rules)
 
     def edges_only(self, paper: Paper) -> bool:
         """It may sit only in the first or last session of a day (H-E8)."""
-        return self.rules_on and self.category(paper) != REGULAR and not self.common_by_numbers(paper)
+        return self.rules_on and self.category(paper) == POSTGRADUATE
 
     def is_edge(self, slot: int) -> bool:
         return self.session_of(slot) in (0, self.sessions - 1)

@@ -234,14 +234,16 @@ def test_a_class_can_sit_morning_and_evening_on_one_day_when_it_must():
     assert result.soft_scores["back_to_back"] == 0
 
 
-def test_moving_or_pinning_a_common_paper_to_midday_breaks_the_rule():
-    papers = [_paper("COMS 101", ("BIT1", 50), ("BSC1", 50)), _paper("BIT 110", ("BIT1", 50))]
-    problem = _common_problem(papers)
-    assert check(problem, {"COMS 101": 3, "BIT 110": 4}) == []  # a regular paper can sit midday
-    broken = check(problem, {"COMS 101": 1, "BIT 110": 4})
+def test_moving_or_pinning_a_postgraduate_paper_to_midday_breaks_the_rule_and_a_common_one_may_go_there():
+    graduate = replace(_paper("MBAD 845", ("M1", 10)), kind=POSTGRADUATE)
+    common = _paper("COMS 101", ("BIT1", 10), ("BSC1", 10))
+    problem = _common_problem([graduate, common])
+    assert check(problem, {"COMS 101": 1, "MBAD 845": 0}) == []  # a common paper can sit midday, as a last resort
+    assert soft_scores(problem, {"COMS 101": 1, "MBAD 845": 0}, [])["common_midday"] == 1
+    broken = check(problem, {"COMS 101": 0, "MBAD 845": 1})
     assert [v.rule for v in broken] == ["H-E8"] and "first or last session" in broken[0].message
-    pinned = _common_problem([_paper("COMS 101", ("BIT1", 50), ("BSC1", 50), pinned=4)])
-    result = solve(pinned, time_limit_s=10, workers=2)
+    pinned = _common_problem([replace(graduate, pinned=1)])
+    result = solve(pinned, time_limit_s=20, workers=2)
     assert result.failure and result.failure["reasons"][0]["rule"] == "H-E8"
 
 
@@ -600,7 +602,7 @@ def test_others_may_use_a_levels_room_when_nothing_else_is_left():
 
 
 def test_a_diploma_paper_keeps_its_session_rules_and_stays_common():
-    # Sat by two programmes: still a common paper, so first or last session. One programme: any session.
+    # Sat by two programmes: still a common paper, preferring first or last. One programme: no preference.
     problem = _common_problem([_level_paper("DIBM 0112", 10)], days=1)
     alone = problem.papers[0]
     assert problem.category(alone) == REGULAR and problem.allowed_slots(alone) == [0, 1, 2]
@@ -608,7 +610,7 @@ def test_a_diploma_paper_keeps_its_session_rules_and_stays_common():
     assert paper_kind(["DIBM 0112"], []) == ""
     joint = replace(_level_paper("DIBM 0113", 10), rows=(Sitting("D1", 5), Sitting("D2", 5)), codes=("DIBM 0113",))
     both = replace(problem, papers=[joint], row_programmes={"D1": "DIBM", "D2": "DHRM"})
-    assert both.category(joint) == COMMON and both.allowed_slots(joint) == [0, 2]
+    assert both.category(joint) == COMMON and both.allowed_slots(joint) == [0, 1, 2]
 
 
 def _big(pid: str, students: int) -> Paper:
@@ -620,37 +622,73 @@ def test_a_paper_of_more_than_3000_students_counts_as_common():
     problem = _common_problem([], rooms=[_room("A", 5000)])
     at_limit, over = _big("AT", 3000), _big("OVER", 3001)
     assert problem.category(at_limit) == REGULAR
-    assert problem.category(over) == COMMON and problem.common_by_numbers(over)
+    assert problem.category(over) == COMMON
     # The Director's choice, or its own category, comes first.
     assert problem.category(replace(over, kind=REGULAR)) == REGULAR
     assert problem.category(replace(over, kind=POSTGRADUATE)) == POSTGRADUATE
-    assert not problem.common_by_numbers(replace(over, kind=COMMON))
 
 
-def test_the_first_or_last_session_is_a_preference_for_a_paper_common_by_its_numbers():
+def test_the_first_or_last_session_is_a_preference_for_a_common_paper():
     big = _big("BIG", 3500)
-    problem = _common_problem([big], days=1, rooms=[_room("A", 5000)])
-    assert problem.allowed_slots(big) == [0, 1, 2]  # no session is closed to it
-    assert not problem.edges_only(big)
-    assert check(problem, {"BIG": 1}, [Seat("BIG", "BIG-1", "A", 3500)]) == []  # midday breaks no hard rule
-    assert soft_scores(problem, {"BIG": 1}, [Seat("BIG", "BIG-1", "A", 3500)])["common_by_numbers_midday"] == 1
-    assert soft_scores(problem, {"BIG": 0}, [Seat("BIG", "BIG-1", "A", 3500)])["common_by_numbers_midday"] == 0
+    shared = _paper("SHARED", ("BIT1", 10), ("BSC1", 10))
+    problem = _common_problem([big, shared], days=1, rooms=[_room("A", 5000)])
+    for p in (big, shared):
+        assert problem.allowed_slots(p) == [0, 1, 2] and not problem.edges_only(p)
+    seat = [Seat("BIG", "BIG-1", "A", 3500)]
+    assert check(problem, {"BIG": 1, "SHARED": 0}, seat + [Seat("SHARED", "BIT1", "A", 10), Seat("SHARED", "BSC1", "A", 10)]) == []
+    assert soft_scores(problem, {"BIG": 1, "SHARED": 0}, seat)["common_midday"] == 1
+    assert soft_scores(problem, {"BIG": 0, "SHARED": 2}, seat)["common_midday"] == 0
 
 
-def test_the_solver_seats_papers_common_by_numbers_first_or_last_when_it_can():
-    # Day two's midday is otherwise the cheapest place for nobody; these two should still take the edges.
-    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10))]
+def test_the_solver_seats_common_papers_first_or_last_when_it_can():
+    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10)), _paper("S", ("BIT1", 5), ("BSC1", 5))]
     problem = _common_problem(papers, days=2, rooms=[_room("A", 5000)])
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
-    assert problem.is_edge(result.slots["BIG1"]) and problem.is_edge(result.slots["BIG2"])
-    assert result.soft_scores["common_by_numbers_midday"] == 0
+    for pid in ("BIG1", "BIG2", "S"):
+        assert problem.is_edge(result.slots[pid])
+    assert result.soft_scores["common_midday"] == 0
 
 
-def test_a_paper_common_by_its_numbers_goes_midday_when_it_must():
+def test_a_common_paper_goes_midday_when_it_must():
     # Three big papers and one exam day: both edges fill up, and that must not make it impossible.
     papers = [_big(f"BIG{i}", 3100) for i in range(3)]
     problem = _common_problem(papers, days=1, rooms=[_room("A", 3200)])
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
-    assert result.soft_scores["common_by_numbers_midday"] == 1
+    assert result.soft_scores["common_midday"] == 1
+
+
+def test_a_stored_run_with_the_retired_weight_still_reads():
+    assert ExamWeights.from_dict({"common_by_numbers": 1000, "same_day": 5}).same_day == 5
+
+
+def _too_tight() -> ExamProblem:
+    # Five postgraduate papers, each pair sharing a class: the two days' four first and last sessions can't hold them.
+    import itertools
+
+    pairs = list(itertools.combinations(range(5), 2))
+    papers = [
+        replace(_paper(f"C{i}", *[(f"{a}-{b}", 1) for a, b in pairs if i in (a, b)]), kind=POSTGRADUATE) for i in range(5)
+    ]
+    return _common_problem(papers, days=2)
+
+
+def test_when_the_classes_cant_be_named_in_time_the_rule_at_fault_is(monkeypatch):
+    problem = _too_tight()
+    monkeypatch.setattr(sessions, "_named", lambda *_: [])  # what running out of time looks like
+    reasons = sessions.explain(problem, 20)
+    assert precheck.run(problem) == []
+    assert reasons[0]["rule"] == "H-E8"
+    messages = " ".join(r["message"] for r in reasons)
+    assert "first or last session" in messages and "4 such sessions" in messages
+    assert "it fits with 1 more exam day." in messages
+
+
+def test_the_rule_at_fault_can_be_seats_or_an_invigilator_not_the_session_rule():
+    seats = [_paper(f"P{i}", (f"R{i}", 90)) for i in range(3)]
+    tight = ExamProblem(papers=seats, days=DAYS[:1], sessions=1, rooms=[_room("A", 100)])
+    assert [r["rule"] for r in sessions.diagnose(tight, 20)][:1] == ["H-E3"]
+    named = [replace(_paper(f"P{i}", (f"R{i}", 5)), invigilator="STF/1") for i in range(3)]
+    busy = ExamProblem(papers=named, days=DAYS[:1], sessions=2, rooms=[_room("A", 100)])
+    assert "H-E7" in [r["rule"] for r in sessions.diagnose(busy, 20)]
