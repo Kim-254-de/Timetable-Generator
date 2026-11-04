@@ -340,12 +340,32 @@ export interface ExamPaperItem {
   category: ExamCategory
   /** The Director's choice; null when worked out from the codes and class rows. */
   category_override: ExamCategory | null
+  /** Uploaded by the Director, not listed by a department. */
+  director_paper: boolean
   codes: string
   title: string
   department: string
   examiner: string
   students: number
-  rows: { label: string; students: number; odel: boolean }[]
+  rows: { label: string; students: number; odel: boolean; programme: string; year: number; semester: number; stream: string }[]
+}
+
+export interface HealthListReview {
+  entries: {
+    line: number
+    codes: string[]
+    title: string
+    section: string
+    sitting: 'regular' | 'odel'
+    students: number | null
+    classes: string[]
+    unknown_codes: string[]
+    duplicate_of: number | null
+    department_lists: string[]
+    already_here: boolean
+  }[]
+  smarttt: { available: boolean; reason: string | null }
+  summary: { papers: number; duplicates: number; unknown: number; no_classes: number }
 }
 
 export interface ExamPracticalItem {
@@ -406,7 +426,12 @@ export interface ExamGridPaper {
   invigilators: Record<string, { staff_number: string | null; name: string }>
   main_room: string | null
   extra_rooms: string[]
+  category: ExamCategory
+  /** Uploaded by the Director, who names its invigilators. */
+  director_paper: boolean
 }
+
+export interface ExamVenue { code: string; seats: number; health: boolean; block: string }
 
 export interface ExamRoomSheet {
   day: string
@@ -449,6 +474,7 @@ export interface ExamGrid {
   papers: ExamGridPaper[]
   practicals: ExamPracticalItem[]
   rooms: ExamRoomSheet[]
+  exam_rooms: ExamVenue[]
 }
 
 export interface ExamSwitchState {

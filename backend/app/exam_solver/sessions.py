@@ -5,7 +5,7 @@ x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
 class row and day at most two; H-E3 per slot the students fit all exam seats;
 H-E8 common, postgraduate and health papers only in the first or last session
-of a day (they get no other slot); H-E9 per slot health students fit the health unit.
+of a day (they get no other slot); H-E9 per slot health students fit the health unit, and the others the rest.
 Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
 S-E4 a guessed class (papers with no students known) one paper a session and
 two a day, S-E5 papers with no students known spread over the period, S-E7
@@ -116,13 +116,14 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
             if len(terms) > 1:
                 mm.limit(terms, 1, f"H-E7|{staff}")
 
-    seats = problem.total_seats
-    if sum(p.students for p in problem.papers) > seats:
+    seats = problem.general_seats
+    others = [p for p in problem.papers if not problem.is_health(p)]
+    if sum(p.students for p in others) > seats:
         for t in slots:
-            load = [p.students * x[p.id, t] for p in problem.papers if (p.id, t) in x]
+            load = [p.students * x[p.id, t] for p in others if (p.id, t) in x]
             if load:
                 mm.limit(load, seats, f"H-E3|{t}")
-    # H-E9: health papers sit only in the health unit; everyone else can use what is left.
+    # H-E9: the health unit holds health papers, and only them.
     health = [p for p in problem.papers if problem.rules_on and problem.category(p) == HEALTH and p.students]
     if health and sum(p.students for p in health) > problem.health_seats:
         for t in slots:
@@ -246,7 +247,7 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
                         "entity": f"{day:%a %d %b} session {problem.session_of(t) + 1}",
                         "message": (
                             f"The papers that must sit on {day:%a %d %b} session {problem.session_of(t) + 1} "
-                            f"need more than the {problem.total_seats} exam seats."
+                            f"need more than the {problem.general_seats} exam seats."
                         ),
                     }
                 )

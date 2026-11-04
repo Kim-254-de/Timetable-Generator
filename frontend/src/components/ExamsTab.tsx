@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { errorBody, errorMessage } from '@/lib/api'
 import { ExamSwitch } from '@/components/ExamSwitch'
+import { HealthPapers } from '@/components/HealthPapers'
 import { dateTime } from '@/lib/format'
 import {
   useExamDepartments,
@@ -105,6 +106,8 @@ export function ExamsTab({ termId }: { termId: string }) {
           )}
         </section>
       </div>
+
+      <HealthPapers termId={termId} papers={data.papers} />
 
       <section className="space-y-3 rounded-lg border border-line bg-card p-4">
         <h2 className="font-semibold">Generate</h2>
@@ -254,7 +257,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       <label className="block">Health and nursing unit code prefixes, separated by commas (e.g. NURS, HPA)
         <input value={health} onChange={(e) => setHealth(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1" />
         <span className="text-xs text-muted">
-          These papers sit only in the health unit ({period.health_seats} exam seats; rooms are marked under Venues in the admin console).
+          These papers sit only in the health unit ({period.health_seats} exam seats), which nothing else uses. Its rooms are marked under Venues in the admin console.
         </span>
       </label>
       <p className="text-xs text-muted">

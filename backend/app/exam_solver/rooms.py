@@ -11,6 +11,8 @@ seats, preferring in order:
   3. the tightest fit, so as few rooms as possible are used.
 A paper's ODEL class rows sit apart from its other class rows. A block that
 fits no single room (seats fragmented) is spread over the emptiest rooms.
+The health unit's rooms hold health papers and nothing else. A paper the
+Director gave its venues on the draft keeps them; the rest are seated around it.
 """
 
 from __future__ import annotations
@@ -48,16 +50,26 @@ def _blocks(paper: Paper, biggest: int) -> list[_Block]:
     return sorted(out, key=lambda b: -b.students)
 
 
+def _keeps_seats(paper: Paper, rooms: dict[str, ExamRoom]) -> bool:
+    """Its chosen venues still hold: every room open, and the same students as its class rows."""
+    if not paper.fixed_seats or any(s.room_id not in rooms for s in paper.fixed_seats):
+        return False
+    wanted: dict[str, int] = defaultdict(int)
+    for s in paper.fixed_seats:
+        wanted[s.row_id] += s.students
+    return dict(wanted) == {r.row_id: r.students for r in paper.rows if r.students}
+
+
 def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
     if not papers:
         return []
     if not rooms:
         raise SeatingError("No room is available for exams.")
-    need = sum(p.students for p in papers)
-    have = sum(r.seats for r in rooms)
+    general_rooms = [r for r in rooms if not r.health]
+    need = sum(p.students for p in papers if p.kind != HEALTH)
+    have = sum(r.seats for r in general_rooms)
     if need > have:
         raise SeatingError(f"{need} students but only {have} exam seats.")
-    biggest = max(r.seats for r in rooms)
     left = {r.id: r.seats for r in rooms}
     by_id = {r.id: r for r in rooms}
     # Which of a paper's kinds (ODEL or not) each room holds, so the two never share a room.
@@ -80,19 +92,35 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
     for p in papers:
         if p.kind == HEALTH and p.students > sum(r.seats for r in health_rooms):
             raise SeatingError(f"{p.label}: the health unit doesn't have seats for {p.students} students.")
+    shared: list[str] = []  # the room(s) of this session's postgraduate papers (S-E8)
+    # The venues the Director chose stay, while the room is open and the numbers are the same.
+    placed: set[str] = set()
+    for paper in papers:
+        if not _keeps_seats(paper, by_id):
+            continue
+        placed.add(paper.id)
+        for s in paper.fixed_seats:
+            left[s.room_id] -= s.students
+            odel = next((r.odel for r in paper.rows if r.row_id == s.row_id), False)
+            holds[(paper.id, s.room_id)].add(odel)
+            if s.room_id not in paper_rooms[paper.id]:
+                paper_rooms[paper.id].append(s.room_id)
+            if paper.kind == POSTGRADUATE and s.room_id not in shared:
+                shared.append(s.room_id)
+            seats.append(s)
     # Health papers take their rooms first, then postgraduate papers theirs, then the rest.
     order = {HEALTH: 0, POSTGRADUATE: 1}
-    shared: list[str] = []  # the room(s) of this session's postgraduate papers (S-E8)
-    settled = False
-    for paper in sorted(papers, key=lambda p: (order.get(p.kind, 2), -p.students, p.label)):
+    settled = bool(shared)
+    for paper in sorted((p for p in papers if p.id not in placed), key=lambda p: (order.get(p.kind, 2), -p.students, p.label)):
         graduate = paper.kind == POSTGRADUATE
         if graduate and not settled:
             settled = True
-            total = sum(p.students for p in papers if p.kind == POSTGRADUATE)
-            home = sorted((r for r in rooms if left[r.id] >= total and left[r.id] == r.seats), key=lambda r: (r.health, r.seats, r.code))
+            total = sum(p.students for p in papers if p.kind == POSTGRADUATE and p.id not in placed)
+            home = sorted((r for r in general_rooms if left[r.id] >= total and left[r.id] == r.seats), key=lambda r: (r.seats, r.code))
             if total and home:
                 shared.append(home[0].id)
-        candidates = health_rooms if paper.kind == HEALTH else rooms
+        candidates = health_rooms if paper.kind == HEALTH else general_rooms
+        biggest = max((r.seats for r in candidates), default=1)
         for block in _blocks(paper, biggest):
             mine = paper_rooms[paper.id]
             blocks_used = {by_id[r].block for r in mine} | ({by_id[r].block for r in shared} if graduate else set())
@@ -102,7 +130,6 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
                     fits,
                     key=lambda r: (
                         r.id not in shared if graduate else r.id in shared,
-                        paper.kind != HEALTH and r.health,
                         r.id not in mine,
                         bool(blocks_used) and r.block not in blocks_used,
                         left[r.id] == r.seats,  # unused rooms last: small papers share

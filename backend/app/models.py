@@ -438,6 +438,9 @@ class LoginAttempt(Base):
 # -- exams ---------------------------------------------------------------------------------
 
 
+DIRECTOR_REF = "director:"  # the start of allocator_ref on a paper the Director uploaded
+
+
 class ExamPaper(Base):
     """
     A written exam paper a department published in Smart Attendance: one or more
@@ -462,6 +465,12 @@ class ExamPaper(Base):
     invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # The Director's choice of category; empty: worked out from the codes and class rows.
     category_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # A paper the Director uploaded (allocator_ref "director:..."): the invigilators they named, by room ("" is the main one).
+    director_invigilators: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+
+    @property
+    def is_director_paper(self) -> bool:
+        return self.allocator_ref.startswith(DIRECTOR_REF)
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
@@ -486,6 +495,8 @@ class ExamPaperRow(Base):
     odel: Mapped[bool] = mapped_column(Boolean, default=False)
     # The class is a guess from the paper's code, not who is known to sit it: it takes seats, no hard rule holds it.
     guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # On a paper the Director uploaded: their number or class, kept when SMARTTT is read again. 0 here: it doesn't sit it.
+    edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class ExamPractical(Base):
@@ -537,6 +548,8 @@ class ExamPlacement(Base):
     day: Mapped[date] = mapped_column(Date)
     session: Mapped[int] = mapped_column(Integer)  # index into the term's exam sessions
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The Director chose its venues on the draft: re-seating a session keeps them.
+    rooms_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     seats: Mapped[list[ExamSeat]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

@@ -30,7 +30,8 @@ exam day (H-E8): common units (sat by more than one programme, or with nobody
 known to sit them, codes from more than one programme: "BITE 131/COSC 130"),
 postgraduate papers (a code numbered 7xx to 9xx) and health and nursing papers
 (a code prefix on the term's list). Health wins when a paper is more than one.
-Health papers sit only in rooms of the health unit (H-E9). All of a session's
+The health unit is theirs alone: health papers sit only in its rooms, and no
+other paper does (H-E9). All of a session's
 postgraduate papers share one room when they fit, undergraduates kept out of it
 while there is another room (S-E8). Common papers spread over the days (S-E7).
 Weight category_rules 0 turns H-E8 and H-E9 off, as for drafts made before them.
@@ -99,6 +100,7 @@ class Paper:
     invigilator: str | None = None  # the main invigilator's staff number, when named before generating
     codes: tuple[str, ...] = ()  # its unit codes, to guess who sits it when no class row is known
     kind: str = ""  # paper_kind(): "" is decided by its class rows (ExamProblem.category)
+    fixed_seats: tuple[Seat, ...] = ()  # the venues the Director chose on the draft: kept when the session is re-seated
 
     @property
     def unknown_students(self) -> bool:
@@ -202,6 +204,14 @@ class ExamProblem:
     @property
     def health_seats(self) -> int:
         return sum(r.seats for r in self.rooms if r.health)
+
+    @property
+    def general_seats(self) -> int:
+        """The seats open to papers other than health ones."""
+        return self.total_seats - self.health_seats if self.rules_on else self.total_seats
+
+    def is_health(self, paper: Paper) -> bool:
+        return self.rules_on and self.category(paper) == HEALTH
 
     def invigilators(self) -> dict[str, list[Paper]]:
         """Each main invigilator's papers, for those named before generating."""

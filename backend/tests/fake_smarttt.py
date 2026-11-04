@@ -172,6 +172,7 @@ class FakeSmarttt:
         # The rooms the admin uploaded (generator/rooms/); none unless a test adds them.
         self.rooms: list[dict[str, Any]] = []
         self.set_current_calls: list[dict[str, Any]] = []
+        self.enrolment: dict[str, dict[str, Any]] = {}  # /unit-enrolment/: by code, as SMARTTT answers
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -186,6 +187,9 @@ class FakeSmarttt:
         params = dict(request.url.params)
         if route == "/rooms/":
             return httpx.Response(200, json={"rooms": self.rooms})
+        if route == "/unit-enrolment/":
+            units = {c: self.enrolment[c] for c in body["codes"] if c in self.enrolment}
+            return httpx.Response(200, json={"term": None, "units": units, "unknown": [c for c in body["codes"] if c not in self.enrolment]})
         if request.url.path.endswith("/set-current/"):
             if self.down:
                 return httpx.Response(503, json={"detail": "down"})

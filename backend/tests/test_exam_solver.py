@@ -242,17 +242,59 @@ def test_the_rules_are_off_for_a_run_made_before_them():
     assert not off.edges_only(papers[0])
 
 
-def test_health_papers_sit_in_the_health_unit_and_others_keep_out_while_they_can():
+def test_the_health_unit_holds_health_papers_and_nothing_else():
     rooms = [ExamRoom(id="H", code="H", block="H", seats=60, health=True), _room("A", 200)]
     nursing = replace(_paper("NURS 101", ("N1", 50)), kind=HEALTH)
     other = _paper("BIT 110", ("BIT1", 100))
-    small = _paper("BIT 111", ("BIT2", 10))
-    seats = seating.seat_session([small, nursing, other], rooms)
+    seats = seating.seat_session([_paper("BIT 111", ("BIT2", 10)), nursing, other], rooms)
     assert {s.room_id for s in seats if s.paper_id == "NURS 101"} == {"H"}
     assert {s.room_id for s in seats if s.paper_id != "NURS 101"} == {"A"}
-    # Others can use a health room when nothing else is left.
-    full = seating.seat_session([_paper("BIG", ("R1", 200)), _paper("MORE", ("R2", 40))], rooms)
-    assert {s.room_id for s in full if s.paper_id == "MORE"} == {"H"}
+    # Even when the other rooms are full, and the health unit is empty.
+    try:
+        seating.seat_session([_paper("BIG", ("R1", 200)), _paper("MORE", ("R2", 40))], rooms)
+    except seating.SeatingError as exc:
+        assert "240 students but only 200" in str(exc)
+    else:
+        raise AssertionError("a paper was seated in the health unit")
+
+
+def test_the_solver_leaves_the_health_unit_out_of_everyone_elses_seats():
+    papers = [_paper(f"P{i}", (f"R{i}", 80)) for i in range(4)]
+    rooms = [ExamRoom(id="H", code="H", block="H", seats=500, health=True), _room("A", 100)]
+    problem = ExamProblem(papers=papers, days=DAYS[:2], sessions=3, rooms=rooms)
+    assert problem.general_seats == 100
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert len(set(result.slots.values())) == 4  # one at a time: A seats 100
+    assert {s.room_id for s in result.seats} == {"A"}
+    too_big = ExamProblem(papers=[_paper("BIG", ("R", 300))], days=DAYS[:2], sessions=3, rooms=rooms)
+    assert [f["rule"] for f in precheck.run(too_big)][0] == "H-E3"
+
+
+def test_a_non_health_paper_in_the_health_unit_breaks_the_rule_and_midday_is_closed():
+    rooms = [ExamRoom(id="H", code="H", block="H", seats=60, health=True), _room("A", 200)]
+    problem = ExamProblem(papers=[_paper("BIT 110", ("R1", 10))], days=DAYS[:1], sessions=3, rooms=rooms)
+    from app.exam_solver.model import Seat
+
+    broken = check(problem, {"BIT 110": 1}, [Seat("BIT 110", "R1", "H", 10)])
+    assert [v.rule for v in broken] == ["H-E9"] and "isn't a health paper" in broken[0].message
+    nursing = replace(_paper("NURS 101", ("N1", 10)), kind=HEALTH)
+    midday = ExamProblem(papers=[nursing], days=DAYS[:1], sessions=3, rooms=rooms)
+    assert [v.rule for v in check(midday, {"NURS 101": 1}, [Seat("NURS 101", "N1", "H", 10)])] == ["H-E8"]
+
+
+def test_a_venue_the_director_chose_stays_when_the_session_is_re_seated():
+    from app.exam_solver.model import Seat
+
+    rooms = [_room("A", 100), _room("B", 100)]
+    chosen = replace(_paper("P1", ("R1", 90)), fixed_seats=(Seat("P1", "R1", "B", 90),))
+    seats = seating.seat_session([chosen, _paper("P2", ("R2", 95))], rooms)
+    assert {(s.paper_id, s.room_id) for s in seats} == {("P1", "B"), ("P2", "A")}
+    # Numbers changed, or the room closed: seated afresh.
+    changed = replace(_paper("P1", ("R1", 70)), fixed_seats=(Seat("P1", "R1", "B", 90),))
+    assert sum(s.students for s in seating.seat_session([changed], rooms)) == 70
+    closed = replace(_paper("P1", ("R1", 90)), fixed_seats=(Seat("P1", "R1", "GONE", 90),))
+    assert {s.room_id for s in seating.seat_session([closed], rooms)} <= {"A", "B"}
 
 
 def test_the_precheck_says_when_the_health_unit_cant_hold_its_papers():
