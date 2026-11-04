@@ -12,7 +12,8 @@ Hard rules:
   H-E4 papers only in the period's slots, pinned papers stay;
   H-E6 every class row (or part of one) sits in one room, rooms within their
        exam seats, a paper's ODEL students apart from its other students;
-  H-E7 a main invigilator named before generating is in one paper per slot;
+  H-E7 a main invigilator named before generating is in one room per slot: their
+       papers go in different sessions, except postgraduate ones, which share a room;
   H-E8 the second day of the period is for common units only.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.

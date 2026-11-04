@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.exam_solver.model import HEALTH, ExamProblem
+from app.exam_solver.model import HEALTH, POSTGRADUATE, ExamProblem
 
 
 def run(problem: ExamProblem) -> list[dict[str, str]]:
@@ -50,8 +50,10 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
                 message = f"{total} health student entries need more seats than the health unit has ({problem.health_seats * len(edge)})."
                 add("H-E9", "health unit", message)
     for staff, papers in problem.invigilators().items():
-        if len(papers) > problem.slots:
-            message = f"{staff} is the main invigilator of {len(papers)} papers; the period has {problem.slots} slots."
+        needed = sum(1 for p in papers if problem.category(p) != POSTGRADUATE)
+        needed += 1 if needed < len(papers) else 0  # postgraduate papers can all share one room and session
+        if needed > problem.slots:
+            message = f"{staff} is the main invigilator of {needed} papers in separate sessions; the period has {problem.slots} slots."
             add("H-E7", staff, message)
     total = sum(p.students for p in problem.papers if not problem.is_health(p))
     if total > seats * problem.slots:

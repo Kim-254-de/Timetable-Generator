@@ -420,3 +420,37 @@ def test_papers_of_different_classes_with_no_numbers_are_spread():
     for t in result.slots.values():
         per_slot[t] += 1
     assert max(per_slot.values()) == 2  # 12 papers over 6 sessions, though nothing has to be seated
+
+
+def _named(pid: str, staff: str, row: str, kind: str = "") -> Paper:
+    return replace(_paper(pid, (row, 10)), invigilator=staff, kind=kind)
+
+
+def test_one_invigilator_can_cover_a_sessions_postgraduate_papers_in_their_room():
+    papers = [_named(f"M{i}", "STF/1", f"M{i}", POSTGRADUATE) for i in range(4)]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100)])
+    assert precheck.run(problem) == []
+    together = {p.id: 0 for p in papers}
+    assert [v.rule for v in check(problem, together)] == []  # no seating known yet: taken to share
+    seats = seating.seat_session(papers, problem.rooms)
+    assert check(problem, together, seats) == []
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+
+
+def test_their_other_papers_still_go_in_another_session_or_room():
+    from app.exam_solver.model import Seat
+
+    papers = [_named("M0", "STF/1", "M0", POSTGRADUATE), _named("M1", "STF/1", "M1", POSTGRADUATE), _named("R", "STF/1", "R")]
+    problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100), _room("B", 100)])
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert result.slots["R"] not in (result.slots["M0"], result.slots["M1"])
+    # Same person, same session: fine in one room, a clash in two.
+    two = [_named("P0", "STF/2", "R0"), _named("P1", "STF/2", "R1")]
+    same = ExamProblem(papers=two, days=DAYS[:1], sessions=3, rooms=[_room("A", 100), _room("B", 100)])
+    both = {"P0": 0, "P1": 0}
+    assert check(same, both, [Seat("P0", "R0", "A", 10), Seat("P1", "R1", "A", 10)]) == []
+    apart = check(same, both, [Seat("P0", "R0", "A", 10), Seat("P1", "R1", "B", 10)])
+    assert [v.rule for v in apart] == ["H-E7"]
+

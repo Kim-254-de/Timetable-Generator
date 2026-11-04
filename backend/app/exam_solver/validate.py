@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from app.exam_solver.model import HEALTH, ExamProblem, ExamViolation, Seat
+from app.exam_solver.model import HEALTH, POSTGRADUATE, ExamProblem, ExamViolation, Seat
 
 
 def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None = None) -> list[ExamViolation]:
@@ -47,8 +47,23 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         paper = papers.get(pid)
         if paper is not None and paper.invigilator and 0 <= t < problem.slots:
             by_staff_slot[(paper.invigilator, t)].append(pid)
+    # With the seating known, one person can cover several papers in one room. Without it, only postgraduate
+    # papers are taken to share a room.
+    biggest_room: dict[str, str] = {}
+    if seats is not None:
+        totals: dict[tuple[str, str], int] = defaultdict(int)
+        for s in seats:
+            totals[(s.paper_id, s.room_id)] += s.students
+        for (pid, room), n in sorted(totals.items(), key=lambda kv: (kv[1], kv[0][1])):
+            biggest_room[pid] = room
     for (staff, t), ids in by_staff_slot.items():
-        if len(ids) > 1:
+        if seats is not None:
+            places = {biggest_room[i] for i in ids if i in biggest_room}
+            clash = len(places) > 1
+        else:
+            apart = [i for i in ids if problem.category(papers[i]) != POSTGRADUATE]
+            clash = len(apart) > 1 or (len(apart) == 1 and len(ids) > 1)
+        if clash:
             labels = " and ".join(papers[i].label for i in ids)
             out.append(ExamViolation("H-E7", f"{staff} invigilates {labels} on {when(t)}.", tuple(ids)))
     for (r, t), ids in by_row_slot.items():

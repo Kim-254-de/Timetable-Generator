@@ -139,6 +139,10 @@ class SmartttClient:
         body.update({"now": True} if action in ("switch_now", "close_now") else {"at": at})
         return dict(self._json(self._request("POST", path, json=body)))
 
+    def programs(self) -> list[dict[str, Any]]:
+        """Programme codes and names."""
+        return list(self._json(self._request("GET", "/programs/")).get("programs") or [])
+
     def unit_enrolment(self, codes: list[str]) -> dict[str, Any]:
         """The classes taking each unit this term (master timetable, or who synced), and how many students synced."""
         return dict(self._json(self._request("POST", "/unit-enrolment/", json={"codes": codes})))

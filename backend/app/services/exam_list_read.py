@@ -33,6 +33,11 @@ _HEADER_WORDS = re.compile(
 )
 
 
+_CLASS_YEAR = re.compile(r"\bY(?:EAR)?\s*([1-9])(?:\s*,?\s*S(?:EM(?:ESTER)?)?\s*([1-3]))?\b", re.I)
+_CLASS_STUDENTS = re.compile(r"\b(\d{1,4})\s*STUDENTS?\b", re.I)
+_CLASS_END = re.compile(r"\(|\b(?:19|20)\d{2}\b")
+
+
 @dataclass(frozen=True)
 class ListedEntry:
     line: int
@@ -85,9 +90,34 @@ def _is_words(text: str) -> bool:
     return bool(re.search(r"[A-Za-z]{2}", text)) and not _HEADER_WORDS.match(text)
 
 
+def class_of(heading: str) -> dict[str, Any] | None:
+    """
+    The class a heading names, as a course allocation writes it: "BACHELOR OF SCIENCE NURSING (SEPTEMBER 2026
+    INTAKE) Y1S1 (107 STUDENTS) ...". None for a heading with neither a year nor a number ("SERVICING UNITS").
+    """
+    year = _CLASS_YEAR.search(heading)
+    students = _CLASS_STUDENTS.search(heading)
+    if not year and not students:
+        return None
+    cut = min(m.start() for m in (year, students, _CLASS_END.search(heading)) if m)
+    name = " ".join(heading[:cut].split(":")[-1].split()).strip(" -,.")
+    if not re.search(r"[A-Za-z]{2}", name):
+        return None
+    return {
+        "name": name[:120],
+        "year": int(year.group(1)) if year else None,
+        "semester": int(year.group(2)) if year and year.group(2) else None,
+        "students": int(students.group(1)) if students else None,
+    }
+
+
 def read_exam_list(file: bytes) -> list[ListedEntry]:
     if len(file) > MAX_BYTES:
         raise ApiError(413, "VALIDATION_ERROR", "The document is over 5 MB.")
+    if file[:5] == b"%PDF-":
+        raise ApiError(
+            422, "VALIDATION_ERROR", "This is a PDF, and only Word can be read. Save it as .docx, or if it is a scan, type its table into Word."
+        )
     try:
         body = Document(io.BytesIO(file)).element.body
     except (ValueError, KeyError, zipfile.BadZipFile, OSError) as exc:
@@ -100,13 +130,13 @@ def read_exam_list(file: bytes) -> list[ListedEntry]:
             t = value
             looks_heading = _ODEL_HEADING.search(t) or (re.search(r"[A-Z]{3}", t) and t == t.upper())
             if t and len(t) <= 80 and not re.search(r"[.,;]$", t) and looks_heading:
-                section, odel = t[:120], bool(_ODEL_HEADING.search(t))
+                section, odel = t[:200], bool(_ODEL_HEADING.search(t))
             continue
         at = next((i for i, c in enumerate(value) if codes_of(c) is not None), None)
         if at is None:
             words = [c for c in value if _is_words(c)]
             if len(words) == 1 and len([c for c in value if c]) <= 2:
-                section, odel = words[0][:120], bool(_ODEL_HEADING.search(words[0]))
+                section, odel = words[0][:200], bool(_ODEL_HEADING.search(words[0]))
             continue
         found = codes_of(value[at])
         assert found is not None
