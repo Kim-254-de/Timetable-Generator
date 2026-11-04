@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ClassRow, ExamPaper, ExamPublication
+from app.models import ClassRow, ExamDraft, ExamPaper, ExamPublication, Run
 from tests.conftest import sign_in
 from tests.fake_smarttt import TERM
 from tests.fake_teaching import FakeTeaching, course, paper
@@ -436,3 +436,25 @@ def test_the_director_sets_a_papers_category_and_the_prefix_list_makes_health_pa
     # Health papers need health rooms, and the pre-check says so.
     run = client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 30})
     assert run.status_code < 300
+
+
+def test_a_postgraduate_paper_stays_in_the_first_week_and_older_drafts_are_left_alone(client, teaching, db):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    ok(client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_end": "2026-12-04"}))
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    listed = {p["codes"]: p for p in ok(client.get(f"/api/terms/{term_id}/exams"))["papers"]}
+    paper_id = listed["COSC 200"]["id"]
+    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{paper_id}/category", json={"category": "postgraduate"}))
+    draft_id = _generate(client, term_id)
+    placed = {p["codes"]: p for p in ok(client.get(f"/api/exam-drafts/{draft_id}"))["papers"]}["COSC 200"]
+    assert "2026-11-23" <= placed["day"] <= "2026-11-29" and placed["session"] in (0, 2)
+
+    moved = client.patch(f"/api/exam-drafts/{draft_id}/papers/{paper_id}", json={"day": "2026-11-30", "session": 0})
+    assert moved.status_code == 409 and "first week" in moved.json()["error"]["message"]
+
+    # A draft from a run made before the rule: the same move goes through.
+    run = db.get(Run, db.get(ExamDraft, uuid.UUID(draft_id)).run_id)
+    run.weights = {k: v for k, v in run.weights.items() if k != "postgraduate_first_week"}
+    db.commit()
+    ok(client.patch(f"/api/exam-drafts/{draft_id}/papers/{paper_id}", json={"day": "2026-11-30", "session": 0}))

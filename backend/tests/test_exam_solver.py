@@ -454,3 +454,69 @@ def test_their_other_papers_still_go_in_another_session_or_room():
     apart = check(same, both, [Seat("P0", "R0", "A", 10), Seat("P1", "R1", "B", 10)])
     assert [v.rule for v in apart] == ["H-E7"]
 
+
+def _weeks(papers: list[Paper], rooms: list[ExamRoom] | None = None) -> ExamProblem:
+    """Mon-Fri for three weeks, starting on a Monday."""
+    days = [date(2026, 11, 23) + timedelta(days=w * 7 + d) for w in range(3) for d in range(5)]
+    return ExamProblem(papers=papers, days=days, sessions=3, rooms=rooms or [_room("A", 400)])
+
+
+def test_postgraduate_papers_sit_first_or_last_in_the_first_week_only():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 10)), kind=POSTGRADUATE) for i in range(12)]
+    others = [_paper(f"R{i}", (f"R{i}", 350)) for i in range(40)]
+    problem = _weeks(graduates + others)
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert check(problem, result.slots, result.seats) == []
+    for p in graduates:
+        assert problem.day_of(result.slots[p.id]) < 5 and problem.session_of(result.slots[p.id]) in (0, 2), p.id
+    assert any(problem.day_of(result.slots[p.id]) >= 5 for p in others)  # undergraduates carry on after it
+
+
+def test_the_first_week_counts_seven_days_from_the_first_exam_day():
+    start = date(2026, 11, 25)  # a Wednesday: the following Monday and Tuesday are still in it
+    days = [start, start + timedelta(days=1), start + timedelta(days=5), start + timedelta(days=6), start + timedelta(days=7)]
+    problem = ExamProblem(papers=[], days=days, sessions=3, rooms=[_room("A", 100)])
+    assert [problem.in_first_week(d * 3) for d in range(5)] == [True, True, True, True, False]
+
+
+def test_a_postgraduate_paper_moved_or_pinned_after_the_first_week_breaks_the_rule():
+    graduate = replace(_paper("MBAD 845", ("M1", 10)), kind=POSTGRADUATE)
+    problem = _weeks([graduate])
+    assert check(problem, {"MBAD 845": 12}) == []  # Friday's last session
+    broken = check(problem, {"MBAD 845": 15})  # next Monday's first
+    assert [v.rule for v in broken] == ["H-E10"] and "first week" in broken[0].message
+    result = solve(_weeks([replace(graduate, pinned=15)]), time_limit_s=10, workers=2)
+    assert result.failure and result.failure["reasons"][0]["rule"] == "H-E10"
+
+
+def test_a_class_with_more_postgraduate_papers_than_the_first_week_holds_is_named():
+    papers = [replace(_paper(f"M{i}", ("MBA1", 10)), kind=POSTGRADUATE) for i in range(11)]
+    problem = _weeks(papers)
+    problem.row_labels = {"MBA1": "MBA Y1S1"}
+    findings = precheck.run(problem)
+    assert [f["rule"] for f in findings] == ["H-E10"]
+    assert "MBA Y1S1 sits 11 postgraduate papers" in findings[0]["message"] and "room for 10" in findings[0]["message"]
+    assert precheck.run(_weeks(papers[:10])) == []
+
+
+def test_postgraduate_students_who_cant_fit_the_first_week_are_reported():
+    papers = [replace(_paper(f"M{i}", (f"M{i}", 90)), kind=POSTGRADUATE) for i in range(12)]
+    findings = precheck.run(_weeks(papers, rooms=[_room("A", 100)]))
+    assert [f["entity"] for f in findings] == ["first week"]
+
+
+def test_a_postgraduate_nursing_paper_keeps_to_the_first_week_and_the_health_unit():
+    nursing = replace(_paper("NURS 801", ("N1", 10)), kind=HEALTH, codes=("NURS 801",))
+    undergraduate = replace(_paper("NURS 101", ("N2", 10)), kind=HEALTH, codes=("NURS 101",))
+    problem = _weeks([nursing, undergraduate])
+    assert problem.first_week_only(nursing) and not problem.first_week_only(undergraduate)
+    assert not problem.first_week_only(replace(nursing, kind=REGULAR))  # the Director's choice wins
+
+
+def test_the_first_week_rule_is_off_for_a_draft_made_before_it():
+    graduate = replace(_paper("MBAD 845", ("M1", 10)), kind=POSTGRADUATE)
+    problem = _weeks([graduate])
+    problem.weights = ExamWeights.from_dict({"postgraduate_first_week": 0, "category_rules": 1})
+    assert check(problem, {"MBAD 845": 15}) == []
+    assert ExamWeights.from_dict(None).postgraduate_first_week == 1

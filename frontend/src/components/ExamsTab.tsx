@@ -262,6 +262,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       </label>
       <p className="text-xs text-muted">
         Common, postgraduate (7xx to 9xx) and health papers sit only in the first or last session of a day.
+        Postgraduate papers also sit only in the first week: the seven days from the first exam day.
       </p>
       <p className="text-muted">
         {period.days.length} exam days · {period.slots} sessions · {period.rooms} rooms with {period.exam_seats.toLocaleString()} exam seats.

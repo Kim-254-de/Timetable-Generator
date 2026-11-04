@@ -101,11 +101,11 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
     term = db.get(Term, draft.term_id)
     if term is None:
         raise ApiError(404, "NOT_FOUND", "No such term.")
-    # The run's weights: a run with category_rules 0, or made before those rules, is checked without H-E8 and H-E9.
+    # The run's weights: a run with these rules off, or made before them, is checked without them.
     run = db.get(Run, draft.run_id) if draft.run_id else None
     weights = None
     if run is not None and run.weights is not None:
-        weights = ExamWeights.from_dict({"category_rules": 0, **run.weights})
+        weights = ExamWeights.from_dict({"category_rules": 0, "postgraduate_first_week": 0, **run.weights})
     problem = build(db, term, draft, weights)
     slots: dict[str, int] = {}
     seats: list[Seat] = []
@@ -350,7 +350,7 @@ def move_paper(
     broken = [
         v
         for v in check(unpinned, slots)
-        if (v.rule in ("H-E1", "H-E2", "H-E7", "H-E8") and paper_id in v.paper_ids)
+        if (v.rule in ("H-E1", "H-E2", "H-E7", "H-E8", "H-E10") and paper_id in v.paper_ids)
         or (v.rule == "H-E3" and not v.paper_ids)
     ]
     if broken:
