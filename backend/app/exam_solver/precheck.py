@@ -17,9 +17,9 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
     if not problem.rooms:
         add("H-E3", "rooms", "No room is available for exams.")
         return findings
-    seats = problem.total_seats
+    seats = problem.general_seats  # the health unit's rooms are for health papers only
     for p in problem.papers:
-        if p.students > seats:
+        if p.students > seats and not problem.is_health(p):
             add("H-E3", p.label, f"{p.label} has {p.students} students; all rooms together seat {seats}.")
         if p.pinned is not None and not 0 <= p.pinned < problem.slots:
             add("H-E4", p.label, f"{p.label} is pinned outside the exam period.")
@@ -34,7 +34,7 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
         for p in problem.papers:
             if p.pinned is not None and problem.edges_only(p) and 0 <= p.pinned < problem.slots and not problem.is_edge(p.pinned):
                 add("H-E8", p.label, f"{p.label} is a {problem.category(p)} paper pinned outside {first_last}.")
-        restricted = sum(p.students for p in problem.papers if problem.edges_only(p))
+        restricted = sum(p.students for p in problem.papers if problem.edges_only(p) and not problem.is_health(p))
         if restricted > seats * len(edge):
             message = f"{restricted} student entries must sit in {first_last}; those sessions seat {seats * len(edge)}."
             add("H-E8", "period", message)
@@ -53,7 +53,7 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
         if len(papers) > problem.slots:
             message = f"{staff} is the main invigilator of {len(papers)} papers; the period has {problem.slots} slots."
             add("H-E7", staff, message)
-    total = sum(p.students for p in problem.papers)
+    total = sum(p.students for p in problem.papers if not problem.is_health(p))
     if total > seats * problem.slots:
         add("H-E3", "period", f"{total} student entries need more seats than the period has ({seats * problem.slots}).")
     return findings

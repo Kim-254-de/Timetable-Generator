@@ -176,7 +176,7 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                     setattr(paper, k, v)
             paper.rows = [ExamPaperRow(class_row_id=i, students=n, odel=o, guessed=g) for i, n, o, g in sitting]
         for ref, paper in list(existing.items()):
-            if paper.department_id == dept.id and ref not in kept:
+            if paper.department_id == dept.id and ref not in kept and not paper.is_director_paper:
                 db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
                 db.delete(paper)
                 removed.append(paper.label)
@@ -215,7 +215,8 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
 
 
 def papers_of(db: Session, term: Term) -> list[dict[str, Any]]:
-    labels = {r.id: r.label for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
+    row_of = {r.id: r for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
+    labels = {i: r.label for i, r in row_of.items()}
     departments = {d.id: d.code for d in db.scalars(select(Department))}
     papers = list(db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)))
     from app.services.exam_runs import build
@@ -227,13 +228,26 @@ def papers_of(db: Session, term: Term) -> list[dict[str, Any]]:
             "id": str(p.id),
             "category": category.get(str(p.id), REGULAR),
             "category_override": p.category_override,
+            "director_paper": p.is_director_paper,
             "codes": p.label,
             "title": p.title,
             "department": departments.get(p.department_id, "?"),
             "examiner": p.examiner_name,
             "students": p.students,
             "rows": sorted(
-                ({"label": labels.get(r.class_row_id, "?"), "students": r.students, "odel": r.odel} for r in p.rows),
+                (
+                    {
+                        "label": labels.get(r.class_row_id, "?"),
+                        "students": r.students,
+                        "odel": r.odel,
+                        "programme": row_of[r.class_row_id].program_code if r.class_row_id in row_of else "",
+                        "year": row_of[r.class_row_id].study_year if r.class_row_id in row_of else 1,
+                        "semester": row_of[r.class_row_id].study_semester if r.class_row_id in row_of else 1,
+                        "stream": row_of[r.class_row_id].sub_class if r.class_row_id in row_of else "",
+                    }
+                    for r in p.rows
+                    if r.students or not r.edited
+                ),
                 key=lambda r: str(r["label"]),
             ),
         }

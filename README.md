@@ -102,7 +102,12 @@ On the term's **Exams** tab:
    the administrator under Venues in the admin console and read on each room
    sync; the Director's own "Used for exams" overrules the administrator's.
    A room's block is its building, so a big paper stays within one block.
-2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
+2. **Health and nursing papers**: the Director uploads the moderation letter
+   (Word), reviews it and saves it, here rather than through a department. Each
+   paper's classes come from SMARTTT's master timetable and who synced; the
+   Director corrects numbers and classes and names the invigilators on the draft.
+   A unit a department already listed isn't doubled: its paper is marked health.
+   **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
@@ -122,9 +127,12 @@ On the term's **Exams** tab:
    and all of a session's postgraduate papers share one room when they fit, with
    undergraduates kept out of it while another room is free (S-E8). The
    pre-check and conflict explanations name the class row or session at fault.
+   The health unit's rooms are for health papers alone, in the first and last
+   sessions: no other paper is seated there, even when other rooms are full.
 4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
-   as room sheets; **move** a paper (checked; both sessions re-seated; pinned)
-   and **re-solve around pins**.
+   as room sheets; **move** a paper (checked; both sessions re-seated; pinned),
+   **change its venue** (checked for open room, seats and the health unit; pinned,
+   and kept when its session is re-seated) and **re-solve around pins**.
 5. **Share with departments** so they name invigilators on their Teaching page
    in Smart Attendance: each paper's main invigilator (in its main room, the
    one with most of its students; collects every room's scripts) and one extra
