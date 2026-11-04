@@ -228,7 +228,7 @@ def test_import_generate_share_and_publish(client, teaching, smarttt, db: Sessio
     doc = Document(BytesIO(timetable.content))
     text = "\n".join(p.text for p in doc.paragraphs)
     assert "DIRECTORATE OF EXAMINATION & TIMETABLING" in text and "VERSION 1" in text
-    cells = " ".join(c.text for row in doc.tables[0].rows for c in row.cells)
+    cells = " ".join(c.text for row in doc.tables[1].rows for c in row.cells)  # tables[0] is the letterhead
     assert "DATE/DAY" in cells and "COSC 200 →" in cells
     for kind in ("timetable", "rooms", "roster"):
         assert client.get(f"/api/exam-drafts/{draft_id}/export/{kind}.pdf").content[:4] == b"%PDF"
