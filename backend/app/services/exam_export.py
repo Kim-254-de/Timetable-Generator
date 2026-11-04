@@ -188,16 +188,20 @@ def _pdf(story_for: Any, landscape_page: bool, title: str) -> bytes:
     from reportlab.lib.units import mm
     from reportlab.platypus import SimpleDocTemplate
 
+    from app.services import letterhead
+
     out = BytesIO()
+    page = letterhead.on_page()
+    pagesize = landscape(A4) if landscape_page else A4
     SimpleDocTemplate(
         out,
-        pagesize=landscape(A4) if landscape_page else A4,
+        pagesize=pagesize,
         leftMargin=10 * mm,
         rightMargin=10 * mm,
         topMargin=10 * mm,
-        bottomMargin=10 * mm,
+        bottomMargin=letterhead.FOOTER_HEIGHT + 3 * mm,
         title=title,
-    ).build(story_for())
+    ).build([letterhead.first_page_header(), *story_for()], onFirstPage=page, onLaterPages=page)
     return out.getvalue()
 
 
@@ -259,7 +263,7 @@ def timetable_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_
     from reportlab.platypus import Paragraph, Spacer
 
     st = _styles()
-    title = _title(term, version)
+    title = _title(term, version)[1:]  # the letterhead names the university
 
     def story() -> list[Any]:
         header, rows = timetable_table(rec)
@@ -281,7 +285,7 @@ def rooms_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by: 
     from reportlab.platypus import Paragraph
 
     st = _styles()
-    title = [*_title(term, version), "ROOM SHEETS"]
+    title = [*_title(term, version)[1:], "ROOM SHEETS"]
     days = {d["date"]: d["label"] for d in rec["days"]}
 
     def story() -> list[Any]:
@@ -303,7 +307,7 @@ def roster_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by:
     from reportlab.platypus import Paragraph
 
     st = _styles()
-    title = [*_title(term, version), "INVIGILATION ROSTER"]
+    title = [*_title(term, version)[1:], "INVIGILATION ROSTER"]
 
     def story() -> list[Any]:
         out: list[Any] = [Paragraph(escape(line), st["title"]) for line in title]

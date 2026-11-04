@@ -3,7 +3,8 @@ A draft as a PDF, a Word document or an Excel workbook, in the layout of
 today's teaching timetable: the Directorate's header, one row per class row
 (or room, or department), a Monday-Friday x 07:00-19:00 grid, cells
 "UNIT / GR X / ROOM" spanning the class's hours, the version line and the
-"Prepared by ... Director Examination & Timetabling" footer.
+"Prepared by ... Director Examination & Timetabling" footer. The PDF is on the
+university's letterhead (see letterhead.py).
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models import Term
+from app.services import letterhead
 
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 TERM_MONTHS = {1: "SEPTEMBER-DECEMBER", 2: "JANUARY-APRIL", 3: "MAY-AUGUST"}
@@ -123,7 +125,7 @@ def build_pdf(term: Term, grid: dict[str, Any], printed_by: str) -> bytes:
         leftMargin=10 * mm,
         rightMargin=10 * mm,
         topMargin=10 * mm,
-        bottomMargin=14 * mm,
+        bottomMargin=letterhead.FOOTER_HEIGHT + 8 * mm,
         title=term_title(term),
         author=printed_by,
     )
@@ -133,17 +135,20 @@ def build_pdf(term: Term, grid: dict[str, Any], printed_by: str) -> bytes:
     def footer(canvas: Any, document: Any) -> None:
         canvas.saveState()
         canvas.setFont("Helvetica", 7)
-        canvas.drawString(10 * mm, 7 * mm, footer_left)
-        canvas.drawRightString(landscape(A3)[0] - 10 * mm, 7 * mm, f"{footer_right} - Page {document.page}")
+        y = letterhead.FOOTER_HEIGHT + 1 * mm
+        canvas.drawString(10 * mm, y, footer_left)
+        canvas.drawRightString(landscape(A3)[0] - 10 * mm, y, f"{footer_right} - Page {document.page}")
         canvas.restoreState()
 
     story = [
+        letterhead.first_page_header(),
         Paragraph("DIRECTORATE OF EXAMINATIONS AND TIMETABLING", styles["Title"]),
         Paragraph(term_title(term), styles["Heading2"]),
         Spacer(1, 3 * mm),
         table,
     ]
-    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    page = letterhead.on_page(footer)
+    doc.build(story, onFirstPage=page, onLaterPages=page)
     return buffer.getvalue()
 
 
