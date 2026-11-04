@@ -205,6 +205,18 @@ class ExamPeriodBody(_Strict):
     exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
 
 
+class PaperRowBody(_Strict):
+    programme: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    year: Annotated[int, Field(ge=1, le=10)]
+    semester: Annotated[int, Field(ge=1, le=3)]
+    stream: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)] = ""
+    students: Annotated[int, Field(ge=0, le=5000)]
+
+
+class PaperRowsBody(_Strict):
+    rows: Annotated[list[PaperRowBody], Field(max_length=200)]
+
+
 class InvigilatorName(_Strict):
     staff_number: Annotated[str, StringConstraints(max_length=64)] = ""
     name: Annotated[str, StringConstraints(max_length=255)] = ""

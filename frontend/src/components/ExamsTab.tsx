@@ -14,9 +14,11 @@ import {
   useSendExamPublication,
   useSetCurrentTerm,
   useSetPaperCategory,
+  useSetPaperRows,
+  type PaperRowInput,
   useStartExamRun,
 } from '@/lib/queries'
-import type { ExamCategory, ExamPeriod, ExamSessionTime } from '@/lib/types'
+import type { ExamCategory, ExamPaperItem, ExamPeriod, ExamSessionTime } from '@/lib/types'
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -30,6 +32,7 @@ export function ExamsTab({ termId }: { termId: string }) {
   const importExams = useImportExams(termId)
   const start = useStartExamRun(termId)
   const category = useSetPaperCategory(termId)
+  const [numbersOf, setNumbersOf] = useState<string | null>(null)
   const setCurrent = useSetCurrentTerm(termId)
   const send = useSendExamPublication(termId)
   const runs = useRuns(termId)
@@ -89,7 +92,8 @@ export function ExamsTab({ termId }: { termId: string }) {
               <summary className="cursor-pointer text-brand-ink">Show the papers</summary>
               <ul className="mt-2 max-h-64 overflow-y-auto">
                 {data.papers.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between gap-2 border-b border-line py-1 last:border-0">
+                  <li key={p.id} className="border-b border-line py-1 last:border-0">
+                    <div className="flex items-center justify-between gap-2">
                     <span><b>{p.codes}</b> {p.title} <span className="text-muted">· {p.department}</span></span>
                     <span className="flex shrink-0 items-center gap-2">
                       <select aria-label={`Category of ${p.codes}`} value={p.category_override ?? ''} className="rounded-md border border-line px-1 py-0.5 text-xs"
@@ -97,8 +101,11 @@ export function ExamsTab({ termId }: { termId: string }) {
                         <option value="">{`Auto: ${CATEGORY_NAMES[p.category]}`}</option>
                         {(Object.keys(CATEGORY_NAMES) as ExamCategory[]).map((c) => <option key={c} value={c}>{CATEGORY_NAMES[c]}</option>)}
                       </select>
-                      <span className="text-muted">{p.students}</span>
+                      <button type="button" className={p.students ? 'text-brand-ink' : 'text-warning'} aria-label={`Students of ${p.codes}: ${p.students}`}
+                        onClick={() => setNumbersOf(numbersOf === p.id ? null : p.id)}>{p.students}</button>
                     </span>
+                    </div>
+                    {numbersOf === p.id && <PaperNumbers termId={termId} paper={p} onClose={() => setNumbersOf(null)} />}
                   </li>
                 ))}
               </ul>
@@ -185,6 +192,38 @@ export function ExamsTab({ termId }: { termId: string }) {
           </ul>
           {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
         </section>
+      </div>
+    </div>
+  )
+}
+
+/** Numbers and classes the Director enters on a paper. A number from the department replaces them on import. */
+function PaperNumbers({ termId, paper, onClose }: { termId: string; paper: ExamPaperItem; onClose: () => void }) {
+  const save = useSetPaperRows(termId)
+  const [rows, setRows] = useState<PaperRowInput[]>(paper.rows.map(({ programme, year, semester, stream, students }) => ({ programme, year, semester, stream, students })))
+  const set = (i: number, patch: Partial<PaperRowInput>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const input = 'rounded-md border border-line px-2 py-1'
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-line p-3">
+      <h3 className="font-semibold">Students sitting {paper.codes}</h3>
+      <p className="text-xs text-muted">For classes with no number. These stay when you import again, until the department sends a number for that class. Seats change on the next draft.</p>
+      {rows.map((r, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2">
+          <input aria-label="Programme" placeholder="Programme" value={r.programme} onChange={(e) => set(i, { programme: e.target.value })} className={`${input} w-32`} />
+          <label>Year <input aria-label="Year" type="number" min={1} max={10} value={r.year} onChange={(e) => set(i, { year: Number(e.target.value) })} className={`${input} w-14`} /></label>
+          <label>Sem <input aria-label="Semester" type="number" min={1} max={3} value={r.semester} onChange={(e) => set(i, { semester: Number(e.target.value) })} className={`${input} w-14`} /></label>
+          <input aria-label="Stream" placeholder="Stream" value={r.stream} onChange={(e) => set(i, { stream: e.target.value })} className={`${input} w-20`} />
+          <label>Students <input aria-label="Students" type="number" min={0} max={5000} value={r.students} onChange={(e) => set(i, { students: Number(e.target.value) })} className={`${input} w-20`} /></label>
+          <button type="button" className="text-danger" onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
+        </div>
+      ))}
+      {rows.length === 0 && <p className="text-muted">No class yet. Add the classes that sit it.</p>}
+      {save.isError && <p role="alert" className="text-danger">{errorMessage(save.error)}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="rounded-md border border-line px-3 py-1" onClick={() => setRows([...rows, { programme: '', year: 1, semester: 1, stream: '', students: 0 }])}>Add a class</button>
+        <button type="button" disabled={save.isPending} className="rounded-md bg-brand px-3 py-1 text-white disabled:opacity-50"
+          onClick={() => save.mutate({ paperId: paper.id, rows: rows.filter((r) => r.programme.trim()) }, { onSuccess: onClose })}>Save</button>
+        <button type="button" className="rounded-md border border-line px-3 py-1" onClick={onClose}>Cancel</button>
       </div>
     </div>
   )

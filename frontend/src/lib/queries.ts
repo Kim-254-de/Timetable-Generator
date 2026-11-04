@@ -360,6 +360,12 @@ export const usePatchExamPeriod = (termId: string) =>
   useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
     patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
 
+export interface PaperRowInput { programme: string; year: number; semester: number; stream: string; students: number }
+
+export const useSetPaperRows = (termId: string) =>
+  useExamMutation(termId, ({ paperId, rows }: { paperId: string; rows: PaperRowInput[] }) =>
+    put(`/terms/${termId}/exam-papers/${paperId}/rows`, { rows }))
+
 export const useDeleteDirectorPaper = (termId: string) =>
   useExamMutation(termId, (paperId: string) => del(`/terms/${termId}/director-papers/${paperId}`))
 

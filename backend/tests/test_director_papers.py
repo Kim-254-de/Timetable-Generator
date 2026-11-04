@@ -120,3 +120,36 @@ def test_the_director_names_invigilators_of_a_paper_uploaded_earlier(client, tea
     nurs = next(p for p in grid["papers"] if p["codes"] == "NURS 101")
     assert nurs["invigilators"][""]["name"] == "Dr. X" and nurs["director_paper"] is True
     assert client.put(f"/api/terms/{term_id}/director-papers/{department_paper}/invigilators", json={"invigilators": {}}).status_code == 404
+
+
+def test_the_director_enters_numbers_on_any_paper_and_import_keeps_them_until_the_department_sends_one(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    paper = _papers(client, term_id)["COSC 301"]
+    published = next(p for d in teaching.exam_published for p in d["papers"] if p["codes"] == ["COSC 301"])
+    for r in published["rows"]:
+        r["students"] = 0  # nobody synced, the letter gave none
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    assert _papers(client, term_id)["COSC 301"]["students"] == 0
+
+    url = f"/api/terms/{term_id}/exam-papers/{paper['id']}/rows"
+    first = paper["rows"][0]
+    typed = {k: first[k] for k in ("programme", "year", "semester", "stream")}
+    assert client.put(url, json={"rows": [{**typed, "students": 40}, {**typed, "students": 41}]}).status_code == 422
+    ok(client.put(url, json={"rows": [{**typed, "students": 40}, {"programme": "bsc.added", "year": 2, "semester": 1, "stream": "", "students": 6}]}))
+    assert _papers(client, term_id)["COSC 301"]["students"] == 46
+
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    assert _papers(client, term_id)["COSC 301"]["students"] == 46
+
+    # The department's letter now gives the class a number: it replaces the Director's.
+    published["rows"][0]["students"] = 107
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    numbers = {r["programme"]: r["students"] for r in _papers(client, term_id)["COSC 301"]["rows"]}
+    assert numbers[first["programme"]] == 107 and numbers["BSC.ADDED"] == 6
+
+    other = _papers(client, term_id)["COSC 200"]["id"]
+    assert client.put(f"/api/terms/{term_id}/exam-papers/{uuid.uuid4()}/rows", json={"rows": []}).status_code == 404
+    ok(client.put(f"/api/terms/{term_id}/exam-papers/{other}/rows", json={"rows": []}))
+    assert _papers(client, term_id)["COSC 200"]["students"] == 0
