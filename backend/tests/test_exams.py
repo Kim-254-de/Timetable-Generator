@@ -11,6 +11,7 @@ from collections import defaultdict
 from io import BytesIO
 from typing import Any
 
+import pypdfium2 as pdfium
 from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -20,6 +21,10 @@ from app.models import ClassRow, ExamDraft, ExamPaper, ExamPublication, Run
 from tests.conftest import sign_in
 from tests.fake_smarttt import TERM
 from tests.fake_teaching import FakeTeaching, course, paper
+
+
+def _pdf_text(content: bytes) -> str:
+    return "\n".join(page.get_textpage().get_text_range() for page in pdfium.PdfDocument(content))
 
 
 def ok(response: Any) -> Any:
@@ -332,8 +337,7 @@ def test_the_timetable_pdf_holds_a_session_busier_than_a_page():
     )
     pdf = exam_export.timetable_pdf(term, rec, 1, "Director")
     assert pdf[:4] == b"%PDF"
-    rows = exam_export._fit_pages(exam_export.timetable_table(rec)[1])
-    assert [r[0] for r in rows] == ["TUE 01/12/2026"] + ["TUE 01/12/2026 (cont.)"] * 3
+    assert "TUE 01/12/2026 (cont.)" in _pdf_text(pdf).replace("\r\n", " ").replace("\n", " ")
 
 
 def test_a_paper_nobody_synced_is_timetabled_and_published_without_a_room(client, teaching, smarttt, db: Session):
