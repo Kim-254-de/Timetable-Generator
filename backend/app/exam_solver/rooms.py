@@ -5,13 +5,19 @@ A paper is cut into seating blocks of whole class rows; a class row bigger
 than every room is cut into equal parts, each given one room ("part 1 of 2").
 Blocks are placed biggest paper first, each block in one room within its exam
 seats, preferring in order:
-  1. a room the paper already uses, then one in the same building block, so a
-     paper takes as few rooms as it can, close together;
+  1. a room the paper already uses;
   2. a room already in use, so small papers share rooms;
   3. the tightest fit, so as few rooms as possible are used.
-A paper's ODEL class rows sit apart from its other class rows. A block that
-fits no single room (seats fragmented) is spread over the emptiest rooms.
-The health unit's rooms hold health papers and nothing else. A paper the
+A paper stays in one building. It starts in the building that holds all of it
+in the fewest rooms, and students who don't fit a room take other rooms there
+("UTC 1", then "UTC 2"), even if that splits a class row. It moves on to
+another building only when its building has no seats left; if no building
+holds it all, it starts in the one with the most seats.
+A session's postgraduate papers share one room when they fit, and so do its
+certificate papers and its diploma papers, each level in its own room. Other
+papers keep out of those rooms while they can sit anywhere else.
+A paper's ODEL class rows sit apart from its other class rows.
+A paper the
 Director gave its venues on the draft keeps them; the rest are seated around it.
 """
 
@@ -20,8 +26,9 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Any
 
-from app.exam_solver.model import HEALTH, POSTGRADUATE, ExamRoom, Paper, Seat
+from app.exam_solver.model import CERTIFICATE, DIPLOMA, POSTGRADUATE, ExamRoom, Paper, Seat, venue_group
 
 
 class SeatingError(Exception):
@@ -60,14 +67,39 @@ def _keeps_seats(paper: Paper, rooms: dict[str, ExamRoom]) -> bool:
     return dict(wanted) == {r.row_id: r.students for r in paper.rows if r.students}
 
 
+def _next_building(rooms: list[ExamRoom], left: dict[str, int], taken: set[str], students: int) -> str | None:
+    """The building to seat these students in next, of those the paper isn't in yet."""
+    free: dict[str, list[ExamRoom]] = defaultdict(list)
+    for r in rooms:
+        if r.block not in taken and left[r.id] > 0:
+            free[r.block].append(r)
+
+    def rank(block: str) -> tuple[Any, ...]:
+        sizes = sorted((left[r.id] for r in free[block]), reverse=True)
+        total = sum(sizes)
+        if total < students:
+            return (1, -total, block)  # none holds them all: the most seats, so the fewest buildings
+        needed, still = 0, students
+        for size in sizes:
+            if still <= 0:
+                break
+            still -= size
+            needed += 1
+        one_room = [r for r in free[block] if left[r.id] >= students]
+        shares = any(left[r.id] < r.seats for r in one_room)  # small papers share rooms
+        spare = min(left[r.id] for r in one_room) - students if one_room else total - students
+        return (0, needed, not shares, spare, block)
+
+    return min(free, key=rank, default=None)
+
+
 def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
     if not papers:
         return []
     if not rooms:
         raise SeatingError("No room is available for exams.")
-    general_rooms = [r for r in rooms if not r.health]
-    need = sum(p.students for p in papers if p.kind != HEALTH)
-    have = sum(r.seats for r in general_rooms)
+    need = sum(p.students for p in papers)
+    have = sum(r.seats for r in rooms)
     if need > have:
         raise SeatingError(f"{need} students but only {have} exam seats.")
     left = {r.id: r.seats for r in rooms}
@@ -88,11 +120,9 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
             paper_rooms[block.paper.id].append(room_id)
         seats.append(Seat(block.paper.id, block.row_id, room_id, students, part, parts))
 
-    health_rooms = [r for r in rooms if r.health]
-    for p in papers:
-        if p.kind == HEALTH and p.students > sum(r.seats for r in health_rooms):
-            raise SeatingError(f"{p.label}: the health unit doesn't have seats for {p.students} students.")
-    shared: list[str] = []  # the room(s) of this session's postgraduate papers (S-E8)
+    # The room(s) of this session's postgraduate, certificate and diploma papers (S-E8).
+    shared: dict[str, list[str]] = defaultdict(list)
+    groups = {p.id: venue_group(p.kind, p.codes) for p in papers}
     # The venues the Director chose stay, while the room is open and the numbers are the same.
     placed: set[str] = set()
     for paper in papers:
@@ -105,44 +135,77 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
             holds[(paper.id, s.room_id)].add(odel)
             if s.room_id not in paper_rooms[paper.id]:
                 paper_rooms[paper.id].append(s.room_id)
-            if paper.kind == POSTGRADUATE and s.room_id not in shared:
-                shared.append(s.room_id)
+            level = groups[paper.id]
+            if level and s.room_id not in shared[level]:
+                shared[level].append(s.room_id)
             seats.append(s)
-    # Health papers take their rooms first, then postgraduate papers theirs, then the rest.
-    order = {HEALTH: 0, POSTGRADUATE: 1}
-    settled = bool(shared)
-    for paper in sorted((p for p in papers if p.id not in placed), key=lambda p: (order.get(p.kind, 2), -p.students, p.label)):
-        graduate = paper.kind == POSTGRADUATE
-        if graduate and not settled:
-            settled = True
-            total = sum(p.students for p in papers if p.kind == POSTGRADUATE and p.id not in placed)
-            home = sorted((r for r in general_rooms if left[r.id] >= total and left[r.id] == r.seats), key=lambda r: (r.seats, r.code))
+    # Each level takes its own rooms first, then the rest.
+    order = {POSTGRADUATE: 0, CERTIFICATE: 1, DIPLOMA: 2}
+    waiting: dict[str, int] = defaultdict(int)  # students of each level still to seat
+    for p in papers:
+        level = groups[p.id]
+        if p.id not in placed and level:
+            waiting[level] += p.students
+    settled = {g for g, kept in shared.items() if kept}
+    unseated = (p for p in papers if p.id not in placed)
+    for paper in sorted(unseated, key=lambda p: (order.get(groups[p.id] or "", 3), -p.students, p.label)):
+        group = groups[paper.id]
+        if group and group not in settled:
+            settled.add(group)
+            total = waiting[group]
+            home = sorted(
+                (r for r in rooms if left[r.id] >= total and left[r.id] == r.seats),
+                key=lambda r: (r.seats, r.code),
+            )
             if total and home:
-                shared.append(home[0].id)
-        candidates = health_rooms if paper.kind == HEALTH else general_rooms
-        biggest = max((r.seats for r in candidates), default=1)
+                shared[group].append(home[0].id)
+        own = shared[group] if group else []
+        others = {room for g, kept in shared.items() if g != group for room in kept}
+        biggest = max(r.seats for r in rooms)
+        buildings = {by_id[r].block for r in own}
+        # The first paper of a level picks the building for them all.
+        to_seat = waiting[group] if group and not own else paper.students
         for block in _blocks(paper, biggest):
             mine = paper_rooms[paper.id]
-            blocks_used = {by_id[r].block for r in mine} | ({by_id[r].block for r in shared} if graduate else set())
-            fits = [r for r in candidates if left[r.id] >= block.students and allowed(block, r.id)]
+            buildings |= {by_id[r].block for r in mine}
+            # Stay in the paper's building(s) until they can't take this block. Rooms kept
+            # for another level count only when nothing else is left.
+            kept_out = [r for r in rooms if r.id not in others]
+            for pool in (kept_out, rooms):
+                while True:
+                    here = [r for r in pool if r.block in buildings and allowed(block, r.id)]
+                    fits = [r for r in here if left[r.id] >= block.students]
+                    enough = bool(fits) or sum(max(left[r.id], 0) for r in here) >= block.students
+                    if enough:
+                        break
+                    # A building is judged on all that is still to seat, this block included.
+                    next_building = _next_building(pool, left, buildings, max(to_seat, block.students))
+                    if next_building is None:
+                        break
+                    buildings.add(next_building)
+                if enough:
+                    break
+            to_seat -= block.students
+            if group:
+                waiting[group] -= block.students
             if fits:
                 best = min(
                     fits,
                     key=lambda r: (
-                        r.id not in shared if graduate else r.id in shared,
+                        bool(group) and r.id not in own,
+                        r.id in others,
                         r.id not in mine,
-                        bool(blocks_used) and r.block not in blocks_used,
                         left[r.id] == r.seats,  # unused rooms last: small papers share
                         left[r.id] - block.students,
                         r.code,
                     ),
                 )
                 place(block, best.id, block.students, block.part, block.parts)
-                if graduate and best.id not in shared:
-                    shared.append(best.id)
+                if group and best.id not in own:
+                    own.append(best.id)
                 continue
-            # No single room has the space: spread this block over the emptiest allowed rooms.
-            spread = sorted((r for r in candidates if left[r.id] > 0 and allowed(block, r.id)), key=lambda r: -left[r.id])
+            # No single room has the space: spread this block over the building's emptiest allowed rooms.
+            spread = sorted((r for r in here if left[r.id] > 0), key=lambda r: (r.id in others, -left[r.id]))
             remaining, pieces = block.students, []
             for r in spread:
                 if remaining <= 0:
@@ -155,6 +218,6 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
             total = len(pieces) * block.parts
             for i, (room_id, take) in enumerate(pieces):
                 place(block, room_id, take, (block.part - 1) * len(pieces) + i + 1, total)
-                if graduate and room_id not in shared:
-                    shared.append(room_id)
+                if group and room_id not in own:
+                    own.append(room_id)
     return seats

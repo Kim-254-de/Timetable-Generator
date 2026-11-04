@@ -4,13 +4,14 @@ Phase 1: each paper to one slot (a session of a day), with CP-SAT.
 x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
 class row and day at most two; H-E3 per slot the students fit all exam seats;
-H-E8 common, postgraduate and health papers only in the first or last session
-of a day (they get no other slot); H-E9 per slot health students fit the health unit, and the others the rest;
+H-E8 common and postgraduate papers only in the first or last session
+of a day (they get no other slot);
 H-E10 postgraduate papers only in the first week (they get no other slot).
 Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
 S-E4 a guessed class (papers with no students known) one paper a session and
 two a day, S-E5 papers with no students known spread over the period, S-E7
-common papers spread over the days.
+common papers spread over the days, S-E9 papers common by their numbers in the
+first or last session of a day.
 
 When it is infeasible, it is solved again with one assumption per class row
 and per slot's seats, to name the ones that cannot all hold.
@@ -23,7 +24,7 @@ from typing import Any
 
 from ortools.sat.python import cp_model
 
-from app.exam_solver.model import COMMON, HEALTH, POSTGRADUATE, ExamProblem
+from app.exam_solver.model import COMMON, POSTGRADUATE, ExamProblem
 
 STATUS = {
     cp_model.OPTIMAL: "OPTIMAL",
@@ -117,23 +118,16 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
             for g in graduate if terms else []:
                 mm.limit([*terms, g], 1, f"H-E7|{staff}")
 
-    seats = problem.general_seats
-    others = [p for p in problem.papers if not problem.is_health(p)]
-    if sum(p.students for p in others) > seats:
+    seats = problem.total_seats
+    if sum(p.students for p in problem.papers) > seats:
         for t in slots:
-            load = [p.students * x[p.id, t] for p in others if (p.id, t) in x]
+            load = [p.students * x[p.id, t] for p in problem.papers if (p.id, t) in x]
             if load:
                 mm.limit(load, seats, f"H-E3|{t}")
-    # H-E9: the health unit holds health papers, and only them.
-    health = [p for p in problem.papers if problem.rules_on and problem.category(p) == HEALTH and p.students]
-    if health and sum(p.students for p in health) > problem.health_seats:
-        for t in slots:
-            load = [p.students * x[p.id, t] for p in health if (p.id, t) in x]
-            if load:
-                mm.limit(load, problem.health_seats, f"H-E9|{t}")
     if not families:
         _guesses(mm, problem)
         _spread_common(mm, problem)
+        _common_by_numbers(mm, problem)
     if not families and w.big_late:
         for p in problem.papers:
             hundreds = (p.students + 99) // 100
@@ -143,6 +137,18 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     if mm.penalties:
         m.minimize(sum(mm.penalties))
     return mm
+
+
+def _common_by_numbers(mm: _Model, problem: ExamProblem) -> None:
+    """S-E9: a paper common only by its numbers prefers the first or last session of a day."""
+    w = problem.weights
+    if not problem.rules_on or not w.common_by_numbers:
+        return
+    for p in problem.papers:
+        if problem.common_by_numbers(p):
+            for t in range(problem.slots):
+                if (p.id, t) in mm.x and not problem.is_edge(t):
+                    mm.penalties.append(w.common_by_numbers * mm.x[p.id, t])
 
 
 def _spread_common(mm: _Model, problem: ExamProblem) -> None:
@@ -233,17 +239,7 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
         grouped[rule].append(entity)
     for rule, entities in grouped.items():
         for entity in entities[:20]:
-            if rule == "H-E9":
-                t = int(entity)
-                day = problem.days[problem.day_of(t)]
-                reasons.append(
-                    {
-                        "rule": rule,
-                        "entity": f"{day:%a %d %b} session {problem.session_of(t) + 1}",
-                        "message": f"Health papers need more than the health unit's {problem.health_seats} seats in the first and last sessions.",
-                    }
-                )
-            elif rule == "H-E3":
+            if rule == "H-E3":
                 t = int(entity)
                 day = problem.days[problem.day_of(t)]
                 reasons.append(
@@ -252,7 +248,7 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
                         "entity": f"{day:%a %d %b} session {problem.session_of(t) + 1}",
                         "message": (
                             f"The papers that must sit on {day:%a %d %b} session {problem.session_of(t) + 1} "
-                            f"need more than the {problem.general_seats} exam seats."
+                            f"need more than the {problem.total_seats} exam seats."
                         ),
                     }
                 )

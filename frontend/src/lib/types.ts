@@ -325,15 +325,13 @@ export interface ExamPeriod {
   exam_days_off: string[]
   exam_sessions: ExamSessionTime[]
   exam_spacing: number
-  exam_health_prefixes: string[]
-  health_seats: number
   days: string[]
   slots: number
   rooms: number
   exam_seats: number
 }
 
-export type ExamCategory = 'health' | 'postgraduate' | 'common' | 'regular'
+export type ExamCategory = 'postgraduate' | 'common' | 'regular'
 
 export interface ExamPaperItem {
   id: string
@@ -348,31 +346,6 @@ export interface ExamPaperItem {
   examiner: string
   students: number
   rows: { label: string; students: number; odel: boolean; programme: string; year: number; semester: number; stream: string }[]
-}
-
-export interface HealthListReview {
-  entries: {
-    line: number
-    codes: string[]
-    title: string
-    section: string
-    sitting: 'regular' | 'odel'
-    category: ExamCategory
-    /** Ids of the classes the letter's headings name for this paper. */
-    letter_classes: string[]
-    students: number | null
-    classes: string[]
-    unknown_codes: string[]
-    duplicate_of: number | null
-    department_lists: string[]
-    already_here: boolean
-  }[]
-  /** The classes the letter's headings name, matched to a SMARTTT programme when exactly one fits. */
-  classes: { id: string; name: string; heading: string; year: number | null; semester: number | null; students: number | null; programme: string; matched: boolean }[]
-  programmes: { code: string; name: string }[]
-  health_prefixes: string[]
-  smarttt: { available: boolean; reason: string | null }
-  summary: { papers: number; duplicates: number; unknown: number; no_classes: number }
 }
 
 export interface ExamPracticalItem {
@@ -438,7 +411,7 @@ export interface ExamGridPaper {
   director_paper: boolean
 }
 
-export interface ExamVenue { code: string; seats: number; health: boolean; block: string }
+export interface ExamVenue { code: string; seats: number; block: string }
 
 export interface ExamRoomSheet {
   day: string

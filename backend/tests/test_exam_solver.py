@@ -7,16 +7,20 @@ from datetime import date, timedelta
 from app.exam_solver import precheck, sessions
 from app.exam_solver import rooms as seating
 from app.exam_solver.model import (
+    CERTIFICATE,
     COMMON,
-    HEALTH,
+    COMMON_STUDENTS,
+    DIPLOMA,
     POSTGRADUATE,
     REGULAR,
     ExamProblem,
     ExamRoom,
     ExamWeights,
     Paper,
+    Seat,
     Sitting,
     paper_kind,
+    venue_group,
 )
 from app.exam_solver.solve import soft_scores, solve
 from app.exam_solver.validate import check
@@ -182,36 +186,43 @@ def _common_problem(papers: list[Paper], days: int = 3, rooms: list[ExamRoom] | 
     )
 
 
-def test_a_papers_kind_comes_from_its_codes_and_health_wins():
-    health = ["NURS", "hpa"]
-    assert paper_kind(["MBAD 845"], health) == POSTGRADUATE
-    assert paper_kind(["PGDE 721"], health) == POSTGRADUATE
-    assert paper_kind(["MIT 810"], health) == POSTGRADUATE
-    assert paper_kind(["MBAD805", "NIHM831"], health) == POSTGRADUATE
-    assert paper_kind(["COSC 231"], health) == ""
-    assert paper_kind(["COSC 00107"], health) == ""  # a certificate's five figures, not a 7xx
-    assert paper_kind(["DIIT 0712"], health) == ""
-    assert paper_kind(["HPA 3111"], health) == HEALTH
-    assert paper_kind(["NURS 801"], health) == HEALTH  # postgraduate nursing: health wins
-    assert paper_kind(["COSC 231"], health, REGULAR) == REGULAR  # the Director's choice wins
-    assert paper_kind(["MBAD 845"], health, COMMON) == COMMON
+def test_a_papers_kind_comes_from_its_codes():
+    assert paper_kind(["MBAD 845"]) == POSTGRADUATE
+    assert paper_kind(["PGDE 721"]) == POSTGRADUATE
+    assert paper_kind(["MIT 810"]) == POSTGRADUATE
+    assert paper_kind(["MBAD805", "NIHM831"]) == POSTGRADUATE
+    assert paper_kind(["COSC 231"]) == ""
+    assert paper_kind(["COSC 00107"]) == ""  # a certificate's five figures, not a 7xx
+    assert paper_kind(["DIIT 0712"]) == ""
+    assert paper_kind(["COSC 231"], REGULAR) == REGULAR  # the Director's choice wins
+    assert paper_kind(["MBAD 845"], COMMON) == COMMON
 
 
-def test_common_postgraduate_and_health_papers_sit_first_or_last_on_any_day():
+def test_health_and_nursing_papers_are_ordinary_papers():
+    assert paper_kind(["NURS 101"]) == ""
+    assert paper_kind(["HPA 3111"]) == ""
+    assert paper_kind(["NURS 801"]) == POSTGRADUATE  # a postgraduate unit like any other
+    assert paper_kind(["NURS 101"], "health") == ""  # a choice made before the rule was revoked
+    assert venue_group("", ("NURS 0112",)) == DIPLOMA
+    nursing = replace(_paper("NURS 101", ("N1", 50)), codes=("NURS 101",))
+    other = _paper("BIT 110", ("BIT1", 40))
+    problem = ExamProblem(papers=[nursing, other], days=DAYS[:1], sessions=3, rooms=[_room("A", 100)])
+    assert problem.allowed_slots(nursing) == [0, 1, 2]  # midday too
+    assert {s.room_id for s in seating.seat_session([nursing, other], problem.rooms)} == {"A"}  # and any room
+
+
+def test_common_and_postgraduate_papers_sit_first_or_last_on_any_day():
     papers = [_paper(f"C{i}", ("BIT1", 50), ("BSC1", 50)) for i in range(4)]
     papers += [replace(_paper(f"M{i}", (f"M{i}", 10)), kind=POSTGRADUATE) for i in range(3)]
-    papers += [replace(_paper(f"N{i}", (f"N{i}", 20)), kind=HEALTH) for i in range(3)]
     papers += [_paper(f"R{i}", (f"BED1", 30)) for i in range(2)]
-    problem = _common_problem(papers, rooms=[_room("A", 400), _room("H", 100), _room("B", 400)])
-    problem.rooms[1] = ExamRoom(id="H", code="H", block="H", seats=100, health=True)
+    problem = _common_problem(papers)
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
     assert check(problem, result.slots, result.seats) == []
-    for p in papers[:10]:
+    for p in papers[:7]:
         assert problem.session_of(result.slots[p.id]) in (0, 2), p.id
     assert {problem.day_of(result.slots[f"C{i}"]) for i in range(4)} != {1}  # not one day kept for them
     assert result.soft_scores["common_busiest_day"] == 2  # 4 papers, BIT1 two a day
-    assert {s.room_id for s in result.seats if s.paper_id.startswith("N")} == {"H"}
 
 
 def test_a_class_can_sit_morning_and_evening_on_one_day_when_it_must():
@@ -242,50 +253,7 @@ def test_the_rules_are_off_for_a_run_made_before_them():
     assert not off.edges_only(papers[0])
 
 
-def test_the_health_unit_holds_health_papers_and_nothing_else():
-    rooms = [ExamRoom(id="H", code="H", block="H", seats=60, health=True), _room("A", 200)]
-    nursing = replace(_paper("NURS 101", ("N1", 50)), kind=HEALTH)
-    other = _paper("BIT 110", ("BIT1", 100))
-    seats = seating.seat_session([_paper("BIT 111", ("BIT2", 10)), nursing, other], rooms)
-    assert {s.room_id for s in seats if s.paper_id == "NURS 101"} == {"H"}
-    assert {s.room_id for s in seats if s.paper_id != "NURS 101"} == {"A"}
-    # Even when the other rooms are full, and the health unit is empty.
-    try:
-        seating.seat_session([_paper("BIG", ("R1", 200)), _paper("MORE", ("R2", 40))], rooms)
-    except seating.SeatingError as exc:
-        assert "240 students but only 200" in str(exc)
-    else:
-        raise AssertionError("a paper was seated in the health unit")
-
-
-def test_the_solver_leaves_the_health_unit_out_of_everyone_elses_seats():
-    papers = [_paper(f"P{i}", (f"R{i}", 80)) for i in range(4)]
-    rooms = [ExamRoom(id="H", code="H", block="H", seats=500, health=True), _room("A", 100)]
-    problem = ExamProblem(papers=papers, days=DAYS[:2], sessions=3, rooms=rooms)
-    assert problem.general_seats == 100
-    result = solve(problem, time_limit_s=20, workers=2)
-    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
-    assert len(set(result.slots.values())) == 4  # one at a time: A seats 100
-    assert {s.room_id for s in result.seats} == {"A"}
-    too_big = ExamProblem(papers=[_paper("BIG", ("R", 300))], days=DAYS[:2], sessions=3, rooms=rooms)
-    assert [f["rule"] for f in precheck.run(too_big)][0] == "H-E3"
-
-
-def test_a_non_health_paper_in_the_health_unit_breaks_the_rule_and_midday_is_closed():
-    rooms = [ExamRoom(id="H", code="H", block="H", seats=60, health=True), _room("A", 200)]
-    problem = ExamProblem(papers=[_paper("BIT 110", ("R1", 10))], days=DAYS[:1], sessions=3, rooms=rooms)
-    from app.exam_solver.model import Seat
-
-    broken = check(problem, {"BIT 110": 1}, [Seat("BIT 110", "R1", "H", 10)])
-    assert [v.rule for v in broken] == ["H-E9"] and "isn't a health paper" in broken[0].message
-    nursing = replace(_paper("NURS 101", ("N1", 10)), kind=HEALTH)
-    midday = ExamProblem(papers=[nursing], days=DAYS[:1], sessions=3, rooms=rooms)
-    assert [v.rule for v in check(midday, {"NURS 101": 1}, [Seat("NURS 101", "N1", "H", 10)])] == ["H-E8"]
-
-
 def test_a_venue_the_director_chose_stays_when_the_session_is_re_seated():
-    from app.exam_solver.model import Seat
-
     rooms = [_room("A", 100), _room("B", 100)]
     chosen = replace(_paper("P1", ("R1", 90)), fixed_seats=(Seat("P1", "R1", "B", 90),))
     seats = seating.seat_session([chosen, _paper("P2", ("R2", 95))], rooms)
@@ -295,26 +263,6 @@ def test_a_venue_the_director_chose_stays_when_the_session_is_re_seated():
     assert sum(s.students for s in seating.seat_session([changed], rooms)) == 70
     closed = replace(_paper("P1", ("R1", 90)), fixed_seats=(Seat("P1", "R1", "GONE", 90),))
     assert {s.room_id for s in seating.seat_session([closed], rooms)} <= {"A", "B"}
-
-
-def test_the_precheck_says_when_the_health_unit_cant_hold_its_papers():
-    nursing = replace(_paper("NURS 101", ("N1", 50)), kind=HEALTH)
-    none = _common_problem([nursing])
-    assert [(f["rule"], f["entity"]) for f in precheck.run(none)] == [("H-E9", "health unit")]
-    small = _common_problem([nursing], rooms=[ExamRoom(id="H", code="H", block="H", seats=40, health=True), _room("A", 100)])
-    assert [(f["rule"], f["entity"]) for f in precheck.run(small)] == [("H-E9", "NURS 101")]
-    # A paper with no number yet doesn't need the room yet.
-    assert precheck.run(_common_problem([replace(_paper("NURS 102", ("N1", 0)), kind=HEALTH)])) == []
-
-
-def test_the_solver_keeps_a_sessions_health_students_within_the_health_unit():
-    papers = [replace(_paper(f"N{i}", (f"N{i}", 40)), kind=HEALTH) for i in range(4)]
-    rooms = [ExamRoom(id="H", code="H", block="H", seats=50, health=True), _room("A", 500)]
-    problem = _common_problem(papers, days=2, rooms=rooms)
-    result = solve(problem, time_limit_s=20, workers=2)
-    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
-    assert len(set(result.slots.values())) == 4  # one at a time: the unit seats 50
-    assert check(problem, result.slots, result.seats) == []
 
 
 def test_a_sessions_postgraduate_papers_share_one_room_undergraduates_elsewhere():
@@ -439,8 +387,6 @@ def test_one_invigilator_can_cover_a_sessions_postgraduate_papers_in_their_room(
 
 
 def test_their_other_papers_still_go_in_another_session_or_room():
-    from app.exam_solver.model import Seat
-
     papers = [_named("M0", "STF/1", "M0", POSTGRADUATE), _named("M1", "STF/1", "M1", POSTGRADUATE), _named("R", "STF/1", "R")]
     problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100), _room("B", 100)])
     result = solve(problem, time_limit_s=10, workers=2)
@@ -531,17 +477,180 @@ def test_postgraduate_students_who_cant_fit_the_first_week_are_reported():
     assert [f["entity"] for f in findings] == ["first week"]
 
 
-def test_a_postgraduate_nursing_paper_keeps_to_the_first_week_and_the_health_unit():
-    nursing = replace(_paper("NURS 801", ("N1", 10)), kind=HEALTH, codes=("NURS 801",))
-    undergraduate = replace(_paper("NURS 101", ("N2", 10)), kind=HEALTH, codes=("NURS 101",))
-    problem = _weeks([nursing, undergraduate])
-    assert problem.first_week_only(nursing) and not problem.first_week_only(undergraduate)
-    assert not problem.first_week_only(replace(nursing, kind=REGULAR))  # the Director's choice wins
-
-
 def test_the_first_week_rule_is_off_for_a_draft_made_before_it():
     graduate = replace(_paper("MBAD 845", ("M1", 10)), kind=POSTGRADUATE)
     problem = _weeks([graduate])
     problem.weights = ExamWeights.from_dict({"postgraduate_first_week": 0, "category_rules": 1})
     assert check(problem, {"MBAD 845": 15}) == []
     assert ExamWeights.from_dict(None).postgraduate_first_week == 1
+
+
+def test_students_a_room_cant_hold_stay_in_its_building():
+    # 60 don't fit what is left of UTC 1. ADM 1 has the seats, but they stay in UTC.
+    rooms = [_room("UTC 1", 100, "UTC"), _room("UTC 2", 50, "UTC"), _room("UTC 3", 20, "UTC")]
+    rooms.append(_room("ADM 1", 60, "ADM"))
+    placed = seating.seat_session([_paper("P", ("R1", 90), ("R2", 60))], rooms)
+    assert {s.room_id for s in placed} <= {"UTC 1", "UTC 2", "UTC 3"}
+    assert sum(s.students for s in placed) == 150
+
+
+def test_a_class_row_bigger_than_every_room_stays_in_one_building():
+    rooms = [_room("UTC 1", 100, "UTC"), _room("UTC 2", 40, "UTC"), _room("UTC 3", 40, "UTC")]
+    rooms.append(_room("ADM 1", 50, "ADM"))
+    placed = seating.seat_session([_paper("P", ("HUGE", 150))], rooms)
+    assert {s.room_id for s in placed} <= {"UTC 1", "UTC 2", "UTC 3"}
+    assert sum(s.students for s in placed) == 150
+
+
+def test_a_paper_starts_in_the_building_that_holds_all_of_it():
+    # 90 fit ADM 1 most tightly, but the other 60 wouldn't: the whole paper goes to UTC.
+    rooms = [_room("ADM 1", 95, "ADM"), _room("UTC 1", 100, "UTC"), _room("UTC 2", 100, "UTC")]
+    placed = seating.seat_session([_paper("P", ("R1", 90), ("R2", 60))], rooms)
+    assert {s.room_id for s in placed} == {"UTC 1", "UTC 2"}
+
+
+def test_a_small_paper_is_not_scattered_over_a_buildings_leftover_seats():
+    rooms = [_room("A 1", 100, "A"), _room("A 2", 15, "A"), _room("B 1", 100, "B")]
+    papers = [_paper("BIG", ("R1", 90)), _paper("SMALL", ("R2", 20))]
+    placed = seating.seat_session(papers, rooms)
+    assert len({s.room_id for s in placed if s.paper_id == "SMALL"}) == 1
+
+
+def test_a_paper_too_big_for_any_building_uses_as_few_as_it_can():
+    rooms = [_room("A 1", 50, "A"), _room("B 1", 100, "B"), _room("B 2", 100, "B"), _room("C 1", 60, "C")]
+    placed = seating.seat_session([_paper("P", ("R1", 100), ("R2", 100), ("R3", 40))], rooms)
+    assert {"B 1", "B 2"} <= {s.room_id for s in placed}  # B has the most seats
+    assert len({s.room_id[0] for s in placed}) == 2  # and one more building takes the rest
+    assert sum(s.students for s in placed) == 240
+
+
+def test_seating_never_overfills_a_room_and_seats_everyone():
+    import random
+
+    rng = random.Random(7)  # noqa: S311
+    seated = 0
+    for _ in range(3000):
+        rooms = [
+            _room(f"{b} {i}", rng.choice((20, 40, 60, 90, 100, 150, 270)), b)
+            for b in rng.sample("ABCDE", rng.randint(1, 5))
+            for i in range(rng.randint(1, 4))
+        ]
+        papers = [
+            _paper(f"P{i}", *[(f"R{i}-{j}", rng.randint(0, 120)) for j in range(rng.randint(1, 3))])
+            for i in range(rng.randint(1, 5))
+        ]
+        try:
+            placed = seating.seat_session(papers, rooms)
+        except seating.SeatingError:
+            continue
+        seated += 1
+        used: dict[str, int] = defaultdict(int)
+        for s in placed:
+            used[s.room_id] += s.students
+        by_id = {r.id: r for r in rooms}
+        assert all(n <= by_id[room].seats for room, n in used.items())
+        for p in papers:
+            assert sum(s.students for s in placed if s.paper_id == p.id) == p.students
+    assert seated > 500
+
+
+def _level_paper(code: str, students: int) -> Paper:
+    return replace(_paper(code, (code, students)), codes=(code,))
+
+
+def test_a_codes_leading_zeros_say_its_level():
+    assert venue_group("", ("COSC 00101",)) == CERTIFICATE
+    assert venue_group("", ("CPLM 00131",)) == CERTIFICATE
+    assert venue_group("", ("COSC 00102", "CIBM 00161")) == CERTIFICATE
+    assert venue_group("", ("DIBM 0112",)) == DIPLOMA
+    assert venue_group("", ("COSC 0172", "COSC 0170")) == DIPLOMA
+    assert venue_group("common", ("DIBM 0112",)) == DIPLOMA
+    assert venue_group("", ("COSC 231",)) is None
+    assert venue_group("", ("COSC 0172", "COSC 231")) is None  # sat by a degree class too
+    assert venue_group("", ()) is None
+    assert venue_group(POSTGRADUATE, ("MBAD 845",)) == POSTGRADUATE
+
+
+def test_a_sessions_certificate_and_diploma_papers_each_share_their_own_room():
+    rooms = [_room("A", 30), _room("B", 60), _room("C", 100), _room("D", 300)]
+    papers = [
+        _level_paper("COSC 00101", 15),
+        _level_paper("CIBM 00112", 10),
+        _level_paper("DIBM 0112", 40),
+        _level_paper("DJMC 0123", 30),
+        _level_paper("COSC 231", 20),
+    ]
+    seats = {s.paper_id: s.room_id for s in seating.seat_session(papers, rooms)}
+    assert seats["COSC 00101"] == seats["CIBM 00112"] == "A"  # the smallest that holds the 25
+    assert seats["DIBM 0112"] == seats["DJMC 0123"] == "C"  # the smallest left that holds the 70
+    assert seats["COSC 231"] not in {"A", "C"}
+
+
+def test_a_level_too_big_for_one_room_stays_in_one_building():
+    rooms = [_room("UTC 1", 60, "UTC"), _room("UTC 2", 60, "UTC"), _room("ADM 1", 60, "ADM")]
+    papers = [_level_paper(f"DIBM 011{i}", 40) for i in range(3)]
+    seats = seating.seat_session(papers, rooms)
+    assert {s.room_id for s in seats} == {"UTC 1", "UTC 2"}
+
+
+def test_others_may_use_a_levels_room_when_nothing_else_is_left():
+    papers = [_level_paper("DIBM 0112", 20), _level_paper("COSC 231", 50)]
+    seats = {s.paper_id: s.room_id for s in seating.seat_session(papers, [_room("A", 100)])}
+    assert seats == {"DIBM 0112": "A", "COSC 231": "A"}
+
+
+def test_a_diploma_paper_keeps_its_session_rules_and_stays_common():
+    # Sat by two programmes: still a common paper, so first or last session. One programme: any session.
+    problem = _common_problem([_level_paper("DIBM 0112", 10)], days=1)
+    alone = problem.papers[0]
+    assert problem.category(alone) == REGULAR and problem.allowed_slots(alone) == [0, 1, 2]
+    assert not problem.first_week_only(alone)
+    assert paper_kind(["DIBM 0112"], []) == ""
+    joint = replace(_level_paper("DIBM 0113", 10), rows=(Sitting("D1", 5), Sitting("D2", 5)), codes=("DIBM 0113",))
+    both = replace(problem, papers=[joint], row_programmes={"D1": "DIBM", "D2": "DHRM"})
+    assert both.category(joint) == COMMON and both.allowed_slots(joint) == [0, 2]
+
+
+def _big(pid: str, students: int) -> Paper:
+    return _paper(pid, (f"{pid}-1", students))
+
+
+def test_a_paper_of_more_than_3000_students_counts_as_common():
+    assert COMMON_STUDENTS == 3000
+    problem = _common_problem([], rooms=[_room("A", 5000)])
+    at_limit, over = _big("AT", 3000), _big("OVER", 3001)
+    assert problem.category(at_limit) == REGULAR
+    assert problem.category(over) == COMMON and problem.common_by_numbers(over)
+    # The Director's choice, or its own category, comes first.
+    assert problem.category(replace(over, kind=REGULAR)) == REGULAR
+    assert problem.category(replace(over, kind=POSTGRADUATE)) == POSTGRADUATE
+    assert not problem.common_by_numbers(replace(over, kind=COMMON))
+
+
+def test_the_first_or_last_session_is_a_preference_for_a_paper_common_by_its_numbers():
+    big = _big("BIG", 3500)
+    problem = _common_problem([big], days=1, rooms=[_room("A", 5000)])
+    assert problem.allowed_slots(big) == [0, 1, 2]  # no session is closed to it
+    assert not problem.edges_only(big)
+    assert check(problem, {"BIG": 1}, [Seat("BIG", "BIG-1", "A", 3500)]) == []  # midday breaks no hard rule
+    assert soft_scores(problem, {"BIG": 1}, [Seat("BIG", "BIG-1", "A", 3500)])["common_by_numbers_midday"] == 1
+    assert soft_scores(problem, {"BIG": 0}, [Seat("BIG", "BIG-1", "A", 3500)])["common_by_numbers_midday"] == 0
+
+
+def test_the_solver_seats_papers_common_by_numbers_first_or_last_when_it_can():
+    # Day two's midday is otherwise the cheapest place for nobody; these two should still take the edges.
+    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10))]
+    problem = _common_problem(papers, days=2, rooms=[_room("A", 5000)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert problem.is_edge(result.slots["BIG1"]) and problem.is_edge(result.slots["BIG2"])
+    assert result.soft_scores["common_by_numbers_midday"] == 0
+
+
+def test_a_paper_common_by_its_numbers_goes_midday_when_it_must():
+    # Three big papers and one exam day: both edges fill up, and that must not make it impossible.
+    papers = [_big(f"BIG{i}", 3100) for i in range(3)]
+    problem = _common_problem(papers, days=1, rooms=[_room("A", 3200)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert result.soft_scores["common_by_numbers_midday"] == 1

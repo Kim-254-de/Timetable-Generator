@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { errorBody, errorMessage } from '@/lib/api'
 import { ExamSwitch } from '@/components/ExamSwitch'
-import { HealthPapers } from '@/components/HealthPapers'
+import { DirectorPapers } from '@/components/DirectorPapers'
 import { dateTime } from '@/lib/format'
 import {
   useExamDepartments,
@@ -107,7 +107,7 @@ export function ExamsTab({ termId }: { termId: string }) {
         </section>
       </div>
 
-      <HealthPapers termId={termId} papers={data.papers} />
+      <DirectorPapers termId={termId} papers={data.papers} />
 
       <section className="space-y-3 rounded-lg border border-line bg-card p-4">
         <h2 className="font-semibold">Generate</h2>
@@ -190,7 +190,7 @@ export function ExamsTab({ termId }: { termId: string }) {
   )
 }
 
-const CATEGORY_NAMES: Record<ExamCategory, string> = { regular: 'Regular', common: 'Common', postgraduate: 'Postgraduate', health: 'Health' }
+const CATEGORY_NAMES: Record<ExamCategory, string> = { regular: 'Regular', common: 'Common', postgraduate: 'Postgraduate' }
 
 function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) {
   const save = usePatchExamPeriod(termId)
@@ -200,7 +200,6 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
   const [daysOff, setDaysOff] = useState(period.exam_days_off.join(', '))
   const [sessions, setSessions] = useState<ExamSessionTime[]>(period.exam_sessions)
   const [spacing, setSpacing] = useState(period.exam_spacing)
-  const [health, setHealth] = useState((period.exam_health_prefixes ?? []).join(', '))
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -211,7 +210,6 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       exam_days_off: daysOff.split(/[,\s]+/).filter(Boolean),
       exam_sessions: sessions,
       exam_spacing: spacing,
-      exam_health_prefixes: health.split(/[,\s]+/).filter(Boolean),
     })
   }
 
@@ -254,14 +252,8 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
         <input type="number" min={0.3} max={1} step={0.05} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))}
           className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
       </label>
-      <label className="block">Health and nursing unit code prefixes, separated by commas (e.g. NURS, HPA)
-        <input value={health} onChange={(e) => setHealth(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1" />
-        <span className="text-xs text-muted">
-          These papers sit only in the health unit ({period.health_seats} exam seats), which nothing else uses. Its rooms are marked under Venues in the admin console.
-        </span>
-      </label>
       <p className="text-xs text-muted">
-        Common, postgraduate (7xx to 9xx) and health papers sit only in the first or last session of a day.
+        Common and postgraduate (7xx to 9xx) papers sit only in the first or last session of a day. A paper of over 3000 students counts as common, and sits first or last whenever it can.
         Postgraduate papers also sit only in the first week: from the first exam day to that week's Friday.
       </p>
       <p className="text-muted">

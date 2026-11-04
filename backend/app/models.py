@@ -105,7 +105,7 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
-    # Code prefixes of health and nursing papers ("NURS", "HPA").
+    # No longer used: health and nursing papers are ordinary papers now.
     exam_health_prefixes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:
     # when the switch is set for (or happened), by whom, and the close of the exam period.
@@ -166,7 +166,7 @@ class Room(Base):
     # The administrator's say in SMARTTT (synced). The Director's choice, when they made one, overrules it.
     for_exams: Mapped[bool] = mapped_column(Boolean, default=True)
     exam_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    # In the health unit, as set in SMARTTT: health and nursing papers sit only in these rooms.
+    # No longer used for exams: health and nursing papers sit in any room.
     health_unit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     @property

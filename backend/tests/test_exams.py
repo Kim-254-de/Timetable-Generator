@@ -422,22 +422,20 @@ def test_set_as_current_links_the_term_so_exams_can_be_sent(client, teaching, sm
     assert ok(client.get(f"/api/terms/{term_id}"))["smarttt_term_id"] == "smarttt-term-new"
 
 
-def test_the_director_sets_a_papers_category_and_the_prefix_list_makes_health_papers(client, teaching, smarttt):
+def test_the_director_sets_a_papers_category(client, teaching, smarttt):
     sign_in(client)
     term_id = setup_exams(client, teaching)
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
     papers = {p["codes"]: p for p in ok(client.get(f"/api/terms/{term_id}/exams"))["papers"]}
     assert papers["BITE 131/COSC 130"]["category"] == "common" and papers["COSC 200"]["category"] == "regular"
-    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": "postgraduate"}))
-    ok(client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_health_prefixes": ["epsc ", "EPSC"]}))
-    data = ok(client.get(f"/api/terms/{term_id}/exams"))
-    assert data["period"]["exam_health_prefixes"] == ["EPSC"]
-    papers = {p["codes"]: p for p in data["papers"]}
-    assert papers["COSC 200"]["category"] == "postgraduate" and papers["EPSC 121"]["category"] == "health"
-    bad = client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": "x"})
-    assert bad.status_code == 422
-    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": None}))
-    # Health papers need health rooms, and the pre-check says so.
+    url = f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category"
+    ok(client.patch(url, json={"category": "postgraduate"}))
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/terms/{term_id}/exams"))["papers"]}
+    assert papers["COSC 200"]["category"] == "postgraduate"
+    assert client.patch(url, json={"category": "x"}).status_code == 422
+    assert client.patch(url, json={"category": "health"}).status_code == 422  # revoked
+    ok(client.patch(url, json={"category": None}))
+    assert client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_health_prefixes": ["NURS"]}).status_code == 422
     run = client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 30})
     assert run.status_code < 300
 

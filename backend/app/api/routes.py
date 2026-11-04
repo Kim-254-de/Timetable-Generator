@@ -27,12 +27,9 @@ from app.api.schemas import (
     OfferingBody,
     OfferingPatch,
     OpenTermBody,
-    ExamListFile,
     ExamVenueBody,
-    HealthPapersBody,
     PaperCategoryBody,
     PaperInvigilatorsBody,
-    PaperRowsBody,
     ProposeBody,
     PublishBody,
     ResolveBody,
@@ -54,7 +51,7 @@ from app.services import (
     departments,
     drafts,
     exam_drafts,
-    exam_health,
+    exam_director_papers,
     exam_export,
     exam_runs,
     exam_setup,
@@ -540,38 +537,15 @@ def exam_paper_category(term_id: str, paper_id: str, body: PaperCategoryBody, id
     return ok(exam_setup.set_category(db, identity, setup.get_term(db, term_id), paper_id, body.category))
 
 
-@router.post("/terms/{term_id}/health-papers/read")
-def read_health_papers(term_id: str, body: ExamListFile, _me: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
-    """The Director's health and nursing moderation letter, read and checked. Nothing is stored."""
-    return ok(exam_health.review(db, smarttt, setup.get_term(db, term_id), body.file))
-
-
-@router.post("/terms/{term_id}/health-papers")
-def save_health_papers(term_id: str, body: HealthPapersBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
-    papers = [p.model_dump() for p in body.papers]
-    return ok(exam_health.save(db, smarttt, identity, setup.get_term(db, term_id), papers))
-
-
-@router.post("/terms/{term_id}/health-papers/recount")
-def recount_health_papers(term_id: str, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
-    return ok(exam_health.recount(db, smarttt, identity, setup.get_term(db, term_id)))
-
-
-@router.put("/terms/{term_id}/health-papers/{paper_id}/rows")
-def health_paper_rows(term_id: str, paper_id: str, body: PaperRowsBody, identity: Me, db: Db) -> dict[str, Any]:
-    rows = [r.model_dump() for r in body.rows]
-    return ok(exam_health.set_rows(db, identity, setup.get_term(db, term_id), paper_id, rows))
-
-
-@router.put("/terms/{term_id}/health-papers/{paper_id}/invigilators")
-def health_paper_invigilators(term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db) -> dict[str, Any]:
+@router.put("/terms/{term_id}/director-papers/{paper_id}/invigilators")
+def director_paper_invigilators(term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db) -> dict[str, Any]:
     named = {room: v.model_dump() for room, v in body.invigilators.items()}
-    return ok(exam_health.set_invigilators(db, identity, setup.get_term(db, term_id), paper_id, named))
+    return ok(exam_director_papers.set_invigilators(db, identity, setup.get_term(db, term_id), paper_id, named))
 
 
-@router.delete("/terms/{term_id}/health-papers/{paper_id}")
-def delete_health_paper(term_id: str, paper_id: str, identity: Me, db: Db) -> dict[str, Any]:
-    exam_health.remove(db, identity, setup.get_term(db, term_id), paper_id)
+@router.delete("/terms/{term_id}/director-papers/{paper_id}")
+def delete_director_paper(term_id: str, paper_id: str, identity: Me, db: Db) -> dict[str, Any]:
+    exam_director_papers.remove(db, identity, setup.get_term(db, term_id), paper_id)
     return ok({"deleted": paper_id})
 
 
@@ -610,8 +584,7 @@ def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching, smarttt
     """Departments' published papers, after bringing the admin's rooms in from SMARTTT (best effort)."""
     rooms = _rooms_from_smarttt(db, smarttt, identity)
     term = setup.get_term(db, term_id)
-    uploaded = exam_health.recount(db, smarttt, identity, term)  # the Director's own papers are read again too
-    return ok({**exam_setup.import_exams(db, teaching, identity, term), "rooms": rooms, "health_papers": uploaded})
+    return ok({**exam_setup.import_exams(db, teaching, identity, term), "rooms": rooms})
 
 
 @router.post("/exam-runs")

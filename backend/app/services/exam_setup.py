@@ -32,7 +32,7 @@ from app.models import (
     Term,
 )
 from app.services.allocator_import import _department, upsert_class_rows
-from app.services.setup import audit
+from app.services.setup import audit, compact
 
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -58,7 +58,7 @@ def exam_seats(room: Room, spacing: float) -> int:
 def exam_rooms(db: Session, term: Term) -> list[ExamRoom]:
     rooms = db.scalars(select(Room).where(Room.active.is_(True)).order_by(Room.code))
     return [
-        ExamRoom(id=r.id, code=r.code, block=r.block, seats=exam_seats(r, term.exam_spacing), health=r.health_unit)
+        ExamRoom(id=r.id, code=r.code, block=r.block, seats=exam_seats(r, term.exam_spacing))
         for r in rooms
         if r.used_for_exams and exam_seats(r, term.exam_spacing) > 0
     ]
@@ -74,8 +74,6 @@ def period_dict(db: Session, term: Term) -> dict[str, Any]:
         "exam_days_off": term.exam_days_off,
         "exam_sessions": term.exam_sessions,
         "exam_spacing": term.exam_spacing,
-        "exam_health_prefixes": term.exam_health_prefixes or [],
-        "health_seats": sum(r.seats for r in rooms if r.health),
         "days": [d.isoformat() for d in days],
         "slots": len(days) * len(term.exam_sessions or []),
         "rooms": len(rooms),
@@ -105,8 +103,6 @@ def update_period(db: Session, identity: Identity, term: Term, fields: dict[str,
     for key in ("exam_start", "exam_end", "exam_weekdays", "exam_sessions", "exam_spacing"):
         if key in fields:
             setattr(term, key, fields[key])
-    if "exam_health_prefixes" in fields:
-        term.exam_health_prefixes = sorted({p.strip().upper() for p in fields["exam_health_prefixes"] or [] if p.strip()})
     if "exam_days_off" in fields:
         term.exam_days_off = sorted({d.isoformat() if isinstance(d, date) else str(d) for d in fields["exam_days_off"]})
     after = period_dict(db, term)
@@ -201,6 +197,14 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
         for ref, found in list(practicals.items()):
             if found.department_id == dept.id and ref not in kept_practicals:
                 db.delete(found)
+    # A paper the Director uploaded earlier gives way to a department's list of the same unit.
+    listed = {(compact(c), p.sitting) for p in existing.values() if not p.is_director_paper for c in p.codes}
+    for ref, paper in list(existing.items()):
+        if paper.is_director_paper and any((compact(c), paper.sitting) in listed for c in paper.codes):
+            db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
+            db.delete(paper)
+            removed.append(paper.label)
+            del existing[ref]
     summary = {
         "departments": [d["code"] for d in published],
         "papers": {"added": sorted(added), "changed": sorted(changed), "removed": sorted(removed)},
@@ -227,7 +231,7 @@ def papers_of(db: Session, term: Term) -> list[dict[str, Any]]:
         {
             "id": str(p.id),
             "category": category.get(str(p.id), REGULAR),
-            "category_override": p.category_override,
+            "category_override": p.category_override if p.category_override in CATEGORIES else None,
             "director_paper": p.is_director_paper,
             "codes": p.label,
             "title": p.title,
