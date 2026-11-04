@@ -34,10 +34,27 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
         for p in problem.papers:
             if p.pinned is not None and problem.edges_only(p) and 0 <= p.pinned < problem.slots and not problem.is_edge(p.pinned):
                 add("H-E8", p.label, f"{p.label} is a {problem.category(p)} paper pinned outside {first_last}.")
+            if p.pinned is not None and problem.first_week_only(p) and 0 <= p.pinned < problem.slots and not problem.in_first_week(p.pinned):
+                add("H-E10", p.label, f"{p.label} is a postgraduate paper pinned outside the first week.")
         restricted = sum(p.students for p in problem.papers if problem.edges_only(p) and not problem.is_health(p))
         if restricted > seats * len(edge):
             message = f"{restricted} student entries must sit in {first_last}; those sessions seat {seats * len(edge)}."
             add("H-E8", "period", message)
+        graduate = [p for p in problem.papers if problem.first_week_only(p)]
+        week_edge = [t for t in edge if problem.in_first_week(t)]
+        week_days = len({problem.day_of(t) for t in week_edge})
+        per_day = min(2, len({problem.session_of(t) for t in edge}))
+        for row, papers in problem.rows().items():
+            count = sum(1 for p in papers if problem.first_week_only(p))
+            if count > per_day * week_days:
+                label = problem.row_label(row)
+                message = f"{label} sits {count} postgraduate papers; the first week has room for {per_day * week_days} ({week_days} days, {per_day} a day)."
+                add("H-E10", label, message)
+        for health_unit, capacity in ((False, seats), (True, problem.health_seats)):
+            entries = sum(p.students for p in graduate if problem.is_health(p) == health_unit)
+            if capacity and entries > capacity * len(week_edge):
+                message = f"{entries} postgraduate student entries must sit in the first week; its first and last sessions seat {capacity * len(week_edge)}."
+                add("H-E10", "first week", message)
         health = [p for p in problem.papers if problem.category(p) == HEALTH and p.students]
         if health and not problem.health_seats:
             add("H-E9", "health unit", "No room open for exams is in the health unit: mark them under Venues in the admin console.")

@@ -14,7 +14,10 @@ Hard rules:
        exam seats, a paper's ODEL students apart from its other students;
   H-E7 a main invigilator named before generating is in one room per slot: their
        papers go in different sessions, except postgraduate ones, which share a room;
-  H-E8 the second day of the period is for common units only.
+  H-E8 common, postgraduate and health papers only in the first or last session
+       of a day;
+  H-E9 the health unit holds health papers, and only them;
+  H-E10 postgraduate papers only in the first week of the period.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
 
@@ -31,11 +34,14 @@ exam day (H-E8): common units (sat by more than one programme, or with nobody
 known to sit them, codes from more than one programme: "BITE 131/COSC 130"),
 postgraduate papers (a code numbered 7xx to 9xx) and health and nursing papers
 (a code prefix on the term's list). Health wins when a paper is more than one.
+Postgraduate papers also sit only in the first week: the seven calendar days
+from the first exam day (H-E10). A postgraduate nursing paper keeps to this too.
 The health unit is theirs alone: health papers sit only in its rooms, and no
 other paper does (H-E9). All of a session's
 postgraduate papers share one room when they fit, undergraduates kept out of it
 while there is another room (S-E8). Common papers spread over the days (S-E7).
-Weight category_rules 0 turns H-E8 and H-E9 off, as for drafts made before them.
+Weight category_rules 0 turns H-E8, H-E9 and H-E10 off, and postgraduate_first_week 0
+turns H-E10 off alone, as for drafts made before them.
 """
 
 from __future__ import annotations
@@ -131,7 +137,8 @@ class ExamWeights:
     guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
     spread: int = 20  # S-E5 per paper with no students known over an even share of a session
     common_spread: int = 30  # S-E7 per common paper over an even share of a day
-    category_rules: int = 1  # 0 turns H-E8 and H-E9 off
+    category_rules: int = 1  # 0 turns H-E8, H-E9 and H-E10 off
+    postgraduate_first_week: int = 1  # 0 turns H-E10 off
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
@@ -201,6 +208,21 @@ class ExamProblem:
 
     def edge_slots(self) -> list[int]:
         return [t for t in range(self.slots) if self.is_edge(t)]
+
+    def first_week_only(self, paper: Paper) -> bool:
+        """A postgraduate paper, a nursing one included, may sit only in the first week (H-E10)."""
+        if not self.rules_on or not self.weights.postgraduate_first_week:
+            return False
+        kind = self.category(paper)
+        return kind == POSTGRADUATE or (kind == HEALTH and any(_POSTGRADUATE.match(c) for c in paper.codes))
+
+    def in_first_week(self, slot: int) -> bool:
+        return (self.days[self.day_of(slot)] - self.days[0]).days < 7
+
+    def allowed_slots(self, paper: Paper) -> list[int]:
+        """The slots a paper's category lets it sit in (H-E8 and H-E10)."""
+        slots = self.edge_slots() if self.edges_only(paper) else list(range(self.slots))
+        return [t for t in slots if self.in_first_week(t)] if self.first_week_only(paper) else slots
 
     @property
     def health_seats(self) -> int:

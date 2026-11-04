@@ -5,7 +5,8 @@ x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
 class row and day at most two; H-E3 per slot the students fit all exam seats;
 H-E8 common, postgraduate and health papers only in the first or last session
-of a day (they get no other slot); H-E9 per slot health students fit the health unit, and the others the rest.
+of a day (they get no other slot); H-E9 per slot health students fit the health unit, and the others the rest;
+H-E10 postgraduate papers only in the first week (they get no other slot).
 Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
 S-E4 a guessed class (papers with no students known) one paper a session and
 two a day, S-E5 papers with no students known spread over the period, S-E7
@@ -60,14 +61,8 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     mm = _Model(problem, families)
     m, x = mm.m, mm.x
     slots = range(problem.slots)
-    edges = problem.edge_slots()
     for p in problem.papers:
-        if p.pinned is not None:
-            allowed = [p.pinned]
-        elif problem.edges_only(p):
-            allowed = edges
-        else:
-            allowed = list(slots)
+        allowed = [p.pinned] if p.pinned is not None else problem.allowed_slots(p)
         for t in allowed:
             x[p.id, t] = m.new_bool_var(f"x[{p.id},{t}]")
         m.add_exactly_one(x[p.id, t] for t in allowed)
@@ -186,11 +181,15 @@ def _guesses(mm: _Model, problem: ExamProblem) -> None:
                 over = m.new_int_var(0, len(terms), f"guessday[{group},{d}]")
                 m.add(sum(terms) - 2 <= over)
                 mm.penalties.append(w.guessed_day * over)
-    # Papers that can sit any session spread over all of them; the others over the first and last.
+    # Papers spread over the sessions open to them: all, the first and last, or those of the first week.
     unknown = [p for p in problem.papers if p.unknown_students or p.no_numbers]
+    week = [p for p in unknown if problem.first_week_only(p)]
+    edge = [p for p in unknown if problem.edges_only(p) and not problem.first_week_only(p)]
+    week_slots = len([t for t in problem.edge_slots() if problem.in_first_week(t)])
     for name, group, count in (
         ("any", [p for p in unknown if not problem.edges_only(p)], problem.slots),
-        ("edge", [p for p in unknown if problem.edges_only(p)], len(problem.edge_slots())),
+        ("edge", edge, len(problem.edge_slots())),
+        ("week", week, week_slots),
     ):
         if len(group) < 2 or not count or not w.spread:
             continue
