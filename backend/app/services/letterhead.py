@@ -8,6 +8,8 @@ and on every page the logo as a faint watermark and the footer
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -175,7 +177,16 @@ def on_page(extra: Callable[[Any, Any], None] | None = None) -> Callable[[Any, A
 # first page, and in the page header and footer of every page the faint logo behind the text and
 # the ISO line, mark and motto.
 
-WORD_WATERMARK_OPACITY = 12_000  # of 100_000
+
+@lru_cache(maxsize=1)
+def _faded_logo() -> bytes:
+    """The logo already paled onto white: Word's own transparency setting isn't honoured by every viewer."""
+    from PIL import Image
+
+    logo = Image.open(LOGO).convert("RGB")
+    out = BytesIO()
+    Image.blend(Image.new("RGB", logo.size, "white"), logo, WATERMARK_OPACITY).save(out, "PNG")
+    return out.getvalue()
 
 
 def apply_to_docx(document: Any) -> None:
@@ -184,11 +195,15 @@ def apply_to_docx(document: Any) -> None:
     section.different_first_page_header_footer = False
     section.header.is_linked_to_previous = False
     section.footer.is_linked_to_previous = False
+    # The page header holds only the watermark: it mustn't push the first page's content down.
+    section.header_distance = int(4 * mm * 12700)
+    section.footer_distance = int(FOOTER_BOTTOM * 12700)
     text_width = section.page_width - section.left_margin - section.right_margin
     _docx_watermark(section, min(section.page_width, section.page_height) * 0.6)
     _docx_footer(section, text_width)
     table = _docx_header_table(document)
     spacer = document.add_paragraph()  # space between the header and what follows
+    spacer.paragraph_format.space_after = 0
     body = document.element.body
     body.insert(0, table._tbl)
     table._tbl.addnext(spacer._p)
@@ -205,6 +220,7 @@ def _docx_header_table(document: Any) -> Any:
     table = document.add_table(rows=1, cols=3)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
+    _docx_no_cell_margins(table)
     left, middle, right = table.rows[0].cells
     for cell, column, width in zip((left, middle, right), table.columns, (side, logo, side), strict=True):
         cell.width = column.width = width
@@ -223,6 +239,7 @@ def _docx_header_table(document: Any) -> Any:
         for label, value, href in rows:
             p = cell.add_paragraph()
             p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = 1
             p.paragraph_format.left_indent = int(indent * emu)
             if tab:
                 p.paragraph_format.tab_stops.add_tab_stop(int((indent + tab) * emu))
@@ -236,6 +253,21 @@ def _docx_header_table(document: Any) -> Any:
     block(left, "THARAKA", [("", line, None) for line in ADDRESS], m.side - HEADER_GAP - m.left_width)
     block(right, "UNIVERSITY", list(CONTACTS), HEADER_GAP, m.label_width)
     return table
+
+
+def _docx_no_cell_margins(table: Any) -> None:
+    """The widths are measured for the text alone: Word's default cell margins would make it wrap."""
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls, qn
+
+    sides = "".join(f'<w:{side} w:w="0" w:type="dxa"/>' for side in ("top", "left", "bottom", "right"))
+    margins = parse_xml(f"<w:tblCellMar {nsdecls('w')}>{sides}</w:tblCellMar>")
+    properties = table._tbl.tblPr
+    look = properties.find(qn("w:tblLook"))  # the schema puts the margins just before it
+    if look is not None:
+        look.addprevious(margins)
+    else:
+        properties.append(margins)
 
 
 def _docx_run(paragraph: Any, text: str, size: float, bold: bool = False, color: str | None = None) -> Any:
@@ -270,9 +302,8 @@ def _docx_watermark(section: Any, size: int) -> None:
     from docx.oxml.ns import nsdecls, qn
 
     paragraph = section.header.paragraphs[0]
-    inline = paragraph.add_run().add_picture(str(LOGO), width=size, height=size)._inline
-    blip = inline.find(".//" + qn("a:blip"))
-    blip.append(parse_xml(f'<a:alphaModFix {nsdecls("a")} amt="{WORD_WATERMARK_OPACITY}"/>'))
+    height = int(size * LOGO_HEIGHT / LOGO_WIDTH)
+    inline = paragraph.add_run().add_picture(BytesIO(_faded_logo()), width=size, height=height)._inline
     anchor = parse_xml(
         f'<wp:anchor {nsdecls("wp")} distT="0" distB="0" distL="0" distR="0" simplePos="0" '
         'relativeHeight="0" behindDoc="1" locked="1" layoutInCell="1" allowOverlap="1">'
@@ -297,7 +328,10 @@ def _docx_footer(section: Any, text_width: int) -> None:
 
     emu = 12700
     paragraph = section.footer.paragraphs[0]
-    paragraph.paragraph_format.tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT)
+    stops = paragraph.paragraph_format.tab_stops
+    for stop in paragraph.style.paragraph_format.tab_stops:  # the Footer style's own would catch the motto mid-page
+        stops.add_tab_stop(stop.position, WD_TAB_ALIGNMENT.CLEAR)
+    stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT)
     blue = "0070C0"
     _docx_run(paragraph, f"{ISO_LINE}  ", 9, color=blue).font.name = "Calibri"
     paragraph.add_run().add_picture(str(ISO_MARK), width=int(ISO_MARK_WIDTH * emu), height=int(ISO_MARK_HEIGHT * emu))
