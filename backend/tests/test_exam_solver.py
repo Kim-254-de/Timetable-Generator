@@ -473,11 +473,36 @@ def test_postgraduate_papers_sit_first_or_last_in_the_first_week_only():
     assert any(problem.day_of(result.slots[p.id]) >= 5 for p in others)  # undergraduates carry on after it
 
 
-def test_the_first_week_counts_seven_days_from_the_first_exam_day():
-    start = date(2026, 11, 25)  # a Wednesday: the following Monday and Tuesday are still in it
-    days = [start, start + timedelta(days=1), start + timedelta(days=5), start + timedelta(days=6), start + timedelta(days=7)]
-    problem = ExamProblem(papers=[], days=days, sessions=3, rooms=[_room("A", 100)])
-    assert [problem.in_first_week(d * 3) for d in range(5)] == [True, True, True, True, False]
+def _first_week(start: date, days: int = 14) -> list[date]:
+    """The exam days, weekends included, that count as the first week from this start."""
+    period = [start + timedelta(days=i) for i in range(days)]
+    problem = ExamProblem(papers=[], days=period, sessions=3, rooms=[_room("A", 100)])
+    return [d for i, d in enumerate(period) if problem.in_first_week(i * 3)]
+
+
+def test_the_first_week_ends_on_the_friday_of_the_week_exams_start():
+    monday = date(2026, 11, 23)
+    friday = date(2026, 11, 27)
+    assert _first_week(monday)[-1] == friday and len(_first_week(monday)) == 5
+    tuesday = monday + timedelta(days=1)
+    assert _first_week(tuesday) == [tuesday + timedelta(days=i) for i in range(4)]  # Tuesday to Friday, not next Monday
+    assert _first_week(friday) == [friday]
+    for weekend in (date(2026, 11, 28), date(2026, 11, 29)):  # a weekend start has no Friday left: the next one
+        assert _first_week(weekend)[-1] == date(2026, 12, 4)
+
+
+def test_a_tuesday_start_gets_postgraduate_papers_done_by_friday():
+    days = [date(2026, 11, 24) + timedelta(days=i) for i in (0, 1, 2, 3, 6, 7, 8, 9, 10)]  # Tue-Fri, then a full week
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 10)), kind=POSTGRADUATE) for i in range(8)]
+    problem = ExamProblem(papers=graduates, days=days, sessions=3, rooms=[_room("A", 400)])
+    result = solve(problem, time_limit_s=20, workers=2)
+    assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
+    assert {problem.days[problem.day_of(t)] for t in result.slots.values()} <= set(days[:4])
+    next_monday = 4 * 3
+    assert [v.rule for v in check(problem, {**result.slots, "M0": next_monday})] == ["H-E10"]
+    too_many = [replace(_paper(f"M{i}", ("MBA1", 10)), kind=POSTGRADUATE) for i in range(9)]
+    short = ExamProblem(papers=too_many, days=days, sessions=3, rooms=[_room("A", 400)])
+    assert "room for 8" in precheck.run(short)[0]["message"]  # 4 days, 2 a day
 
 
 def test_a_postgraduate_paper_moved_or_pinned_after_the_first_week_breaks_the_rule():
