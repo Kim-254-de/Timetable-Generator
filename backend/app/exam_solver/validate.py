@@ -1,10 +1,10 @@
-"""Every hard-rule violation (H-E1 to H-E10) in an exam timetable and its seating."""
+"""Every hard-rule violation in an exam timetable and its seating."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 
-from app.exam_solver.model import HEALTH, POSTGRADUATE, ExamProblem, ExamViolation, Seat
+from app.exam_solver.model import POSTGRADUATE, ExamProblem, ExamViolation, Seat
 
 
 def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None = None) -> list[ExamViolation]:
@@ -39,8 +39,7 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         paper = papers.get(pid)
         if paper is None or not 0 <= t < problem.slots:
             continue
-        if not problem.is_health(paper):  # the health unit's rooms hold only health papers
-            load[t] += paper.students
+        load[t] += paper.students
         for r in paper.row_ids:
             by_row_slot[(r, t)].append(pid)
             by_row_day[(r, problem.day_of(t))].append(pid)
@@ -81,9 +80,9 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
                 )
             )
     for t, students in load.items():
-        if students > problem.general_seats:
+        if students > problem.total_seats:
             out.append(
-                ExamViolation("H-E3", f"{when(t)} has {students} students for {problem.general_seats} exam seats.")
+                ExamViolation("H-E3", f"{when(t)} has {students} students for {problem.total_seats} exam seats.")
             )
 
     if seats is not None:
@@ -102,11 +101,6 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
                 )
                 continue
             used[(s.room_id, slots.get(s.paper_id, -1))] += s.students
-            is_health = problem.is_health(papers[s.paper_id])
-            if problem.rules_on and is_health and not room.health:
-                out.append(ExamViolation("H-E9", f"{papers[s.paper_id].label} is a health paper in {room.code}, outside the health unit.", (s.paper_id,)))
-            if problem.rules_on and room.health and not is_health:
-                out.append(ExamViolation("H-E9", f"{papers[s.paper_id].label} isn't a health paper; {room.code} is in the health unit.", (s.paper_id,)))
             seated[(s.paper_id, s.row_id)] += s.students
             kinds[(s.paper_id, s.room_id)].add(odel.get((s.paper_id, s.row_id), False))
         for (room_id, t), students in used.items():

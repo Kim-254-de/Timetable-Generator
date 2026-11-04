@@ -48,7 +48,7 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
                 previous=slot,
                 invigilator=p.invigilator_staff_number,
                 codes=tuple(p.codes or ()),
-                kind=paper_kind(p.codes or (), term.exam_health_prefixes or [], p.category_override),
+                kind=paper_kind(p.codes or (), p.category_override),
                 fixed_seats=tuple(
                     Seat(str(p.id), str(s.class_row_id), s.room_id, s.students, s.part, s.parts) for s in pl.seats
                 )

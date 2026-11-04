@@ -124,8 +124,7 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
 def change_venue(db: Session, identity: Identity, draft: ExamDraft, paper_id: str, from_room: str, to_room: str) -> dict[str, Any]:
     """
     Moves a paper's students from one room to another, checked: the room must be
-    open for exams, have the seats that session, and be the right kind (the
-    health unit for health papers only). The paper is pinned and keeps this venue.
+    open for exams and have the seats that session. The paper is pinned and keeps this venue.
     """
     _require_editable(draft)
     built = _built(db, draft)
@@ -312,7 +311,7 @@ def grid(db: Session, draft: ExamDraft, teaching: TeachingClient | None = None) 
         **rec,
         "rooms": room_sheets(rec),
         "exam_rooms": [
-            {"code": r.code, "seats": r.seats, "health": r.health, "block": r.block} for r in _built(db, draft).problem.rooms
+            {"code": r.code, "seats": r.seats, "block": r.block} for r in _built(db, draft).problem.rooms
         ],
     }
 
