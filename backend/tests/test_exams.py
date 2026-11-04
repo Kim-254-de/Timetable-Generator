@@ -452,7 +452,7 @@ def test_a_postgraduate_paper_stays_in_the_first_week_and_older_drafts_are_left_
     ok(client.patch(f"/api/terms/{term_id}/exam-papers/{paper_id}/category", json={"category": "postgraduate"}))
     draft_id = _generate(client, term_id)
     placed = {p["codes"]: p for p in ok(client.get(f"/api/exam-drafts/{draft_id}"))["papers"]}["COSC 200"]
-    assert "2026-11-23" <= placed["day"] <= "2026-11-29" and placed["session"] in (0, 2)
+    assert "2026-11-23" <= placed["day"] <= "2026-11-27" and placed["session"] in (0, 2)
 
     moved = client.patch(f"/api/exam-drafts/{draft_id}/papers/{paper_id}", json={"day": "2026-11-30", "session": 0})
     assert moved.status_code == 409 and "first week" in moved.json()["error"]["message"]

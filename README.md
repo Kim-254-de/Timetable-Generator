@@ -117,8 +117,8 @@ On the term's **Exams** tab:
    per day, each session's students fit the exam seats, pinned papers stay,
    common, postgraduate and health papers sit only in the first or last session
    of a day (H-E8), health papers sit only in the health unit (H-E9), and
-   postgraduate papers sit only in the first week, the seven calendar days from
-   the first exam day (H-E10). Soft: back-to-back sessions (heavily weighted), two papers on
+   postgraduate papers sit only in the first week, from the first exam day to the
+   Friday of that week (H-E10; a Saturday or Sunday start runs to the next Friday). Soft: back-to-back sessions (heavily weighted), two papers on
    one day, big papers late, and common units spread over the days (S-E7).
    A common unit is a paper sat by class rows of more than one programme (with
    no class rows yet: codes of more than one programme, "BITE 131/COSC 130").

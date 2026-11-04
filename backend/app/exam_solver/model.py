@@ -34,8 +34,10 @@ exam day (H-E8): common units (sat by more than one programme, or with nobody
 known to sit them, codes from more than one programme: "BITE 131/COSC 130"),
 postgraduate papers (a code numbered 7xx to 9xx) and health and nursing papers
 (a code prefix on the term's list). Health wins when a paper is more than one.
-Postgraduate papers also sit only in the first week: the seven calendar days
-from the first exam day (H-E10). A postgraduate nursing paper keeps to this too.
+Postgraduate papers also sit only in the first week: from the first exam day to
+the Friday of that week, so Tuesday to Friday when exams start on a Tuesday (a
+Saturday or Sunday start runs to the next Friday) (H-E10). A postgraduate nursing
+paper keeps to this too.
 The health unit is theirs alone: health papers sit only in its rooms, and no
 other paper does (H-E9). All of a session's
 postgraduate papers share one room when they fit, undergraduates kept out of it
@@ -55,6 +57,7 @@ _LETTERS = re.compile(r"^\s*([A-Za-z]{2,6})")
 _POSTGRADUATE = re.compile(r"^\s*[A-Za-z]{2,6}\s*-?\s*[7-9]\d{2,3}[A-Za-z]?\s*$")
 HEALTH, POSTGRADUATE, COMMON, REGULAR = "health", "postgraduate", "common", "regular"
 CATEGORIES = (HEALTH, POSTGRADUATE, COMMON, REGULAR)
+FRIDAY = 4  # date.weekday()
 
 
 def paper_kind(codes: list[str] | tuple[str, ...], health_prefixes: list[str], override: str | None = None) -> str:
@@ -217,7 +220,9 @@ class ExamProblem:
         return kind == POSTGRADUATE or (kind == HEALTH and any(_POSTGRADUATE.match(c) for c in paper.codes))
 
     def in_first_week(self, slot: int) -> bool:
-        return (self.days[self.day_of(slot)] - self.days[0]).days < 7
+        """From the first exam day to the Friday of that week; a weekend start runs to the next Friday."""
+        start = self.days[0]
+        return (self.days[self.day_of(slot)] - start).days <= (FRIDAY - start.weekday()) % 7
 
     def allowed_slots(self, paper: Paper) -> list[int]:
         """The slots a paper's category lets it sit in (H-E8 and H-E10)."""
