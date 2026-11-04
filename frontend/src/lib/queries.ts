@@ -54,7 +54,6 @@ export const keys = {
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
 const patch = <T>(url: string, body: unknown) => api.patch<T>(url, body).then((r) => r.data)
 const put = <T>(url: string, body: unknown) => api.put<T>(url, body).then((r) => r.data)
-const del = <T>(url: string) => api.delete<T>(url).then((r) => r.data)
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => get<Me>('/auth/me'), retry: false })
 export const useSmartttTerms = () => useQuery({ queryKey: keys.smartttTerms, queryFn: () => get<SmartttTerm[]>('/smarttt/terms') })
@@ -366,8 +365,8 @@ export const useSetPaperRows = (termId: string) =>
   useExamMutation(termId, ({ paperId, rows }: { paperId: string; rows: PaperRowInput[] }) =>
     put(`/terms/${termId}/exam-papers/${paperId}/rows`, { rows }))
 
-export const useDeleteDirectorPaper = (termId: string) =>
-  useExamMutation(termId, (paperId: string) => del(`/terms/${termId}/director-papers/${paperId}`))
+export const useRemoveDirectorPapers = (termId: string) =>
+  useExamMutation(termId, (paperIds: string[]) => post<{ deleted: number }>(`/terms/${termId}/director-papers/remove`, { paper_ids: paperIds }))
 
 export const useSetDirectorInvigilators = (termId: string) =>
   useExamMutation(termId, ({ paperId, invigilators }: { paperId: string; invigilators: Record<string, { staff_number: string; name: string }> }) =>

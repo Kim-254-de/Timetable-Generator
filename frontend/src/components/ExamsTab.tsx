@@ -62,7 +62,7 @@ export function ExamsTab({ termId }: { termId: string }) {
               <h2 className="font-semibold">Exam papers</h2>
               <p className="text-sm text-muted">Departments list their papers on their Teaching page in Smart Attendance and publish them.</p>
             </div>
-            <button onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending || !departments.data?.published.length}
+            <button onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending}
               className="rounded-md bg-brand px-3 py-2 text-sm text-white disabled:opacity-50">
               {importExams.isPending ? 'Importing…' : 'Import exam papers'}
             </button>
@@ -70,7 +70,7 @@ export function ExamsTab({ termId }: { termId: string }) {
           {departments.isError && <p role="alert" className="text-sm text-danger">{errorMessage(departments.error)}</p>}
           {departments.data && (
             <p className="text-sm">
-              Published: {departments.data.published.map((d) => `${d.code} (${d.papers})`).join(', ') || 'none yet'}.
+              Published: {departments.data.published.map((d) => `${d.code} (${d.papers})`).join(', ') || 'none yet, so there is nothing to import until a department publishes'}.
               {departments.data.not_published.length > 0 && (
                 <span className="text-muted"> Not yet: {departments.data.not_published.map((d) => d.code).join(', ')}.</span>
               )}

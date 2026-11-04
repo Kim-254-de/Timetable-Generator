@@ -217,6 +217,10 @@ class PaperRowsBody(_Strict):
     rows: Annotated[list[PaperRowBody], Field(max_length=200)]
 
 
+class PaperIdsBody(_Strict):
+    paper_ids: Annotated[list[Annotated[str, StringConstraints(max_length=64)]], Field(min_length=1, max_length=1500)]
+
+
 class InvigilatorName(_Strict):
     staff_number: Annotated[str, StringConstraints(max_length=64)] = ""
     name: Annotated[str, StringConstraints(max_length=255)] = ""
