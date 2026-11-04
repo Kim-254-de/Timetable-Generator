@@ -555,19 +555,26 @@ def exam_departments(term_id: str, _me: Me, db: Db, teaching: Teaching) -> dict[
     )
 
 
+def _rooms_from_smarttt(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[str, Any]:
+    """The admin's rooms and their exam use, read again (best effort): the rooms here are used if it can't be."""
+    try:
+        return master.sync_rooms(db, smarttt, identity)
+    except SmartttError as down:
+        db.rollback()
+        return {"error": getattr(down, "message", None) or "SMARTTT can't be reached; the rooms here were used."}
+
+
 @router.post("/terms/{term_id}/exams/import")
 def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching, smarttt: Smarttt) -> dict[str, Any]:
     """Departments' published papers, after bringing the admin's rooms in from SMARTTT (best effort)."""
-    try:
-        rooms: dict[str, Any] = master.sync_rooms(db, smarttt, identity)
-    except SmartttError as down:
-        db.rollback()
-        rooms = {"error": getattr(down, "message", None) or "SMARTTT can't be reached; the rooms here were used."}
+    rooms = _rooms_from_smarttt(db, smarttt, identity)
     return ok({**exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id)), "rooms": rooms})
 
 
 @router.post("/exam-runs")
-def start_exam_run(body: ExamRunBody, identity: Me, db: Db) -> dict[str, Any]:
+def start_exam_run(body: ExamRunBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    # A venue marked in the admin console since the last import counts for this run.
+    _rooms_from_smarttt(db, smarttt, identity)
     term = setup.get_term(db, str(body.term_id))
     return ok(runs.run_dict(exam_runs.create_exam_run(db, identity, term, body.weights, body.time_limit_s, None)))
 
@@ -584,7 +591,8 @@ def move_exam_paper(draft_id: str, paper_id: str, body: ExamMoveBody, identity: 
 
 
 @router.post("/exam-drafts/{draft_id}/resolve")
-def resolve_exam_draft(draft_id: str, body: ExamResolveBody, identity: Me, db: Db) -> dict[str, Any]:
+def resolve_exam_draft(draft_id: str, body: ExamResolveBody, identity: Me, db: Db, smarttt: Smarttt) -> dict[str, Any]:
+    _rooms_from_smarttt(db, smarttt, identity)
     draft = exam_drafts.get_draft(db, draft_id)
     term = setup.get_term(db, str(draft.term_id))
     return ok(runs.run_dict(exam_runs.create_exam_run(db, identity, term, None, body.time_limit_s, draft)))

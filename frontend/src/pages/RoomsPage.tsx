@@ -63,7 +63,8 @@ export function RoomsPage() {
       {sync.data && (
         <p role="status" className="text-sm text-muted">
           From SMARTTT: {sync.data.added.length} added, {sync.data.updated.length} updated.
-          {sync.data.only_here.length > 0 && ` Only here, not in SMARTTT: ${sync.data.only_here.join(', ')}.`}
+          {sync.data.merged.length > 0 && ` One room under two codes, merged: ${sync.data.merged.join(', ')}.`}
+          {sync.data.only_here.length > 0 && ` Only here, not in SMARTTT, so not used for exams unless you choose them: ${sync.data.only_here.join(', ')}.`}
         </p>
       )}
       <div className="overflow-x-auto rounded-lg border border-line bg-card">

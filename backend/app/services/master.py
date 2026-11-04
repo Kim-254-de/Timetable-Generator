@@ -17,7 +17,7 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.schemas import ClassRowBody, DepartmentPatch, OfferingBody, RoomBody, RoomPatch
@@ -28,6 +28,7 @@ from app.models import (
     ClassRow,
     Department,
     DraftSession,
+    ExamSeat,
     Group,
     GroupClassRow,
     OfferingClassRow,
@@ -74,8 +75,46 @@ def list_rooms(db: Session) -> list[dict[str, Any]]:
     return [room_dict(r, int(usage.get(r.id, 0))) for r in rooms]
 
 
+def room_key(code: str) -> str:
+    """'TC 1', 'tc1', 'TC-01' -> 'TC1': one room however it is written. SMARTTT has the same rule (room_merge.py)."""
+    plain = re.sub(r"[^A-Z0-9]", "", (code or "").upper())
+    return re.sub(r"(?<![0-9])0+(?=[0-9])", "", plain)
+
+
 def _room_by_code(db: Session, code: str) -> Room | None:
-    return db.scalar(select(Room).where(func.upper(Room.code) == code.strip().upper()))
+    key = room_key(code)
+    return next((r for r in db.scalars(select(Room).order_by(Room.code)) if room_key(r.code) == key), None)
+
+
+def _merge_twins(db: Session, identity: Identity, keep_codes: dict[str, str]) -> list[str]:
+    """
+    Folds rooms here that are one room ("TC1", "TC 1") into one, keeping the code
+    SMARTTT uses, and points saved timetables and exam seats at it. Kept out of
+    exams by the Director on either code keeps it out.
+    """
+    groups: dict[str, list[Room]] = {}
+    for room in db.scalars(select(Room).order_by(Room.code)):
+        groups.setdefault(room_key(room.code), []).append(room)
+    merged: list[str] = []
+    for key, rooms in groups.items():
+        if len(rooms) < 2:
+            continue
+        wanted = keep_codes.get(key, "").upper()
+        keep = next((r for r in rooms if r.code.upper() == wanted), rooms[0])
+        others = [r for r in rooms if r is not keep]
+        before = room_dict(keep)
+        choices = [r.exam_override for r in rooms if r.exam_override is not None]
+        keep.exam_override = (False if False in choices else True) if choices else None
+        keep.exam_seats = keep.exam_seats or next((r.exam_seats for r in others if r.exam_seats), None)
+        keep.unavailable = sorted({slot for r in rooms for slot in (r.unavailable or [])})
+        for old in others:
+            db.execute(update(DraftSession).where(DraftSession.smarttt_room_id == old.id).values(smarttt_room_id=keep.id))
+            db.execute(update(ExamSeat).where(ExamSeat.room_id == old.id).values(room_id=keep.id))
+            merged.append(f"{old.code} into {keep.code}")
+            audit(db, identity, "room.merge", "room", keep.id, before, {"merged": old.code})
+            db.delete(old)
+    db.flush()
+    return merged
 
 
 def _apply_room(db: Session, room: Room, fields: dict[str, Any]) -> None:
@@ -136,16 +175,32 @@ def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[
     only the Generator keeps stays as it is: exam seats, the Director's own
     choice of "for exams" (which overrules the administrator's, read here with
     "health unit") and the slots a room is unavailable. A room only here is
-    left alone and listed.
+    listed, and not used for exams unless the Director chooses it. Rooms that are
+    one room under two codes ("TC1", "TC 1") are folded into one.
     """
     added: list[str] = []
     updated: list[str] = []
-    seen: set[str] = set()
+    # SMARTTT may still hold one room under two codes: read as one, and kept out of exams if either says so.
+    rows: dict[str, dict[str, Any]] = {}
     for r in smarttt.rooms():
         code = str(r.get("code") or "").strip()
         if not code or not r.get("capacity"):
             continue
-        seen.add(code.upper())
+        key = room_key(code)
+        had = rows.get(key)
+        if had is None:
+            rows[key] = {**r, "code": code}
+            continue
+        better = r if r.get("capacity_confirmed") and not had.get("capacity_confirmed") else had
+        rows[key] = {
+            **better,
+            "code": had["code"] if better is had else code,
+            "for_exams": had.get("for_exams") is not False and r.get("for_exams") is not False,
+            "health_unit": had.get("health_unit") is True or r.get("health_unit") is True,
+        }
+    merged = _merge_twins(db, identity, {k: r["code"] for k, r in rows.items()})
+    for r in rows.values():
+        code = r["code"]
         try:
             kind = _room_type(r.get("room_type"))
         except ValueError:
@@ -170,6 +225,8 @@ def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[
         before = room_dict(room)
         if room.exam_seats and room.exam_seats > capacity:
             room.exam_seats = None  # a fixed number above the new capacity no longer holds
+        if room.code.upper() != code.upper():
+            fields["code"] = code  # SMARTTT's spelling, so a published timetable names the same room
         changed = {k: v for k, v in fields.items() if getattr(room, k) != v}
         if changed:
             for key, value in changed.items():
@@ -177,9 +234,15 @@ def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[
             db.flush()
             audit(db, identity, "room.update", "room", room.id, before, room_dict(room))
             updated.append(code)
-    only_here = sorted(r.code for r in db.scalars(select(Room)) if r.code.upper() not in seen)
+    # A room the administrator can't see can't be kept out by them: unused for exams unless the Director chooses it.
+    only_here = []
+    if rows:
+        for room in db.scalars(select(Room)):
+            if room_key(room.code) not in rows:
+                only_here.append(room.code)
+                room.for_exams = False
     db.commit()
-    return {"added": added, "updated": updated, "only_here": only_here}
+    return {"added": added, "updated": updated, "only_here": sorted(only_here), "merged": merged}
 
 
 def delete_room(db: Session, identity: Identity, room: Room) -> None:
