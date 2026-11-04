@@ -185,7 +185,6 @@ def build_docx(term: Term, grid: dict[str, Any], printed_by: str) -> bytes:
         run.bold = bold
         run.font.size = Pt(size)
 
-    centred("THARAKA UNIVERSITY", 16)
     centred("DIRECTORATE OF EXAMINATIONS AND TIMETABLING", 13)
     centred(term_title(term), 12)
 
@@ -265,6 +264,7 @@ def build_docx(term: Term, grid: dict[str, Any], printed_by: str) -> bytes:
     signature = document.add_paragraph("Signature: ______________________    Date: ______________")
     signature.runs[0].font.size = Pt(9)
 
+    letterhead.apply_to_docx(document)
     buffer = BytesIO()
     document.save(buffer)
     return buffer.getvalue()

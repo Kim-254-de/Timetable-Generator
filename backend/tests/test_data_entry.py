@@ -199,7 +199,7 @@ def test_director_enters_everything_and_downloads(client, smarttt, db):
     assert "SEPTEMBER-DECEMBER 2026 TEACHING TIMETABLE" in text
     assert "Prepared by Dr. Alex Mutegi Rwanda, Director Examination & Timetabling" in text
     assert "To be used from Monday 21/09/2026" in text
-    table = document.tables[0]
+    table = document.tables[1]  # tables[0] is the letterhead
     assert len(table.columns) == 61
     assert any("COSC 103" in c.text and "GR A" in c.text for row in table.rows for c in row.cells)
 

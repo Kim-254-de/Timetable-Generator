@@ -1,8 +1,8 @@
 """
 Exam downloads, Word and PDF:
 
-- the exam timetable in the Directorate's layout: THARAKA UNIVERSITY,
-  DIRECTORATE OF EXAMINATION & TIMETABLING, the title line, a DATE/DAY x
+- the exam timetable in the Directorate's layout, on the university's
+  letterhead: DIRECTORATE OF EXAMINATION & TIMETABLING, the title line, a DATE/DAY x
   session grid of `paper -> rooms`, practicals on their dates, "Prepared by";
 - room sheets: per date and session, each room's papers, class rows,
   students and invigilator;
@@ -20,14 +20,14 @@ from xml.sax.saxutils import escape
 from app.models import Term
 from app.services.exam_drafts import MAIN, room_sheets
 
-UNIVERSITY = "THARAKA UNIVERSITY"
 DIRECTORATE = "DIRECTORATE OF EXAMINATION & TIMETABLING"
 
 
 def _title(term: Term, version: int | None) -> list[str]:
     name = (term.name or f"{term.academic_year} semester {term.semester}").upper()
     line = f"END OF {name} EXAMINATION TIMETABLE"
-    return [UNIVERSITY, DIRECTORATE, line + (f" - VERSION {version}" if version else " - DRAFT")]
+    # The university is named by the letterhead above this (letterhead.py).
+    return [DIRECTORATE, line + (f" - VERSION {version}" if version else " - DRAFT")]
 
 
 def _prepared(term: Term, printed_by: str) -> str:
@@ -137,6 +137,9 @@ def _new_docx(landscape: bool) -> Any:
 
 
 def _save(doc: Any) -> bytes:
+    from app.services import letterhead
+
+    letterhead.apply_to_docx(doc)
     out = BytesIO()
     doc.save(out)
     return out.getvalue()
@@ -263,7 +266,7 @@ def timetable_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_
     from reportlab.platypus import Paragraph, Spacer
 
     st = _styles()
-    title = _title(term, version)[1:]  # the letterhead names the university
+    title = _title(term, version)
 
     def story() -> list[Any]:
         header, rows = timetable_table(rec)
@@ -285,7 +288,7 @@ def rooms_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by: 
     from reportlab.platypus import Paragraph
 
     st = _styles()
-    title = [*_title(term, version)[1:], "ROOM SHEETS"]
+    title = [*_title(term, version), "ROOM SHEETS"]
     days = {d["date"]: d["label"] for d in rec["days"]}
 
     def story() -> list[Any]:
@@ -307,7 +310,7 @@ def roster_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by:
     from reportlab.platypus import Paragraph
 
     st = _styles()
-    title = [*_title(term, version)[1:], "INVIGILATION ROSTER"]
+    title = [*_title(term, version), "INVIGILATION ROSTER"]
 
     def story() -> list[Any]:
         out: list[Any] = [Paragraph(escape(line), st["title"]) for line in title]
