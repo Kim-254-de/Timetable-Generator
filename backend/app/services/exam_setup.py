@@ -106,7 +106,9 @@ def update_period(db: Session, identity: Identity, term: Term, fields: dict[str,
         if key in fields:
             setattr(term, key, fields[key])
     if "exam_health_prefixes" in fields:
-        term.exam_health_prefixes = sorted({p.strip().upper() for p in fields["exam_health_prefixes"] or [] if p.strip()})
+        term.exam_health_prefixes = sorted(
+            {p.strip().upper() for p in fields["exam_health_prefixes"] or [] if p.strip()}
+        )
     if "exam_days_off" in fields:
         term.exam_days_off = sorted({d.isoformat() if isinstance(d, date) else str(d) for d in fields["exam_days_off"]})
     after = period_dict(db, term)
@@ -260,7 +262,9 @@ def set_category(db: Session, identity: Identity, term: Term, paper_id: str, cat
     """The Director's choice of a paper's category; None goes back to working it out."""
     if category is not None and category not in CATEGORIES:
         raise ApiError(422, "VALIDATION_ERROR", f"A paper is {', '.join(CATEGORIES)}.")
-    paper = next((p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)) if str(p.id) == paper_id), None)
+    paper = next(
+        (p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)) if str(p.id) == paper_id), None
+    )
     if paper is None:
         raise ApiError(404, "NOT_FOUND", "No such paper in this term.")
     before = paper.category_override

@@ -42,7 +42,9 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
                 id=str(p.id),
                 label=p.label,
                 rows=tuple(
-                    Sitting(str(r.class_row_id), r.students, r.odel, r.guessed) for r in p.rows if r.students or not r.edited
+                    Sitting(str(r.class_row_id), r.students, r.odel, r.guessed)
+                    for r in p.rows
+                    if r.students or not r.edited
                 ),
                 pinned=slot if pl is not None and pl.pinned else None,
                 previous=slot,

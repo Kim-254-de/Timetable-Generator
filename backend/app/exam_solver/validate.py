@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from app.exam_solver.model import HEALTH, POSTGRADUATE, ExamProblem, ExamViolation, Seat
+from app.exam_solver.model import POSTGRADUATE, ExamProblem, ExamViolation, Seat
 
 
 def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None = None) -> list[ExamViolation]:
@@ -54,8 +54,8 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         totals: dict[tuple[str, str], int] = defaultdict(int)
         for s in seats:
             totals[(s.paper_id, s.room_id)] += s.students
-        for (pid, room), n in sorted(totals.items(), key=lambda kv: (kv[1], kv[0][1])):
-            biggest_room[pid] = room
+        for (pid, room_id), _students in sorted(totals.items(), key=lambda kv: (kv[1], kv[0][1])):
+            biggest_room[pid] = room_id
     for (staff, t), ids in by_staff_slot.items():
         if seats is not None:
             places = {biggest_room[i] for i in ids if i in biggest_room}
@@ -102,9 +102,21 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
             used[(s.room_id, slots.get(s.paper_id, -1))] += s.students
             is_health = problem.is_health(papers[s.paper_id])
             if problem.rules_on and is_health and not room.health:
-                out.append(ExamViolation("H-E9", f"{papers[s.paper_id].label} is a health paper in {room.code}, outside the health unit.", (s.paper_id,)))
+                out.append(
+                    ExamViolation(
+                        "H-E9",
+                        f"{papers[s.paper_id].label} is a health paper in {room.code}, outside the health unit.",
+                        (s.paper_id,),
+                    )
+                )
             if problem.rules_on and room.health and not is_health:
-                out.append(ExamViolation("H-E9", f"{papers[s.paper_id].label} isn't a health paper; {room.code} is in the health unit.", (s.paper_id,)))
+                out.append(
+                    ExamViolation(
+                        "H-E9",
+                        f"{papers[s.paper_id].label} isn't a health paper; {room.code} is in the health unit.",
+                        (s.paper_id,),
+                    )
+                )
             seated[(s.paper_id, s.row_id)] += s.students
             kinds[(s.paper_id, s.room_id)].add(odel.get((s.paper_id, s.row_id), False))
         for (room_id, t), students in used.items():

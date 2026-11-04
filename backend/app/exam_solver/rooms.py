@@ -111,12 +111,17 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
     # Health papers take their rooms first, then postgraduate papers theirs, then the rest.
     order = {HEALTH: 0, POSTGRADUATE: 1}
     settled = bool(shared)
-    for paper in sorted((p for p in papers if p.id not in placed), key=lambda p: (order.get(p.kind, 2), -p.students, p.label)):
+    for paper in sorted(
+        (p for p in papers if p.id not in placed), key=lambda p: (order.get(p.kind, 2), -p.students, p.label)
+    ):
         graduate = paper.kind == POSTGRADUATE
         if graduate and not settled:
             settled = True
             total = sum(p.students for p in papers if p.kind == POSTGRADUATE and p.id not in placed)
-            home = sorted((r for r in general_rooms if left[r.id] >= total and left[r.id] == r.seats), key=lambda r: (r.seats, r.code))
+            home = sorted(
+                (r for r in general_rooms if left[r.id] >= total and left[r.id] == r.seats),
+                key=lambda r: (r.seats, r.code),
+            )
             if total and home:
                 shared.append(home[0].id)
         candidates = health_rooms if paper.kind == HEALTH else general_rooms
@@ -142,7 +147,9 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
                     shared.append(best.id)
                 continue
             # No single room has the space: spread this block over the emptiest allowed rooms.
-            spread = sorted((r for r in candidates if left[r.id] > 0 and allowed(block, r.id)), key=lambda r: -left[r.id])
+            spread = sorted(
+                (r for r in candidates if left[r.id] > 0 and allowed(block, r.id)), key=lambda r: -left[r.id]
+            )
             remaining, pieces = block.students, []
             for r in spread:
                 if remaining <= 0:

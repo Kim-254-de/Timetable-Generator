@@ -20,7 +20,9 @@ def _placement(db: Session) -> uuid.UUID:
     term = Term(academic_year="2030/2031", semester=1)
     db.add(term)
     db.flush()
-    paper = ExamPaper(term_id=term.id, allocator_ref=f"p-{uuid.uuid4().hex[:8]}", department_id=1, codes=["X 1"], title="X")
+    paper = ExamPaper(
+        term_id=term.id, allocator_ref=f"p-{uuid.uuid4().hex[:8]}", department_id=1, codes=["X 1"], title="X"
+    )
     draft = ExamDraft(term_id=term.id, name="d")
     db.add_all([paper, draft])
     db.flush()
@@ -78,7 +80,11 @@ def test_exam_import_brings_the_rooms_in_first(client, teaching: FakeTeaching, s
 
 def test_the_administrators_exam_use_and_health_unit_are_read_and_the_director_overrules(client, smarttt: FakeSmarttt):
     sign_in(client)
-    smarttt.rooms = [room("TC 1", 100), {**room("NURS 1", 60), "health_unit": True}, {**room("TC 2", 80), "for_exams": False}]
+    smarttt.rooms = [
+        room("TC 1", 100),
+        {**room("NURS 1", 60), "health_unit": True},
+        {**room("TC 2", 80), "for_exams": False},
+    ]
     ok(client.post("/api/rooms/sync"))
     rooms = {r["code"]: r for r in ok(client.get("/api/rooms"))}
     assert rooms["TC 2"]["for_exams"] is False and rooms["TC 2"]["admin_for_exams"] is False
@@ -134,7 +140,9 @@ def test_twins_already_here_are_merged_and_their_exam_seats_follow(client, teach
     assert db.scalar(select(ExamSeat.room_id)) == rooms["STB 1"]["id"]
 
 
-def test_a_venue_marked_after_the_import_counts_for_the_next_run_and_only_here_rooms_stay_out(client, teaching, smarttt: FakeSmarttt):
+def test_a_venue_marked_after_the_import_counts_for_the_next_run_and_only_here_rooms_stay_out(
+    client, teaching, smarttt: FakeSmarttt
+):
     sign_in(client)
     term_id = setup_exams(client, teaching)
     codes = [r["code"] for r in ok(client.get("/api/rooms"))]

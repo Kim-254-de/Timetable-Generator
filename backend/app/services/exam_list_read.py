@@ -116,12 +116,16 @@ def read_exam_list(file: bytes) -> list[ListedEntry]:
         raise ApiError(413, "VALIDATION_ERROR", "The document is over 5 MB.")
     if file[:5] == b"%PDF-":
         raise ApiError(
-            422, "VALIDATION_ERROR", "This is a PDF, and only Word can be read. Save it as .docx, or if it is a scan, type its table into Word."
+            422,
+            "VALIDATION_ERROR",
+            "This is a PDF, and only Word can be read. Save it as .docx, or if it is a scan, type its table into Word.",
         )
     try:
         body = Document(io.BytesIO(file)).element.body
     except (ValueError, KeyError, zipfile.BadZipFile, OSError) as exc:
-        raise ApiError(422, "VALIDATION_ERROR", "That is not a Word document (.docx). Save it as .docx and upload it again.") from exc
+        raise ApiError(
+            422, "VALIDATION_ERROR", "That is not a Word document (.docx). Save it as .docx and upload it again."
+        ) from exc
     entries: list[ListedEntry] = []
     section = ""
     odel = False

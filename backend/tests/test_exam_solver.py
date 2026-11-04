@@ -201,7 +201,7 @@ def test_common_postgraduate_and_health_papers_sit_first_or_last_on_any_day():
     papers = [_paper(f"C{i}", ("BIT1", 50), ("BSC1", 50)) for i in range(4)]
     papers += [replace(_paper(f"M{i}", (f"M{i}", 10)), kind=POSTGRADUATE) for i in range(3)]
     papers += [replace(_paper(f"N{i}", (f"N{i}", 20)), kind=HEALTH) for i in range(3)]
-    papers += [_paper(f"R{i}", (f"BED1", 30)) for i in range(2)]
+    papers += [_paper(f"R{i}", ("BED1", 30)) for i in range(2)]
     problem = _common_problem(papers, rooms=[_room("A", 400), _room("H", 100), _room("B", 400)])
     problem.rooms[1] = ExamRoom(id="H", code="H", block="H", seats=100, health=True)
     result = solve(problem, time_limit_s=20, workers=2)
@@ -268,7 +268,7 @@ def test_the_solver_leaves_the_health_unit_out_of_everyone_elses_seats():
     assert len(set(result.slots.values())) == 4  # one at a time: A seats 100
     assert {s.room_id for s in result.seats} == {"A"}
     too_big = ExamProblem(papers=[_paper("BIG", ("R", 300))], days=DAYS[:2], sessions=3, rooms=rooms)
-    assert [f["rule"] for f in precheck.run(too_big)][0] == "H-E3"
+    assert next(f["rule"] for f in precheck.run(too_big)) == "H-E3"
 
 
 def test_a_non_health_paper_in_the_health_unit_breaks_the_rule_and_midday_is_closed():
@@ -301,7 +301,9 @@ def test_the_precheck_says_when_the_health_unit_cant_hold_its_papers():
     nursing = replace(_paper("NURS 101", ("N1", 50)), kind=HEALTH)
     none = _common_problem([nursing])
     assert [(f["rule"], f["entity"]) for f in precheck.run(none)] == [("H-E9", "health unit")]
-    small = _common_problem([nursing], rooms=[ExamRoom(id="H", code="H", block="H", seats=40, health=True), _room("A", 100)])
+    small = _common_problem(
+        [nursing], rooms=[ExamRoom(id="H", code="H", block="H", seats=40, health=True), _room("A", 100)]
+    )
     assert [(f["rule"], f["entity"]) for f in precheck.run(small)] == [("H-E9", "NURS 101")]
     # A paper with no number yet doesn't need the room yet.
     assert precheck.run(_common_problem([replace(_paper("NURS 102", ("N1", 0)), kind=HEALTH)])) == []
@@ -320,7 +322,7 @@ def test_the_solver_keeps_a_sessions_health_students_within_the_health_unit():
 def test_a_sessions_postgraduate_papers_share_one_room_undergraduates_elsewhere():
     rooms = [_room("SMALL", 30), _room("MID", 60), _room("BIG", 300)]
     graduates = [replace(_paper(f"M{i}", (f"M{i}", 15)), kind=POSTGRADUATE) for i in range(3)]
-    seats = seating.seat_session([_paper("BIT 110", ("BIT1", 20))] + graduates, rooms)
+    seats = seating.seat_session([_paper("BIT 110", ("BIT1", 20)), *graduates], rooms)
     assert {s.room_id for s in seats if s.paper_id.startswith("M")} == {"MID"}  # the smallest that holds all 45
     assert {s.room_id for s in seats if s.paper_id == "BIT 110"} != {"MID"}
 
@@ -332,6 +334,8 @@ def test_postgraduate_papers_too_big_for_one_room_take_few_and_the_score_says_so
     seats = seating.seat_session(graduates, rooms)
     assert len({s.room_id for s in seats}) == 2 and {s.room_id for s in seats} == {"A", "B"}
     assert soft_scores(problem, {"M0": 0, "M1": 0}, seats)["postgraduate_extra_rooms"] == 1
+
+
 def _guessed(pid: str, code: str, row: str = "COSC Y1S1", students: int = 10) -> Paper:
     return Paper(id=pid, label=pid, rows=(Sitting(row, students, guessed=True),), codes=(code,))
 
@@ -441,7 +445,11 @@ def test_one_invigilator_can_cover_a_sessions_postgraduate_papers_in_their_room(
 def test_their_other_papers_still_go_in_another_session_or_room():
     from app.exam_solver.model import Seat
 
-    papers = [_named("M0", "STF/1", "M0", POSTGRADUATE), _named("M1", "STF/1", "M1", POSTGRADUATE), _named("R", "STF/1", "R")]
+    papers = [
+        _named("M0", "STF/1", "M0", POSTGRADUATE),
+        _named("M1", "STF/1", "M1", POSTGRADUATE),
+        _named("R", "STF/1", "R"),
+    ]
     problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100), _room("B", 100)])
     result = solve(problem, time_limit_s=10, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
@@ -453,4 +461,3 @@ def test_their_other_papers_still_go_in_another_session_or_room():
     assert check(same, both, [Seat("P0", "R0", "A", 10), Seat("P1", "R1", "A", 10)]) == []
     apart = check(same, both, [Seat("P0", "R0", "A", 10), Seat("P1", "R1", "B", 10)])
     assert [v.rule for v in apart] == ["H-E7"]
-

@@ -16,20 +16,20 @@ from app.api.schemas import (
     ClassRowPatch,
     CopyTermBody,
     DepartmentPatch,
+    ExamListFile,
     ExamMoveBody,
     ExamPeriodBody,
     ExamResolveBody,
     ExamRunBody,
     ExamSwitchBody,
+    ExamVenueBody,
     GroupBody,
+    HealthPapersBody,
     LoginBody,
     MoveBody,
     OfferingBody,
     OfferingPatch,
     OpenTermBody,
-    ExamListFile,
-    ExamVenueBody,
-    HealthPapersBody,
     PaperCategoryBody,
     PaperInvigilatorsBody,
     PaperRowsBody,
@@ -54,8 +54,8 @@ from app.services import (
     departments,
     drafts,
     exam_drafts,
-    exam_health,
     exam_export,
+    exam_health,
     exam_runs,
     exam_setup,
     exam_switch,
@@ -564,7 +564,9 @@ def health_paper_rows(term_id: str, paper_id: str, body: PaperRowsBody, identity
 
 
 @router.put("/terms/{term_id}/health-papers/{paper_id}/invigilators")
-def health_paper_invigilators(term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db) -> dict[str, Any]:
+def health_paper_invigilators(
+    term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db
+) -> dict[str, Any]:
     named = {room: v.model_dump() for room, v in body.invigilators.items()}
     return ok(exam_health.set_invigilators(db, identity, setup.get_term(db, term_id), paper_id, named))
 

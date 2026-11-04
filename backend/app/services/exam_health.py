@@ -28,9 +28,9 @@ from app.clients.smarttt import SmartttClient, SmartttError
 from app.errors import ApiError
 from app.exam_solver.model import paper_kind
 from app.models import DIRECTOR_REF, ClassRow, Department, ExamPaper, ExamPaperRow, ExamPlacement, Term
-from app.services.allocator_import import _department, row_label, upsert_class_rows
+from app.services.allocator_import import _department, upsert_class_rows
 from app.services.exam_list_read import class_of, read_exam_list
-from app.services.setup import audit, compact
+from app.services.setup import audit, compact, row_label
 
 DEPARTMENT_CODE = "HLTH"
 DEPARTMENT_NAME = "Health Sciences and Nursing"
@@ -55,8 +55,11 @@ def _programme_guesses(smarttt: SmartttClient) -> list[dict[str, str]]:
         return []
 
 
-def _letter_classes(entries: list[Any], programmes: list[dict[str, str]]) -> tuple[list[dict[str, Any]], dict[int, str]]:
-    """Each class the letter's headings name, matched to a SMARTTT programme when exactly one fits; and each line's class."""
+def _letter_classes(
+    entries: list[Any], programmes: list[dict[str, str]]
+) -> tuple[list[dict[str, Any]], dict[int, str]]:
+    """Each class the letter's headings name, matched to a SMARTTT programme when exactly one fits;
+    and each line's class."""
     by_name: dict[str, list[str]] = {}
     for p in programmes:
         by_name.setdefault(_name_key(p["name"]), []).append(p["code"])
@@ -70,7 +73,13 @@ def _letter_classes(entries: list[Any], programmes: list[dict[str, str]]) -> tup
         codes = by_name.get(_name_key(c["name"]), [])
         found.setdefault(
             key,
-            {**c, "id": key, "heading": e.section, "programme": codes[0] if len(codes) == 1 else "", "matched": len(codes) == 1},
+            {
+                **c,
+                "id": key,
+                "heading": e.section,
+                "programme": codes[0] if len(codes) == 1 else "",
+                "matched": len(codes) == 1,
+            },
         )
         line_class[e.line] = key
     return list(found.values()), line_class
@@ -91,7 +100,12 @@ def _enrolment(smarttt: SmartttClient, codes: list[str]) -> dict[str, Any]:
     try:
         data = smarttt.unit_enrolment(list(dict.fromkeys(codes)))
     except SmartttError as down:
-        return {"available": False, "units": {}, "unknown": set(), "reason": getattr(down, "message", None) or "SMARTTT can't be reached."}
+        return {
+            "available": False,
+            "units": {},
+            "unknown": set(),
+            "reason": getattr(down, "message", None) or "SMARTTT can't be reached.",
+        }
     return {
         "available": True,
         "units": {compact(k): v for k, v in (data.get("units") or {}).items()},
@@ -114,7 +128,14 @@ def _classes(enrolment: dict[str, Any], codes: list[str], sitting: str, odel_twi
             key = _course_id(r["program"], year, semester, stream)
             students = int(r.get("students") or 0)
             if key not in out or out[key]["students"] < students:
-                out[key] = {"programme": r["program"], "year": year, "semester": semester, "stream": stream, "students": students, "odel": odel}
+                out[key] = {
+                    "programme": r["program"],
+                    "year": year,
+                    "semester": semester,
+                    "stream": stream,
+                    "students": students,
+                    "odel": odel,
+                }
     return out
 
 
@@ -153,7 +174,10 @@ def review(db: Session, smarttt: SmartttClient, term: Term, file: str) -> dict[s
         seen.setdefault(key, e.line)
         mine = {compact(c) for c in e.codes}
         overlapping = [p for p in papers if p.sitting == e.sitting and mine & {compact(c) for c in p.codes}]
-        twin = any(any(k.split("|")[0] and compact(c) in k.split("|")[0].split("/") for c in e.codes) and k.endswith("|odel") for k in pending)
+        twin = any(
+            any(k.split("|")[0] and compact(c) in k.split("|")[0].split("/") for c in e.codes) and k.endswith("|odel")
+            for k in pending
+        )
         classes = _classes(enrolment, e.codes, e.sitting, twin)
         out.append(
             {
@@ -170,7 +194,9 @@ def review(db: Session, smarttt: SmartttClient, term: Term, file: str) -> dict[s
                 ),
                 "unknown_codes": [c for c in e.codes if compact(c) in enrolment["unknown"]],
                 "duplicate_of": duplicate_of,
-                "department_lists": sorted({departments.get(p.department_id, "?") for p in overlapping if not p.is_director_paper}),
+                "department_lists": sorted(
+                    {departments.get(p.department_id, "?") for p in overlapping if not p.is_director_paper}
+                ),
                 "already_here": any(p.is_director_paper for p in overlapping),
             }
         )
@@ -204,7 +230,9 @@ def _class_rows(
         }
         for key, c in classes.items()
     ]
-    return upsert_class_rows(db, identity, term, courses, {department.code: department}, {"added": [], "changed": [], "removed": []})
+    return upsert_class_rows(
+        db, identity, term, courses, {department.code: department}, {"added": [], "changed": [], "removed": []}
+    )
 
 
 def _set_rows(
@@ -223,14 +251,17 @@ def _set_rows(
     wanted = {**{k: v for k, v in fresh.items() if k not in kept}, **given}
     rows = _class_rows(db, identity, term, wanted, department)
     paper.rows = [
-        ExamPaperRow(class_row_id=r.class_row_id, students=r.students, odel=r.odel, guessed=False, edited=True) for r in kept.values()
+        ExamPaperRow(class_row_id=r.class_row_id, students=r.students, odel=r.odel, guessed=False, edited=True)
+        for r in kept.values()
     ] + [
         ExamPaperRow(class_row_id=rows[k].id, students=c["students"], odel=c["odel"], guessed=False, edited=k in given)
         for k, c in wanted.items()
     ]
 
 
-def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wanted: list[dict[str, Any]]) -> dict[str, Any]:
+def save(
+    db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wanted: list[dict[str, Any]]
+) -> dict[str, Any]:
     """
     The reviewed letter. A paper here already gets its new title. A unit a department
     already listed stays theirs, and isn't entered again: the answer says which.
@@ -255,7 +286,8 @@ def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wa
         }
     enrolment = _enrolment(smarttt, [c for p in cleaned.values() for c in p["codes"]])
     keys = list(cleaned)
-    created, updated, listed_elsewhere = 0, 0, []
+    created, updated = 0, 0
+    listed_elsewhere: list[str] = []
     for key, p in cleaned.items():
         mine = {compact(c) for c in p["codes"]}
         overlapping = [x for x in papers if x.sitting == p["sitting"] and mine & {compact(c) for c in x.codes}]
@@ -306,7 +338,15 @@ def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wa
         "listed_by_departments": sorted(set(listed_elsewhere)),
         "smarttt": {"available": enrolment["available"], "reason": enrolment["reason"]},
     }
-    audit(db, identity, "exam_health.save", "term", str(term.id), None, {k: result[k] for k in ("created", "updated", "listed_by_departments")})
+    audit(
+        db,
+        identity,
+        "exam_health.save",
+        "term",
+        str(term.id),
+        None,
+        {k: result[k] for k in ("created", "updated", "listed_by_departments")},
+    )
     db.commit()
     return result
 
@@ -347,7 +387,11 @@ def set_rows(db: Session, identity: Identity, term: Term, paper_id: str, rows: l
             raise ApiError(422, "VALIDATION_ERROR", "Every class needs its programme code.")
         key = _course_id(programme, r["year"], r["semester"], r["stream"])
         if key in classes:
-            raise ApiError(422, "VALIDATION_ERROR", f"{row_label(programme, r['year'], r['semester'], r['stream'])} is listed twice.")
+            raise ApiError(
+                422,
+                "VALIDATION_ERROR",
+                f"{row_label(programme, r['year'], r['semester'], r['stream'])} is listed twice.",
+            )
         classes[key] = {**r, "programme": programme, "odel": paper.sitting == "odel"}
     by_key = _class_rows(db, identity, term, classes, department)
     refs = {x.id: x.allocator_ref for x in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
@@ -382,8 +426,13 @@ def remove(db: Session, identity: Identity, term: Term, paper_id: str) -> None:
     db.commit()
 
 
-def set_invigilators(db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """Who invigilates: "" is the main invigilator, a room code that extra room's. SMARTTT checks the staff numbers on publishing."""
+def set_invigilators(
+    db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]
+) -> dict[str, Any]:
+    """Who invigilates: "" is the main invigilator, a room code that extra room's.
+
+    SMARTTT checks the staff numbers on publishing.
+    """
     paper = _director_paper(db, term, paper_id)
     paper.director_invigilators = {
         room: {"staff_number": v["staff_number"].strip().upper(), "name": v.get("name", "").strip()}

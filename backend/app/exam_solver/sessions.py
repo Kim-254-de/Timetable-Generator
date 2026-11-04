@@ -159,7 +159,12 @@ def _spread_common(mm: _Model, problem: ExamProblem) -> None:
         return
     share = -(-len(common) // days)
     for d in range(days):
-        terms = [x[p.id, t] for p in common for t in range(d * problem.sessions, (d + 1) * problem.sessions) if (p.id, t) in x]
+        terms = [
+            x[p.id, t]
+            for p in common
+            for t in range(d * problem.sessions, (d + 1) * problem.sessions)
+            if (p.id, t) in x
+        ]
         if len(terms) > share:
             over = m.new_int_var(0, len(common), f"commonday[{d}]")
             m.add(sum(terms) - share <= over)
@@ -188,15 +193,15 @@ def _guesses(mm: _Model, problem: ExamProblem) -> None:
                 mm.penalties.append(w.guessed_day * over)
     # Papers that can sit any session spread over all of them; the others over the first and last.
     unknown = [p for p in problem.papers if p.unknown_students or p.no_numbers]
-    for name, group, count in (
+    for name, members, count in (
         ("any", [p for p in unknown if not problem.edges_only(p)], problem.slots),
         ("edge", [p for p in unknown if problem.edges_only(p)], len(problem.edge_slots())),
     ):
-        if len(group) < 2 or not count or not w.spread:
+        if len(members) < 2 or not count or not w.spread:
             continue
-        share = -(-len(group) // count)  # an even share of the sessions, rounded up
+        share = -(-len(members) // count)  # an even share of the sessions, rounded up
         for t in slots:
-            terms = [x[p.id, t] for p in group if (p.id, t) in x]
+            terms = [x[p.id, t] for p in members if (p.id, t) in x]
             if len(terms) > share:
                 over = m.new_int_var(0, len(terms), f"spread[{name},{t}]")
                 m.add(sum(terms) - share <= over)
@@ -241,7 +246,10 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
                     {
                         "rule": rule,
                         "entity": f"{day:%a %d %b} session {problem.session_of(t) + 1}",
-                        "message": f"Health papers need more than the health unit's {problem.health_seats} seats in the first and last sessions.",
+                        "message": (
+                            f"Health papers need more than the health unit's {problem.health_seats} seats "
+                            "in the first and last sessions."
+                        ),
                     }
                 )
             elif rule == "H-E3":

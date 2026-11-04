@@ -204,7 +204,9 @@ class ExamPeriodBody(_Strict):
     # Exam seats as a share of each room's teaching capacity.
     exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
     # Code prefixes of health and nursing papers.
-    exam_health_prefixes: Annotated[list[Annotated[str, StringConstraints(max_length=8)]], Field(max_length=60)] | None = None
+    exam_health_prefixes: (
+        Annotated[list[Annotated[str, StringConstraints(max_length=8)]], Field(max_length=60)] | None
+    ) = None
 
 
 class ExamListFile(_Strict):
