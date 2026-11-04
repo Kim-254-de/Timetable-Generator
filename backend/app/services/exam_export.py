@@ -186,6 +186,21 @@ def roster_docx(term: Term, rec: dict[str, Any], version: int | None, printed_by
 # -- PDF ----------------------------------------------------------------------------------------
 
 
+PDF_MARGIN_MM = 10  # left, right and top; the bottom leaves room for the letterhead footer
+FRAME_PADDING = 6  # what ReportLab's page frame keeps inside the margins on every side, in points
+
+
+def _pdf_body_height(landscape_page: bool) -> float:
+    """The height a page's story can fill: the page less its margins and the frame's padding."""
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+
+    from app.services import letterhead
+
+    height = (landscape(A4) if landscape_page else A4)[1]
+    return height - PDF_MARGIN_MM * mm - (letterhead.FOOTER_HEIGHT + 3 * mm) - 2 * FRAME_PADDING
+
+
 def _pdf(story_for: Any, landscape_page: bool, title: str) -> bytes:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
@@ -199,9 +214,9 @@ def _pdf(story_for: Any, landscape_page: bool, title: str) -> bytes:
     SimpleDocTemplate(
         out,
         pagesize=pagesize,
-        leftMargin=10 * mm,
-        rightMargin=10 * mm,
-        topMargin=10 * mm,
+        leftMargin=PDF_MARGIN_MM * mm,
+        rightMargin=PDF_MARGIN_MM * mm,
+        topMargin=PDF_MARGIN_MM * mm,
         bottomMargin=letterhead.FOOTER_HEIGHT + 3 * mm,
         title=title,
     ).build([letterhead.first_page_header(), *story_for()], onFirstPage=page, onLaterPages=page)
@@ -220,14 +235,18 @@ def _styles() -> dict[str, Any]:
     }
 
 
+def _cell(text: str, bold: bool = False) -> Any:
+    from reportlab.platypus import Paragraph
+
+    markup = escape(text).replace("\n", "<br/>")
+    return Paragraph(f"<b>{markup}</b>" if bold else markup, _styles()["cell"])
+
+
 def _pdf_table(header: list[str], rows: list[list[str]], widths: list[float] | None = None) -> Any:
     from reportlab.lib import colors
-    from reportlab.platypus import Paragraph, Table, TableStyle
+    from reportlab.platypus import Table, TableStyle
 
-    st = _styles()
-    data = [[Paragraph(f"<b>{escape(h)}</b>", st["cell"]) for h in header]] + [
-        [Paragraph(escape(v).replace("\n", "<br/>"), st["cell"]) for v in row] for row in rows
-    ]
+    data = [[_cell(h, bold=True) for h in header]] + [[_cell(v) for v in row] for row in rows]
     table = Table(data, colWidths=widths, repeatRows=1)
     table.setStyle(
         TableStyle(
@@ -241,24 +260,61 @@ def _pdf_table(header: list[str], rows: list[list[str]], widths: list[float] | N
     return table
 
 
-# Lines of `paper -> rooms` a grid row may hold and still fit a landscape A4 page.
-PDF_ROW_LINES = 40
+# A table cell's default padding: 6 pt left and right, 3 pt top and bottom.
+CELL_PAD_X, CELL_PAD_Y = 12, 6
+# Fewer lines than this left at the foot of a page: the day starts on the next page instead.
+MIN_ROW_LINES = 3
+# Points kept free at the foot of each page, so rounding never pushes a row over.
+PAGE_SLACK = 2
 
 
-def _fit_pages(rows: list[list[str]]) -> list[list[str]]:
-    """A day busier than a page holds (80 papers in a session at full size) as several rows, the date repeated."""
-    out = []
+def _row_height(row: list[str], widths: list[float], bold: bool = False) -> float:
+    tallest = max(_cell(text, bold).wrap(w - CELL_PAD_X, 1e6)[1] for text, w in zip(row, widths, strict=True))
+    return float(tallest) + CELL_PAD_Y
+
+
+def _stack_height(flowables: list[Any], width: float) -> float:
+    return float(sum(f.wrap(width, 1e6)[1] + f.getSpaceBefore() + f.getSpaceAfter() for f in flowables))
+
+
+def _fit_pages(rows: list[list[str]], widths: list[float], first_space: float, page_space: float) -> list[list[str]]:
+    """Each day as one grid row, cut into several (the date repeated, "(cont.)") where it doesn't fit the page.
+
+    ReportLab never splits a row: one taller than the space left moves whole to the next page, which left
+    page 1 blank under the letterhead. So rows are measured as they will print (long room lists wrap),
+    and a day fills what is left of its page: `first_space` under the letterhead and title on page 1,
+    `page_space` on every later page (both net of the repeated header row).
+    """
+    out: list[list[str]] = []
+    space = first_space
     for label, *cells in rows:
         lines = [cell.split("\n") if cell else [] for cell in cells]
         tallest = max((len(c) for c in lines), default=0)
-        for start in range(0, max(tallest, 1), PDF_ROW_LINES):
-            out.append(
-                [
-                    label if start == 0 else f"{label} (cont.)",
-                    *["\n".join(c[start : start + PDF_ROW_LINES]) for c in lines],
-                ]
-            )
+        start = 0
+        while True:
+            name = label if start == 0 else f"{label} (cont.)"
+            left = tallest - start
+            need = min(left, MIN_ROW_LINES)
+            if _row_height(_chunk(name, lines, start, need), widths) > space and space < page_space:
+                space = page_space  # too little room at the foot: the day goes on the next page
+                continue
+            lo, hi = need, left  # the most lines that still fit
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                fits = _row_height(_chunk(name, lines, start, mid), widths) <= space
+                lo, hi = (mid, hi) if fits else (lo, mid - 1)
+            row = _chunk(name, lines, start, lo)
+            out.append(row)
+            space -= _row_height(row, widths)
+            start += lo
+            if start >= tallest:
+                break
     return out
+
+
+def _chunk(name: str, lines: list[list[str]], start: int, count: int) -> list[str]:
+    """A grid row: the date, then `count` lines of each session from line `start`."""
+    return [name, *["\n".join(c[start : start + count]) for c in lines]]
 
 
 def timetable_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_by: str) -> bytes:
@@ -269,12 +325,18 @@ def timetable_pdf(term: Term, rec: dict[str, Any], version: int | None, printed_
     title = _title(term, version)
 
     def story() -> list[Any]:
+        from app.services import letterhead
+
         header, rows = timetable_table(rec)
-        rows = _fit_pages(rows)
         first = 28 * mm
         rest = (277 * mm - first) / max(1, len(header) - 1)
+        widths = [first] + [rest] * (len(header) - 1)
         out: list[Any] = [Paragraph(escape(line), st["title"]) for line in title]
-        out += [Spacer(1, 4 * mm), _pdf_table(header, rows, [first] + [rest] * (len(header) - 1))]
+        out.append(Spacer(1, 4 * mm))
+        page_space = _pdf_body_height(True) - _row_height(header, widths, bold=True) - PAGE_SLACK
+        above = _stack_height([letterhead.first_page_header(), *out], 277 * mm - 2 * FRAME_PADDING)
+        rows = _fit_pages(rows, widths, page_space - above, page_space)
+        out.append(_pdf_table(header, rows, widths))
         lines = practical_lines(rec)
         if lines:
             out += [Paragraph("PRACTICALS", st["heading"]), *[Paragraph(escape(line), st["cell"]) for line in lines]]

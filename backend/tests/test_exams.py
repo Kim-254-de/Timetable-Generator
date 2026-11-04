@@ -319,6 +319,8 @@ def test_the_timetable_pdf_holds_a_session_busier_than_a_page():
     """At full size (899 papers) one session had 86 papers: its day must not overflow the page."""
     from types import SimpleNamespace
 
+    import pypdfium2 as pdfium
+
     from app.services import exam_export
 
     day = {"date": "2026-12-01", "label": "TUE 01/12/2026"}
@@ -331,9 +333,14 @@ def test_the_timetable_pdf_holds_a_session_busier_than_a_page():
         academic_year="2026/2027", semester=1, name="Semester I", prepared_by="", prepared_by_title=""
     )
     pdf = exam_export.timetable_pdf(term, rec, 1, "Director")
-    assert pdf[:4] == b"%PDF"
-    rows = exam_export._fit_pages(exam_export.timetable_table(rec)[1])
-    assert [r[0] for r in rows] == ["TUE 01/12/2026"] + ["TUE 01/12/2026 (cont.)"] * 3
+    # Text as printed, with wrapped lines joined: "(cont.)" wraps in the narrow date column.
+    pages = [" ".join(page.get_textpage().get_text_range().split()) for page in pdfium.PdfDocument(pdf)]
+    # The day starts on page 1, under the letterhead: a row too tall for the space left there used to
+    # move whole to page 2 and leave page 1 blank below the header.
+    assert "TUE 01/12/2026" in pages[0] and "COSC 100" in pages[0]
+    assert len(pages) > 1 and all("TUE 01/12/2026 (cont.)" in text for text in pages[1:])
+    printed = "".join(pages)
+    assert all(f"COSC {100 + i} " in printed for i in range(150)), "every paper is printed"
 
 
 def test_a_paper_nobody_synced_is_timetabled_and_published_without_a_room(client, teaching, smarttt, db: Session):
