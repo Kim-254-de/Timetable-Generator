@@ -372,8 +372,8 @@ export const useReadHealthList = (termId: string) =>
   })
 
 export const useSaveHealthList = (termId: string) =>
-  useExamMutation(termId, (papers: { codes: string[]; title: string; sitting: string }[]) =>
-    post<{ created: number; updated: number; marked_health: string[]; smarttt: { available: boolean; reason: string | null } }>(`/terms/${termId}/health-papers`, { papers }))
+  useExamMutation(termId, (papers: { codes: string[]; title: string; sitting: string; classes: HealthRowInput[] }[]) =>
+    post<{ created: number; updated: number; listed_by_departments: string[]; smarttt: { available: boolean; reason: string | null } }>(`/terms/${termId}/health-papers`, { papers }))
 
 export const useRecountHealthPapers = (termId: string) =>
   useExamMutation(termId, () => post<{ papers: number; available: boolean; reason: string | null }>(`/terms/${termId}/health-papers/recount`))

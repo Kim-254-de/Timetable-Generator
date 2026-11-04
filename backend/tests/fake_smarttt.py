@@ -173,6 +173,7 @@ class FakeSmarttt:
         self.rooms: list[dict[str, Any]] = []
         self.set_current_calls: list[dict[str, Any]] = []
         self.enrolment: dict[str, dict[str, Any]] = {}  # /unit-enrolment/: by code, as SMARTTT answers
+        self.programs: list[dict[str, str]] = []  # /programs/
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -187,6 +188,8 @@ class FakeSmarttt:
         params = dict(request.url.params)
         if route == "/rooms/":
             return httpx.Response(200, json={"rooms": self.rooms})
+        if route == "/programs/":
+            return httpx.Response(200, json={"programs": self.programs})
         if route == "/unit-enrolment/":
             units = {c: self.enrolment[c] for c in body["codes"] if c in self.enrolment}
             return httpx.Response(200, json={"term": None, "units": units, "unknown": [c for c in body["codes"] if c not in self.enrolment]})

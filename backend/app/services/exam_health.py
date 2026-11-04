@@ -1,18 +1,22 @@
 """
-Health and nursing papers the Director uploads: the moderation letter as Word,
+The moderation letter the Director uploads for health and nursing, as Word:
 read and reviewed like a department's list in Smart Attendance, kept here.
 
-Each paper's classes are those taking its units on SMARTTT's master timetable,
-and those of the students who synced them; numbers are who synced, and the
-Director corrects any, adds a class or removes one (kept when SMARTTT is read
-again). No department names their invigilators, so the Director does. A unit a
-department already listed isn't entered twice: its paper is marked as health.
+A letter that is a course allocation names each class and its students in its
+headings, so a paper's classes are those, as the Director reviewed them and
+matched to SMARTTT's programmes, with those taking its units on SMARTTT's master
+timetable. The Director corrects any number, adds a class or removes one (kept
+when SMARTTT is read again). A paper is a health paper by its code prefix; other
+units in the letter (MATH 101, ZOOL 143) are ordinary papers, and a unit a
+department already listed stays that department's. No department names the
+invigilators of these papers, so the Director does.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
+import re
 import uuid
 from typing import Any
 
@@ -22,14 +26,54 @@ from sqlalchemy.orm import Session
 from app.auth import Identity
 from app.clients.smarttt import SmartttClient, SmartttError
 from app.errors import ApiError
-from app.exam_solver.model import HEALTH
+from app.exam_solver.model import paper_kind
 from app.models import DIRECTOR_REF, ClassRow, Department, ExamPaper, ExamPaperRow, ExamPlacement, Term
 from app.services.allocator_import import _department, row_label, upsert_class_rows
-from app.services.exam_list_read import read_exam_list
+from app.services.exam_list_read import class_of, read_exam_list
 from app.services.setup import audit, compact
 
 DEPARTMENT_CODE = "HLTH"
 DEPARTMENT_NAME = "Health Sciences and Nursing"
+# The term's list starts with these when the letter is first used; the Director can change it on the Exams tab.
+DEFAULT_HEALTH_PREFIXES = ["BMLS", "CCM", "CMCH", "HMM", "HND", "HPA", "HRIM", "MBIOC", "NURS"]
+_DEGREE_WORDS = re.compile(r"\b(BACHELOR(S)?|OF|SCIENCE|IN|BSC|B\s*SC|AND|THE)\b")
+
+
+def _name_key(name: str) -> str:
+    """'BACHELOR OF SCIENCE IN NURSING', 'BSc Nursing' -> 'NURSING': how a letter's class is matched to a programme."""
+    return compact(_DEGREE_WORDS.sub(" ", name.upper().replace(".", " ")))
+
+
+def _prefixes(term: Term) -> list[str]:
+    return list(term.exam_health_prefixes or DEFAULT_HEALTH_PREFIXES)
+
+
+def _programme_guesses(smarttt: SmartttClient) -> list[dict[str, str]]:
+    try:
+        return [{"code": str(p["code"]), "name": str(p.get("name") or "")} for p in smarttt.programs()]
+    except SmartttError:
+        return []
+
+
+def _letter_classes(entries: list[Any], programmes: list[dict[str, str]]) -> tuple[list[dict[str, Any]], dict[int, str]]:
+    """Each class the letter's headings name, matched to a SMARTTT programme when exactly one fits; and each line's class."""
+    by_name: dict[str, list[str]] = {}
+    for p in programmes:
+        by_name.setdefault(_name_key(p["name"]), []).append(p["code"])
+    found: dict[str, dict[str, Any]] = {}
+    line_class: dict[int, str] = {}
+    for e in entries:
+        c = class_of(e.section) if e.section else None
+        if c is None:
+            continue
+        key = f"{_name_key(c['name'])}|{c['year']}|{c['semester']}"
+        codes = by_name.get(_name_key(c["name"]), [])
+        found.setdefault(
+            key,
+            {**c, "id": key, "heading": e.section, "programme": codes[0] if len(codes) == 1 else "", "matched": len(codes) == 1},
+        )
+        line_class[e.line] = key
+    return list(found.values()), line_class
 
 
 def _paper_key(codes: list[str], sitting: str) -> str:
@@ -91,6 +135,15 @@ def review(db: Session, smarttt: SmartttClient, term: Term, file: str) -> dict[s
     enrolment = _enrolment(smarttt, [c for e in entries for c in e.codes])
     papers = _papers(db, term)
     departments = {d.id: d.code for d in db.scalars(select(Department))}
+    prefixes = _prefixes(term)
+    programmes = _programme_guesses(smarttt)
+    letter_classes, line_class = _letter_classes(entries, programmes)
+    classes_of_paper: dict[str, list[str]] = {}
+    for e in entries:
+        if e.line in line_class:
+            named = classes_of_paper.setdefault(_paper_key(e.codes, e.sitting), [])
+            if line_class[e.line] not in named:
+                named.append(line_class[e.line])
     seen: dict[str, int] = {}
     pending = {_paper_key(e.codes, e.sitting) for e in entries}
     out = []
@@ -109,6 +162,8 @@ def review(db: Session, smarttt: SmartttClient, term: Term, file: str) -> dict[s
                 "title": e.title,
                 "section": e.section,
                 "sitting": e.sitting,
+                "category": paper_kind(e.codes, prefixes) or "regular",
+                "letter_classes": classes_of_paper.get(key, []),
                 "students": sum(c["students"] for c in classes.values()) if enrolment["available"] else None,
                 "classes": sorted(
                     row_label(c["programme"], c["year"], c["semester"], c["stream"]) for c in classes.values()
@@ -121,12 +176,15 @@ def review(db: Session, smarttt: SmartttClient, term: Term, file: str) -> dict[s
         )
     return {
         "entries": out,
+        "classes": letter_classes,
+        "programmes": programmes,
+        "health_prefixes": prefixes,
         "smarttt": {"available": enrolment["available"], "reason": enrolment["reason"]},
         "summary": {
             "papers": sum(1 for x in out if x["duplicate_of"] is None),
             "duplicates": sum(1 for x in out if x["duplicate_of"] is not None),
             "unknown": sum(1 for x in out if x["unknown_codes"]),
-            "no_classes": sum(1 for x in out if x["students"] == 0 and not x["classes"]),
+            "no_classes": sum(1 for x in out if not x["students"] and not x["classes"] and not x["letter_classes"]),
         },
     }
 
@@ -156,23 +214,30 @@ def _set_rows(
     paper: ExamPaper,
     fresh: dict[str, dict[str, Any]],
     department: Department,
+    given: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """SMARTTT's classes over the rows the paper has: a row the Director set keeps its number."""
+    """SMARTTT's classes over the rows the paper has: a row the Director set, or the letter names, keeps its number."""
+    given = given or {}
     refs = {r.id: r.allocator_ref for r in db.scalars(select(ClassRow).where(ClassRow.term_id == term.id))}
-    kept = {refs.get(r.class_row_id): r for r in paper.rows if r.edited}
-    rows = _class_rows(db, identity, term, {k: v for k, v in fresh.items() if k not in kept}, department)
+    kept = {refs.get(r.class_row_id): r for r in paper.rows if r.edited and refs.get(r.class_row_id) not in given}
+    wanted = {**{k: v for k, v in fresh.items() if k not in kept}, **given}
+    rows = _class_rows(db, identity, term, wanted, department)
     paper.rows = [
         ExamPaperRow(class_row_id=r.class_row_id, students=r.students, odel=r.odel, guessed=False, edited=True) for r in kept.values()
     ] + [
-        ExamPaperRow(class_row_id=rows[k].id, students=c["students"], odel=c["odel"], guessed=False, edited=False)
-        for k, c in fresh.items()
-        if k not in kept
+        ExamPaperRow(class_row_id=rows[k].id, students=c["students"], odel=c["odel"], guessed=False, edited=k in given)
+        for k, c in wanted.items()
     ]
 
 
 def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wanted: list[dict[str, Any]]) -> dict[str, Any]:
-    """The reviewed list. A paper here already gets its new title; a unit a department listed is marked as health."""
+    """
+    The reviewed letter. A paper here already gets its new title. A unit a department
+    already listed stays theirs, and isn't entered again: the answer says which.
+    """
     department = _department(db, identity, DEPARTMENT_CODE, DEPARTMENT_NAME)
+    if not term.exam_health_prefixes:
+        term.exam_health_prefixes = list(DEFAULT_HEALTH_PREFIXES)
     papers = _papers(db, term)
     cleaned: dict[str, dict[str, Any]] = {}
     for p in wanted:
@@ -182,24 +247,38 @@ def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wa
         if not p["title"].strip():
             raise ApiError(422, "VALIDATION_ERROR", f"Give {'/'.join(codes)} a title.")
         sitting = "odel" if p.get("sitting") == "odel" else "regular"
-        cleaned[_paper_key(codes, sitting)] = {"codes": codes, "title": p["title"].strip()[:255], "sitting": sitting}
+        cleaned[_paper_key(codes, sitting)] = {
+            "codes": codes,
+            "title": p["title"].strip()[:255],
+            "sitting": sitting,
+            "classes": p.get("classes") or [],
+        }
     enrolment = _enrolment(smarttt, [c for p in cleaned.values() for c in p["codes"]])
     keys = list(cleaned)
-    created, updated, marked = 0, 0, []
+    created, updated, listed_elsewhere = 0, 0, []
     for key, p in cleaned.items():
         mine = {compact(c) for c in p["codes"]}
         overlapping = [x for x in papers if x.sitting == p["sitting"] and mine & {compact(c) for c in x.codes}]
         own = next((x for x in overlapping if x.is_director_paper and _paper_key(x.codes, x.sitting) == key), None)
         listed = [x for x in overlapping if not x.is_director_paper]
         if listed and own is None:
-            for x in listed:
-                x.category_override = HEALTH
-                marked.append(x.label)
+            listed_elsewhere.extend(x.label for x in listed)
             continue
         twin = any(k.endswith("|odel") and mine & set(k.split("|")[0].split("/")) for k in keys) or any(
             x.sitting == "odel" and mine & {compact(c) for c in x.codes} for x in papers
         )
         fresh = _classes(enrolment, p["codes"], p["sitting"], twin)
+        given = {
+            _course_id(c["programme"], c["year"], c["semester"], c.get("stream") or ""): {
+                "programme": c["programme"].strip().upper(),
+                "year": c["year"],
+                "semester": c["semester"],
+                "stream": c.get("stream") or "",
+                "students": c["students"],
+                "odel": p["sitting"] == "odel",
+            }
+            for c in p["classes"]
+        }
         if own is None:
             own = ExamPaper(
                 term_id=term.id,
@@ -208,7 +287,6 @@ def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wa
                 codes=p["codes"],
                 title=p["title"],
                 sitting=p["sitting"],
-                category_override=HEALTH,
                 examiner_name="",
                 notes="",
                 director_invigilators={},
@@ -220,10 +298,15 @@ def save(db: Session, smarttt: SmartttClient, identity: Identity, term: Term, wa
         else:
             own.title = p["title"]
             updated += 1
-        if enrolment["available"]:
-            _set_rows(db, identity, term, own, fresh, department)
-    result = {"created": created, "updated": updated, "marked_health": sorted(marked), "smarttt": {"available": enrolment["available"], "reason": enrolment["reason"]}}
-    audit(db, identity, "exam_health.save", "term", str(term.id), None, {k: result[k] for k in ("created", "updated", "marked_health")})
+        if enrolment["available"] or given:
+            _set_rows(db, identity, term, own, fresh, department, given)
+    result = {
+        "created": created,
+        "updated": updated,
+        "listed_by_departments": sorted(set(listed_elsewhere)),
+        "smarttt": {"available": enrolment["available"], "reason": enrolment["reason"]},
+    }
+    audit(db, identity, "exam_health.save", "term", str(term.id), None, {k: result[k] for k in ("created", "updated", "listed_by_departments")})
     db.commit()
     return result
 

@@ -211,22 +211,24 @@ class ExamListFile(_Strict):
     file: Annotated[str, StringConstraints(min_length=1, max_length=8_000_000)]  # .docx as base64
 
 
-class HealthPaperBody(_Strict):
-    codes: Annotated[list[Annotated[str, StringConstraints(max_length=30)]], Field(min_length=1, max_length=12)]
-    title: Annotated[str, StringConstraints(max_length=255)]
-    sitting: str = "regular"
-
-
-class HealthPapersBody(_Strict):
-    papers: Annotated[list[HealthPaperBody], Field(min_length=1, max_length=1500)]
-
-
 class PaperRowBody(_Strict):
     programme: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
     year: Annotated[int, Field(ge=1, le=10)]
     semester: Annotated[int, Field(ge=1, le=3)]
     stream: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)] = ""
     students: Annotated[int, Field(ge=0, le=5000)]
+
+
+class HealthPaperBody(_Strict):
+    codes: Annotated[list[Annotated[str, StringConstraints(max_length=30)]], Field(min_length=1, max_length=12)]
+    title: Annotated[str, StringConstraints(max_length=255)]
+    sitting: str = "regular"
+    # The classes the letter names for it, as the Director reviewed them.
+    classes: Annotated[list[PaperRowBody], Field(max_length=60)] = []
+
+
+class HealthPapersBody(_Strict):
+    papers: Annotated[list[HealthPaperBody], Field(min_length=1, max_length=1500)]
 
 
 class PaperRowsBody(_Strict):

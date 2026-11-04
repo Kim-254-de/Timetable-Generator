@@ -103,10 +103,13 @@ On the term's **Exams** tab:
    sync; the Director's own "Used for exams" overrules the administrator's.
    A room's block is its building, so a big paper stays within one block.
 2. **Health and nursing papers**: the Director uploads the moderation letter
-   (Word), reviews it and saves it, here rather than through a department. Each
-   paper's classes come from SMARTTT's master timetable and who synced; the
-   Director corrects numbers and classes and names the invigilators on the draft.
-   A unit a department already listed isn't doubled: its paper is marked health.
+   (Word; a scan must be typed into Word first), reviews it and saves it, here
+   rather than through a department. Each paper's classes are those its headings
+   name ("... Y1S1 (107 STUDENTS)"), matched to SMARTTT's programmes in the review,
+   and those on SMARTTT's master timetable and who synced. The Director corrects
+   numbers and classes, and names the invigilators on the draft. A code prefix on
+   the exam period's list makes a health paper; the letter's other units are
+   ordinary papers. A unit a department already listed stays theirs, not doubled.
    **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
@@ -147,7 +150,8 @@ On the term's **Exams** tab:
    impossible; real numbers from the department replace the guess.
    A main invigilator a department names before the timetable is generated
    comes in with the papers, and the solver keeps that person's papers in
-   different sessions (rule H-E7). A paper nobody is known to sit (no class
+   different sessions (rule H-E7), except postgraduate papers, which share a room:
+   one person can cover several papers in one room. A paper nobody is known to sit (no class
    rows: nobody synced it, e.g. part-time students) still gets a date and
    session, with no room ("room to be announced") and no invigilator needed.
 6. **Approve and publish**: refused while any paper, or any extra room of a

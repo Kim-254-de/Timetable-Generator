@@ -357,6 +357,9 @@ export interface HealthListReview {
     title: string
     section: string
     sitting: 'regular' | 'odel'
+    category: ExamCategory
+    /** Ids of the classes the letter's headings name for this paper. */
+    letter_classes: string[]
     students: number | null
     classes: string[]
     unknown_codes: string[]
@@ -364,6 +367,10 @@ export interface HealthListReview {
     department_lists: string[]
     already_here: boolean
   }[]
+  /** The classes the letter's headings name, matched to a SMARTTT programme when exactly one fits. */
+  classes: { id: string; name: string; heading: string; year: number | null; semester: number | null; students: number | null; programme: string; matched: boolean }[]
+  programmes: { code: string; name: string }[]
+  health_prefixes: string[]
   smarttt: { available: boolean; reason: string | null }
   summary: { papers: number; duplicates: number; unknown: number; no_classes: number }
 }
