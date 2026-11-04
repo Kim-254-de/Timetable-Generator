@@ -108,9 +108,15 @@ def _docx_heading(doc: Any, lines: list[str]) -> None:
         run.font.size = Pt(12)
 
 
-def _docx_table(doc: Any, header: list[str], rows: list[list[str]]) -> None:
+def _docx_table(doc: Any, header: list[str], rows: list[list[str]], widths: list[int] | None = None) -> None:
     table = doc.add_table(rows=len(rows) + 1, cols=len(header))
     table.style = "Table Grid"
+    if widths:
+        table.autofit = False
+        for column, width in zip(table.columns, widths, strict=True):
+            column.width = width
+            for cell in column.cells:
+                cell.width = width
     for r, values in enumerate([header, *rows]):
         for c, value in enumerate(values):
             cell = table.rows[r].cells[c]
@@ -123,10 +129,11 @@ def _docx_table(doc: Any, header: list[str], rows: list[list[str]]) -> None:
 def _new_docx(landscape: bool) -> Any:
     from docx import Document
     from docx.enum.section import WD_ORIENT
-    from docx.shared import Cm, Pt
+    from docx.shared import Cm, Mm, Pt
 
     doc = Document()
     section = doc.sections[0]
+    section.page_width, section.page_height = Mm(210), Mm(297)  # A4, like the PDFs; python-docx starts on Letter
     if landscape:
         section.orientation = WD_ORIENT.LANDSCAPE
         section.page_width, section.page_height = section.page_height, section.page_width
@@ -146,10 +153,16 @@ def _save(doc: Any) -> bytes:
 
 
 def timetable_docx(term: Term, rec: dict[str, Any], version: int | None, printed_by: str) -> bytes:
+    from docx.shared import Mm
+
     doc = _new_docx(landscape=True)
     _docx_heading(doc, _title(term, version))
     header, rows = timetable_table(rec)
-    _docx_table(doc, header, rows)
+    section = doc.sections[0]
+    text_width = section.page_width - section.left_margin - section.right_margin
+    date = Mm(28)  # as in the PDF: the date column fits the date; the sessions share the rest
+    sessions = max(1, len(header) - 1)
+    _docx_table(doc, header, rows, [date] + [(text_width - date) // sessions] * (len(header) - 1))
     lines = practical_lines(rec)
     if lines:
         doc.add_paragraph().add_run("PRACTICALS").bold = True

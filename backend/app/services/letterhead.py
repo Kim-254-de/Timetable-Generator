@@ -8,12 +8,15 @@ and on every page the logo as a faint watermark and the footer
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Image, Paragraph, Table, TableStyle
 
@@ -44,6 +47,9 @@ FOOTER_BOTTOM = 6 * mm
 # Room a page keeps at the bottom for the footer; a builder adds its own lines above it.
 FOOTER_HEIGHT = FOOTER_BOTTOM + ISO_MARK_HEIGHT + 2 * mm
 WATERMARK_OPACITY = 0.1
+# Logo pixels this light (all of red, green and blue at least WHITE) are paper: fully clear in the
+# watermark. Darker ones fade in over FEATHER levels, so the logo's edge stays smooth.
+WHITE, FEATHER = 248, 40
 NAME_FONT, NAME_SIZE = "Times-Bold", 20
 TEXT_FONT, TEXT_SIZE = "Times-Roman", 10
 # Between the logo and the text on either side of it.
@@ -126,20 +132,40 @@ def _no_padding() -> TableStyle:
     )
 
 
+@lru_cache(maxsize=1)
+def faded_logo() -> bytes:
+    """The logo as the watermark: a PNG that is faint in itself, its white background clear.
+
+    The faintness is in the image's alpha channel, not in a setting that asks the viewer to fade it
+    (a PDF fill opacity, Word's alphaModFix or "Washout"). Phone viewers and Word-to-PDF converters
+    ignore those settings, and printed the logo at full strength over the timetable.
+    """
+    from PIL import Image as PILImage
+    from PIL import ImageChops
+
+    with PILImage.open(LOGO) as image:
+        rgb = image.convert("RGB")
+    red, green, blue = rgb.split()
+    darkest = ImageChops.darker(ImageChops.darker(red, green), blue)
+    top = WATERMARK_OPACITY * 255
+    rgb.putalpha(darkest.point(lambda v: round(top * min(1.0, max(0.0, (WHITE - v) / FEATHER)))))
+    out = BytesIO()
+    rgb.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
 def _watermark(canvas: Any, page_width: float, page_height: float) -> None:
     size = min(page_width, page_height) * 0.6
-    canvas.saveState()
-    canvas.setFillAlpha(WATERMARK_OPACITY)
     canvas.drawImage(
-        str(LOGO),
+        ImageReader(BytesIO(faded_logo())),
         (page_width - size) / 2,
         (page_height - size) / 2,
         size,
         size,
         preserveAspectRatio=True,
         anchor="c",
+        mask="auto",
     )
-    canvas.restoreState()
 
 
 def _footer(canvas: Any, page_width: float, margin: float) -> None:
@@ -175,11 +201,12 @@ def on_page(extra: Callable[[Any, Any], None] | None = None) -> Callable[[Any, A
 # first page, and in the page header and footer of every page the faint logo behind the text and
 # the ISO line, mark and motto.
 
-WORD_WATERMARK_OPACITY = 12_000  # of 100_000
+EMU_PER_POINT = 12700
 
 
 def apply_to_docx(document: Any) -> None:
-    """Puts the letterhead on a python-docx document; call it before or after adding the content."""
+    """Puts the letterhead on a python-docx document, once its page size and margins are set;
+    call it before or after adding the content."""
     section = document.sections[0]
     section.different_first_page_header_footer = False
     section.header.is_linked_to_previous = False
@@ -187,45 +214,66 @@ def apply_to_docx(document: Any) -> None:
     text_width = section.page_width - section.left_margin - section.right_margin
     _docx_watermark(section, min(section.page_width, section.page_height) * 0.6)
     _docx_footer(section, text_width)
-    table = _docx_header_table(document)
+    table = _docx_header_table(document, text_width)
     spacer = document.add_paragraph()  # space between the header and what follows
     body = document.element.body
     body.insert(0, table._tbl)
     table._tbl.addnext(spacer._p)
 
 
-def _docx_header_table(document: Any) -> Any:
-    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+def _docx_header_table(document: Any, text_width: int) -> Any:
+    """The header as two rows, like the PDF's: THARAKA and UNIVERSITY on the first, the address and
+    the contacts on the second, the logo down both.
+
+    The names share a row, so they stay level whatever a viewer does to the lines below them (a
+    phone without Times New Roman sets them in a wider font, and the contacts may wrap). The sides
+    take all the width the logo leaves, so the contacts have room to stay on one line; each block
+    is still placed HEADER_GAP from the logo, as in the PDF.
+    """
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt
 
     m = _measure()
-    emu = 12700  # per point
-    side, logo = int(m.side * emu), int(LOGO_WIDTH * emu)
-    table = document.add_table(rows=1, cols=3)
+    emu = EMU_PER_POINT
+    logo = int(LOGO_WIDTH * emu)
+    side = (text_width - logo) // 2
+    table = document.add_table(rows=2, cols=3)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
-    left, middle, right = table.rows[0].cells
-    for cell, column, width in zip((left, middle, right), table.columns, (side, logo, side), strict=True):
-        cell.width = column.width = width
-        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    _docx_no_cell_margins(table)
+    for column, width in zip(table.columns, (side, logo, side), strict=True):
+        column.width = width
+        for cell in column.cells:
+            cell.width = width
+    names, details = table.rows
+    names.height, names.height_rule = int(LOGO_HEIGHT * 0.45 * emu), WD_ROW_HEIGHT_RULE.AT_LEAST
 
+    middle = table.cell(0, 1).merge(table.cell(1, 1))
+    middle.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
     picture = middle.paragraphs[0]
     picture.alignment = WD_ALIGN_PARAGRAPH.CENTER
     picture.add_run().add_picture(str(LOGO), width=logo, height=int(LOGO_HEIGHT * emu))
 
-    def block(cell: Any, name: str, rows: list[tuple[str, str, str | None]], indent: float, tab: float = 0) -> None:
-        """A name over its lines; `indent` places the block so it keeps HEADER_GAP from the logo."""
+    # The left block ends HEADER_GAP before the logo; the right one starts HEADER_GAP after it.
+    left_indent = side - int((HEADER_GAP + m.left_width) * emu)
+    right_indent = int(HEADER_GAP * emu)
+    for cell, name, indent in ((names.cells[0], "THARAKA", left_indent), (names.cells[2], "UNIVERSITY", right_indent)):
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.BOTTOM
         title = cell.paragraphs[0]
+        title.paragraph_format.left_indent = indent
+        title.paragraph_format.space_after = Pt(0)
         _docx_run(title, name, NAME_SIZE, bold=True)
-        title.paragraph_format.space_after = Pt(8)
-        title.paragraph_format.left_indent = int(indent * emu)
-        for label, value, href in rows:
-            p = cell.add_paragraph()
-            p.paragraph_format.space_after = Pt(0)
-            p.paragraph_format.left_indent = int(indent * emu)
+
+    def lines(cell: Any, rows: list[tuple[str, str, str | None]], indent: int, tab: float = 0) -> None:
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        for i, (label, value, href) in enumerate(rows):
+            p = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+            p.paragraph_format.left_indent = indent
+            p.paragraph_format.space_before = Pt(3 * mm if i == 0 else 0)
+            p.paragraph_format.space_after = Pt(5 * mm if i == len(rows) - 1 else 0)
             if tab:
-                p.paragraph_format.tab_stops.add_tab_stop(int((indent + tab) * emu))
+                p.paragraph_format.tab_stops.add_tab_stop(indent + int(tab * emu))
             if label:
                 _docx_run(p, f"{label}\t", TEXT_SIZE)
             if href:
@@ -233,9 +281,27 @@ def _docx_header_table(document: Any) -> Any:
             else:
                 _docx_run(p, value, TEXT_SIZE)
 
-    block(left, "THARAKA", [("", line, None) for line in ADDRESS], m.side - HEADER_GAP - m.left_width)
-    block(right, "UNIVERSITY", list(CONTACTS), HEADER_GAP, m.label_width)
+    lines(details.cells[0], [("", line, None) for line in ADDRESS], left_indent)
+    lines(details.cells[2], list(CONTACTS), right_indent, m.label_width)
     return table
+
+
+def _docx_no_cell_margins(table: Any) -> None:
+    """No padding inside the cells, so the blocks sit exactly where the indents put them."""
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+
+    margins = parse_xml(
+        f"<w:tblCellMar {nsdecls('w')}>"
+        + "".join(f'<w:{side} w:w="0" w:type="dxa"/>' for side in ("top", "left", "bottom", "right"))
+        + "</w:tblCellMar>"
+    )
+    properties = table._tbl.tblPr
+    look = properties.find(margins.tag.replace("tblCellMar", "tblLook"))
+    if look is not None:
+        look.addprevious(margins)
+    else:
+        properties.append(margins)
 
 
 def _docx_run(paragraph: Any, text: str, size: float, bold: bool = False, color: str | None = None) -> Any:
@@ -270,9 +336,7 @@ def _docx_watermark(section: Any, size: int) -> None:
     from docx.oxml.ns import nsdecls, qn
 
     paragraph = section.header.paragraphs[0]
-    inline = paragraph.add_run().add_picture(str(LOGO), width=size, height=size)._inline
-    blip = inline.find(".//" + qn("a:blip"))
-    blip.append(parse_xml(f'<a:alphaModFix {nsdecls("a")} amt="{WORD_WATERMARK_OPACITY}"/>'))
+    inline = paragraph.add_run().add_picture(BytesIO(faded_logo()), width=size, height=size)._inline
     anchor = parse_xml(
         f'<wp:anchor {nsdecls("wp")} distT="0" distB="0" distL="0" distR="0" simplePos="0" '
         'relativeHeight="0" behindDoc="1" locked="1" layoutInCell="1" allowOverlap="1">'
@@ -295,7 +359,7 @@ def _docx_watermark(section: Any, size: int) -> None:
 def _docx_footer(section: Any, text_width: int) -> None:
     from docx.enum.text import WD_TAB_ALIGNMENT
 
-    emu = 12700
+    emu = EMU_PER_POINT
     paragraph = section.footer.paragraphs[0]
     paragraph.paragraph_format.tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT)
     blue = "0070C0"
