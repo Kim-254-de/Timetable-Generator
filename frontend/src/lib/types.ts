@@ -45,17 +45,40 @@ export interface RoomRecord {
   in_use: number
   /** Seats for exams when set; otherwise capacity x the term's spacing. */
   exam_seats: number | null
+  /** What applies: the Director's choice when they made one, else the administrator's. */
   for_exams: boolean
+  admin_for_exams: boolean
+  exam_override: boolean | null
+  health_unit: boolean
   block: string
 }
 
+/**
+ * A department, read from Smart Attendance (where an administrator creates
+ * it with a name and a code). `lecturer_count` is the Generator's own; the
+ * code is Attendance's when `code_from_attendance`, else made here.
+ */
 export interface Department {
   id: number
   code: string
   name: string
-  school: string
+  /** True when the code is Attendance's: it can only be changed there. */
+  code_from_attendance: boolean
   lecturer_count: number | null
   smarttt_department_id: number | null
+  /** False for one entered here before departments came from Attendance. */
+  from_attendance: boolean
+  /** Active lecturers Attendance has placed in it: a guide for lecturer_count. */
+  attendance_lecturer_count: number | null
+}
+
+export interface DepartmentList {
+  attendance_connected: boolean
+  departments: Department[]
+}
+
+export interface DepartmentSync extends DepartmentList {
+  report: { linked: number; created: number; updated: number; skipped: string[] } | null
 }
 
 export interface BulkResult {
@@ -128,7 +151,7 @@ export interface ClassRow {
   sub_class: string
   student_count: number | null
   unavailable: number[]
-  /** Entered by its department in the Allocator, and edited only there (but its unavailable hours). */
+  /** Entered by its department in Smart Attendance, and edited only there (but its unavailable hours). */
   from_allocator: boolean
 }
 
@@ -157,14 +180,14 @@ export interface Offering {
   session_length: number | null
   room_type: RoomType
   source: string
-  /** Entered by its department in the Allocator, and edited only there. */
+  /** Entered by its department in Smart Attendance, and edited only there. */
   from_allocator: boolean
   class_row_ids: string[]
   class_rows: string[]
   groups: Group[]
 }
 
-/** A department's teaching in the Allocator: published or not yet, and whether it is imported. */
+/** A department's teaching in Smart Attendance: published or not yet, and whether it is imported. */
 export interface DepartmentSubmission {
   code: string
   name: string
@@ -302,20 +325,54 @@ export interface ExamPeriod {
   exam_days_off: string[]
   exam_sessions: ExamSessionTime[]
   exam_spacing: number
+  exam_health_prefixes: string[]
+  health_seats: number
   days: string[]
   slots: number
   rooms: number
   exam_seats: number
 }
 
+export type ExamCategory = 'health' | 'postgraduate' | 'common' | 'regular'
+
 export interface ExamPaperItem {
   id: string
+  category: ExamCategory
+  /** The Director's choice; null when worked out from the codes and class rows. */
+  category_override: ExamCategory | null
+  /** Uploaded by the Director, not listed by a department. */
+  director_paper: boolean
   codes: string
   title: string
   department: string
   examiner: string
   students: number
-  rows: { label: string; students: number; odel: boolean }[]
+  rows: { label: string; students: number; odel: boolean; programme: string; year: number; semester: number; stream: string }[]
+}
+
+export interface HealthListReview {
+  entries: {
+    line: number
+    codes: string[]
+    title: string
+    section: string
+    sitting: 'regular' | 'odel'
+    category: ExamCategory
+    /** Ids of the classes the letter's headings name for this paper. */
+    letter_classes: string[]
+    students: number | null
+    classes: string[]
+    unknown_codes: string[]
+    duplicate_of: number | null
+    department_lists: string[]
+    already_here: boolean
+  }[]
+  /** The classes the letter's headings name, matched to a SMARTTT programme when exactly one fits. */
+  classes: { id: string; name: string; heading: string; year: number | null; semester: number | null; students: number | null; programme: string; matched: boolean }[]
+  programmes: { code: string; name: string }[]
+  health_prefixes: string[]
+  smarttt: { available: boolean; reason: string | null }
+  summary: { papers: number; duplicates: number; unknown: number; no_classes: number }
 }
 
 export interface ExamPracticalItem {
@@ -336,6 +393,8 @@ export interface ExamPublicationItem {
   published_at: string
   sent_to_smarttt: boolean
   not_sent_reason: string | null
+  /** Not yet in SMARTTT, the latest version, and SMARTTT has the term: it can be sent now. */
+  can_send: boolean
 }
 
 export interface ExamOverview {
@@ -374,7 +433,12 @@ export interface ExamGridPaper {
   invigilators: Record<string, { staff_number: string | null; name: string }>
   main_room: string | null
   extra_rooms: string[]
+  category: ExamCategory
+  /** Uploaded by the Director, who names its invigilators. */
+  director_paper: boolean
 }
+
+export interface ExamVenue { code: string; seats: number; health: boolean; block: string }
 
 export interface ExamRoomSheet {
   day: string
@@ -417,6 +481,7 @@ export interface ExamGrid {
   papers: ExamGridPaper[]
   practicals: ExamPracticalItem[]
   rooms: ExamRoomSheet[]
+  exam_rooms: ExamVenue[]
 }
 
 export interface ExamSwitchState {

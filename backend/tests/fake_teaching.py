@@ -1,4 +1,4 @@
-"""A stand-in for the Timetable Allocator's /api/integrations/generator endpoint."""
+"""A stand-in for Smart Attendance's /api/v1/integrations/generator/terms/{term}/submissions endpoint."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-KEY = "test-inbound-key"
+KEY = "test-attendance-key"
 
 
 def course(cid: str, department: str, programme: str, students: int, year: int = 1) -> dict[str, Any]:
@@ -56,7 +56,7 @@ def unit(
     }
 
 
-class FakeAllocator:
+class FakeTeaching:
     """Departments' published teaching for any term; tests change `published` and `not_published`."""
 
     def __init__(self) -> None:
@@ -88,7 +88,7 @@ class FakeAllocator:
     def handle(self, request: httpx.Request) -> httpx.Response:
         if request.headers.get("X-API-Key") != KEY:
             return httpx.Response(401, json={"success": False})
-        path = request.url.path.removeprefix("/api/integrations/generator")
+        path = request.url.path.removeprefix("/api/v1/integrations/generator")
         self.calls.append(path)
         if path.startswith("/terms/") and path.endswith("/submissions"):
             data = {

@@ -1,6 +1,6 @@
 """
-The data the Directorate enters in the Generator: lecture halls, departments,
-class rows and units (with the class rows that take each unit), entered one
+The data the Directorate enters in the Generator: lecture halls, class rows
+and units (with the class rows that take each unit), entered one
 at a time or pasted in bulk from Excel, and copying a previous term's class
 rows, units and groups into a new term.
 
@@ -17,16 +17,18 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.api.schemas import ClassRowBody, DepartmentBody, DepartmentPatch, OfferingBody, RoomBody, RoomPatch
+from app.api.schemas import ClassRowBody, DepartmentPatch, OfferingBody, RoomBody, RoomPatch
 from app.auth import Identity
+from app.clients.smarttt import SmartttClient
 from app.errors import ApiError
 from app.models import (
     ClassRow,
     Department,
     DraftSession,
+    ExamSeat,
     Group,
     GroupClassRow,
     OfferingClassRow,
@@ -54,7 +56,10 @@ def room_dict(room: Room, in_use: int = 0) -> dict[str, Any]:
         "unavailable": sorted(room.unavailable or []),
         "in_use": in_use,
         "exam_seats": room.exam_seats,
-        "for_exams": room.for_exams,
+        "for_exams": room.used_for_exams,  # what applies
+        "admin_for_exams": room.for_exams,  # the administrator's say in SMARTTT
+        "exam_override": room.exam_override,  # the Director's, when they made one
+        "health_unit": room.health_unit,
         "block": room.block,
     }
 
@@ -70,8 +75,48 @@ def list_rooms(db: Session) -> list[dict[str, Any]]:
     return [room_dict(r, int(usage.get(r.id, 0))) for r in rooms]
 
 
+def room_key(code: str) -> str:
+    """'TC 1', 'tc1', 'TC-01' -> 'TC1': one room however it is written. SMARTTT has the same rule (room_merge.py)."""
+    plain = re.sub(r"[^A-Z0-9]", "", (code or "").upper())
+    return re.sub(r"(?<![0-9])0+(?=[0-9])", "", plain)
+
+
 def _room_by_code(db: Session, code: str) -> Room | None:
-    return db.scalar(select(Room).where(func.upper(Room.code) == code.strip().upper()))
+    key = room_key(code)
+    return next((r for r in db.scalars(select(Room).order_by(Room.code)) if room_key(r.code) == key), None)
+
+
+def _merge_twins(db: Session, identity: Identity, keep_codes: dict[str, str]) -> list[str]:
+    """
+    Folds rooms here that are one room ("TC1", "TC 1") into one, keeping the code
+    SMARTTT uses, and points saved timetables and exam seats at it. Kept out of
+    exams by the Director on either code keeps it out.
+    """
+    groups: dict[str, list[Room]] = {}
+    for room in db.scalars(select(Room).order_by(Room.code)):
+        groups.setdefault(room_key(room.code), []).append(room)
+    merged: list[str] = []
+    for key, rooms in groups.items():
+        if len(rooms) < 2:
+            continue
+        wanted = keep_codes.get(key, "").upper()
+        keep = next((r for r in rooms if r.code.upper() == wanted), rooms[0])
+        others = [r for r in rooms if r is not keep]
+        before = room_dict(keep)
+        choices = [r.exam_override for r in rooms if r.exam_override is not None]
+        keep.exam_override = (False not in choices) if choices else None
+        keep.exam_seats = keep.exam_seats or next((r.exam_seats for r in others if r.exam_seats), None)
+        keep.unavailable = sorted({slot for r in rooms for slot in (r.unavailable or [])})
+        for old in others:
+            db.execute(
+                update(DraftSession).where(DraftSession.smarttt_room_id == old.id).values(smarttt_room_id=keep.id)
+            )
+            db.execute(update(ExamSeat).where(ExamSeat.room_id == old.id).values(room_id=keep.id))
+            merged.append(f"{old.code} into {keep.code}")
+            audit(db, identity, "room.merge", "room", keep.id, before, {"merged": old.code})
+            db.delete(old)
+    db.flush()
+    return merged
 
 
 def _apply_room(db: Session, room: Room, fields: dict[str, Any]) -> None:
@@ -90,7 +135,9 @@ def _apply_room(db: Session, room: Room, fields: dict[str, Any]) -> None:
         clash = _room_by_code(db, fields["code"])
         if clash is not None and clash.id != room.id:
             raise ApiError(409, "CODE_TAKEN", f"There is already a lecture hall {clash.code}.")
-    for key in ("code", "building", "capacity", "room_type", "active", "for_exams"):
+    if "for_exams" in fields:  # the Director's choice; None goes back to the administrator's
+        room.exam_override = fields["for_exams"]
+    for key in ("code", "building", "capacity", "room_type", "active"):
         if key in fields and fields[key] is not None:
             setattr(room, key, fields[key])
     if "exam_seats" in fields:
@@ -104,6 +151,9 @@ def create_room(db: Session, identity: Identity, fields: dict[str, Any], commit:
         id=uuid.uuid4().hex, code="", building="", capacity=1, room_type="lecture_hall", unavailable=[], for_exams=True
     )
     _apply_room(db, room, fields)
+    room.exam_override = (
+        False if room.exam_override is False else None
+    )  # a new room follows the administrator unless kept out
     db.add(room)
     db.flush()
     audit(db, identity, "room.create", "room", room.id, None, room_dict(room))
@@ -122,6 +172,83 @@ def update_room(db: Session, identity: Identity, room: Room, fields: dict[str, A
     return room
 
 
+def sync_rooms(db: Session, smarttt: SmartttClient, identity: Identity) -> dict[str, Any]:
+    """
+    Brings in the rooms the admin uploaded to SMARTTT, by code: building,
+    capacity, type, and whether it is in use (SMARTTT's status "active"). What
+    only the Generator keeps stays as it is: exam seats, the Director's own
+    choice of "for exams" (which overrules the administrator's, read here with
+    "health unit") and the slots a room is unavailable. A room only here is
+    listed, and not used for exams unless the Director chooses it. Rooms that are
+    one room under two codes ("TC1", "TC 1") are folded into one.
+    """
+    added: list[str] = []
+    updated: list[str] = []
+    # SMARTTT may still hold one room under two codes: read as one, and kept out of exams if either says so.
+    rows: dict[str, dict[str, Any]] = {}
+    for r in smarttt.rooms():
+        code = str(r.get("code") or "").strip()
+        if not code or not r.get("capacity"):
+            continue
+        key = room_key(code)
+        had = rows.get(key)
+        if had is None:
+            rows[key] = {**r, "code": code}
+            continue
+        better = r if r.get("capacity_confirmed") and not had.get("capacity_confirmed") else had
+        rows[key] = {
+            **better,
+            "code": had["code"] if better is had else code,
+            "for_exams": had.get("for_exams") is not False and r.get("for_exams") is not False,
+            "health_unit": had.get("health_unit") is True or r.get("health_unit") is True,
+        }
+    merged = _merge_twins(db, identity, {k: r["code"] for k, r in rows.items()})
+    for r in rows.values():
+        code = r["code"]
+        try:
+            kind = _room_type(r.get("room_type"))
+        except ValueError:
+            kind = "lecture_hall"
+        capacity = int(r["capacity"])
+        fields: dict[str, Any] = {
+            "building": str(r.get("building") or ""),
+            "capacity": capacity,
+            "room_type": kind,
+            "active": (r.get("status") or "active") == "active",
+            "for_exams": r.get("for_exams") is not False,
+            "health_unit": r.get("health_unit") is True,
+        }
+        room = _room_by_code(db, code)
+        if room is None:
+            room = Room(id=uuid.uuid4().hex, code=code, unavailable=[], **fields)
+            db.add(room)
+            db.flush()
+            audit(db, identity, "room.create", "room", room.id, None, room_dict(room))
+            added.append(code)
+            continue
+        before = room_dict(room)
+        if room.exam_seats and room.exam_seats > capacity:
+            room.exam_seats = None  # a fixed number above the new capacity no longer holds
+        if room.code.upper() != code.upper():
+            fields["code"] = code  # SMARTTT's spelling, so a published timetable names the same room
+        changed = {k: v for k, v in fields.items() if getattr(room, k) != v}
+        if changed:
+            for key, value in changed.items():
+                setattr(room, key, value)
+            db.flush()
+            audit(db, identity, "room.update", "room", room.id, before, room_dict(room))
+            updated.append(code)
+    # A room the administrator can't see can't be kept out by them: unused for exams unless the Director chooses it.
+    only_here = []
+    if rows:
+        for room in db.scalars(select(Room)):
+            if room_key(room.code) not in rows:
+                only_here.append(room.code)
+                room.for_exams = False
+    db.commit()
+    return {"added": added, "updated": updated, "only_here": sorted(only_here), "merged": merged}
+
+
 def delete_room(db: Session, identity: Identity, room: Room) -> None:
     used = db.scalar(select(func.count()).select_from(DraftSession).where(DraftSession.smarttt_room_id == room.id))
     if used:
@@ -138,19 +265,21 @@ def delete_room(db: Session, identity: Identity, room: Room) -> None:
 # -- departments ---------------------------------------------------------------------------
 
 
+# Departments come from Smart Attendance (app.services.departments); here they
+# are found, and their Generator-only fields (code, lecturer count) edited.
+
+
 def department_dict(d: Department) -> dict[str, Any]:
     return {
         "id": d.id,
         "code": d.code,
         "name": d.name,
-        "school": d.school,
+        "code_from_attendance": d.code_from_attendance,
         "lecturer_count": d.lecturer_count,
         "smarttt_department_id": d.smarttt_department_id,
+        "from_attendance": d.attendance_department_id is not None,
+        "attendance_lecturer_count": d.attendance_lecturer_count,
     }
-
-
-def list_departments(db: Session) -> list[dict[str, Any]]:
-    return [department_dict(d) for d in db.scalars(select(Department).order_by(Department.name))]
 
 
 def get_department(db: Session, department_id: int) -> Department:
@@ -165,27 +294,18 @@ def _department_by_code(db: Session, code: str) -> Department | None:
 
 
 def _apply_department(db: Session, d: Department, fields: dict[str, Any]) -> None:
+    """The Generator's own fields; the name, and a code Attendance gives, are Attendance's."""
+    if fields.get("code") is not None and d.code_from_attendance and fields["code"].strip().upper() != d.code.upper():
+        raise ApiError(
+            409, "CODE_FROM_ATTENDANCE", f"{d.name}'s code is set in Smart Attendance's admin console; change it there."
+        )
     if fields.get("code") is not None:
         clash = _department_by_code(db, fields["code"])
         if clash is not None and clash.id != d.id:
             raise ApiError(409, "CODE_TAKEN", f"There is already a department {clash.code}.")
-    for key in ("code", "name", "school"):
-        if fields.get(key) is not None:
-            setattr(d, key, fields[key])
+        d.code = fields["code"]
     if "lecturer_count" in fields and fields["lecturer_count"] is not None:
         d.lecturer_count = fields["lecturer_count"] or None
-
-
-def create_department(db: Session, identity: Identity, fields: dict[str, Any], commit: bool = True) -> Department:
-    next_id = max(int(db.scalar(select(func.max(Department.id))) or 0) + 1, FIRST_LOCAL_DEPARTMENT_ID)
-    d = Department(id=next_id, code="", name="", school="")
-    _apply_department(db, d, fields)
-    db.add(d)
-    db.flush()
-    audit(db, identity, "department.create", "department", str(d.id), None, department_dict(d))
-    if commit:
-        db.commit()
-    return d
 
 
 def update_department(
@@ -201,6 +321,9 @@ def update_department(
 
 
 def delete_department(db: Session, identity: Identity, d: Department) -> None:
+    """Only one entered here before departments came from Attendance, and only when nothing uses it."""
+    if d.attendance_department_id is not None:
+        raise ApiError(409, "FROM_ATTENDANCE", f"{d.name} comes from Smart Attendance; it can't be deleted here.")
     units = db.scalar(select(func.count()).select_from(UnitOffering).where(UnitOffering.owning_department_id == d.id))
     rows = db.scalar(select(func.count()).select_from(ClassRow).where(ClassRow.department_id == d.id))
     if units or rows:
@@ -214,7 +337,7 @@ _NAME_PREFIX = re.compile(r"^(department|dept\.?)(\s+of)?\s+", re.IGNORECASE)
 _CODE_FILLER = {"OF", "AND", "THE", "FOR", "IN"}
 
 
-def _name_key(name: str) -> str:
+def name_key(name: str) -> str:
     """'Department of  Computer Science' and 'computer science' are the same department."""
     return _NAME_PREFIX.sub("", " ".join(name.split())).casefold()
 
@@ -224,11 +347,11 @@ def find_department(db: Session, text: str) -> Department | None:
     found = _department_by_code(db, text)
     if found is not None:
         return found
-    key = _name_key(text)
-    return next((d for d in db.scalars(select(Department)) if _name_key(d.name) == key), None)
+    key = name_key(text)
+    return next((d for d in db.scalars(select(Department)) if name_key(d.name) == key), None)
 
 
-def _new_department_code(db: Session, name: str) -> str:
+def new_department_code(db: Session, name: str) -> str:
     """A short unused code from the name: 'Computer Science' -> 'CS', 'Education' -> 'EDUCATIO'."""
     words = [w for w in re.findall(r"[A-Za-z0-9]+", _NAME_PREFIX.sub("", name).upper()) if w not in _CODE_FILLER]
     base = (words[0][:8] if len(words) == 1 else "".join(w[0] for w in words)[:8]) if words else "DEPT"
@@ -240,15 +363,18 @@ def _new_department_code(db: Session, name: str) -> str:
 
 def department_for(db: Session, identity: Identity, text: str) -> Department:
     """
-    The department typed on a class row or unit. A name not yet in the
-    Departments list is added there, with a code made from the name that the
-    Director can change on the Departments page.
+    The department typed on a class row or unit, by code or name. Departments
+    are created in Smart Attendance by an administrator, never here.
     """
     found = find_department(db, text)
     if found is not None:
         return found
-    name = " ".join(text.split())
-    return create_department(db, identity, {"code": _new_department_code(db, name), "name": name}, commit=False)
+    raise ApiError(
+        422,
+        "UNKNOWN_DEPARTMENT",
+        f"{' '.join(text.split())} is not a department. Departments are added in Smart Attendance's admin console "
+        "by an administrator; once it is there, refresh the Departments page.",
+    )
 
 
 def _resolved_department_id(db: Session, identity: Identity, fields: dict[str, Any]) -> int | None:
@@ -302,7 +428,7 @@ def create_class_row(
 def update_class_row(db: Session, identity: Identity, row: ClassRow, fields: dict[str, Any]) -> None:
     """
     Applies a patch (the caller audits and commits). Everything is checked
-    before anything changes. A row from the Allocator takes only the hours it
+    before anything changes. A row from a department's Teaching page takes only the hours it
     can't be taught; the rest is its department's.
     """
     if any(v is not None for k, v in fields.items() if k != "unavailable"):
@@ -611,26 +737,24 @@ def bulk_rooms(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> d
 
 
 def bulk_departments(db: Session, identity: Identity, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sets codes and lecturer counts of departments already here (they come from Attendance)."""
+
     def one(r: dict[str, Any], claim: Any) -> str:
+        text = str(r.get("department") or r.get("name") or r.get("code") or "")
+        if not text:
+            raise ValueError("name the department (its code or name)")
+        found = find_department(db, text)
+        if found is None:
+            raise ValueError(f"{text} is not a department; departments are added in Smart Attendance")
+        claim(f"id:{found.id}", f"Department {found.code}")
         given = _given(
             {
-                "code": r.get("code"),
-                "name": r.get("name") or r.get("department"),
-                "school": r.get("school", r.get("faculty")),
+                "code": r.get("code") if r.get("code") and r.get("department") else None,
                 "lecturer_count": r.get("lecturer_count") or r.get("lecturers"),
             }
         )
-        if given.get("code"):
-            claim("code:" + compact(str(given["code"])), f"Department code {given['code']}")
-        if given.get("name"):
-            claim("name:" + compact(str(given["name"])), f"Department {given['name']}")
-        existing = _department_by_code(db, str(given.get("code") or ""))
-        if existing is not None:
-            fields = _validated(DepartmentPatch, given, exclude_unset=True)
-            update_department(db, identity, existing, fields, commit=False)
-            return "updated"
-        create_department(db, identity, _validated(DepartmentBody, given), commit=False)
-        return "created"
+        update_department(db, identity, found, _validated(DepartmentPatch, given, exclude_unset=True), commit=False)
+        return "updated"
 
     return _bulk(db, rows, one)
 

@@ -48,7 +48,7 @@ def propose_groups(db: Session, identity: Identity, term: Term, replace: bool) -
 
     for offering in db.scalars(select(UnitOffering).where(UnitOffering.term_id == term.id)):
         if offering.allocator_ref or (offering.groups and not replace):
-            continue  # a unit from the Allocator is split by its department
+            continue  # a unit a department published is split by that department
         members = [rows[link.class_row_id] for link in offering.class_rows if link.class_row_id in rows]
         missing = [r.label for r in members if r.student_count is None]
         if not members or missing:

@@ -29,3 +29,17 @@ def test_production_refuses_to_start_without(monkeypatch, unset):
     monkeypatch.delenv(unset, raising=False)
     with pytest.raises(ValueError, match=unset):
         Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("", []),
+        ("https://tt.example.com", ["https://tt.example.com"]),
+        ("https://a.example.com, https://b.example.com", ["https://a.example.com", "https://b.example.com"]),
+        ('["https://a.example.com"]', ["https://a.example.com"]),
+    ],
+)
+def test_cors_origins_from_the_environment(monkeypatch, value, expected):
+    monkeypatch.setenv("CORS_ORIGINS", value)
+    assert Settings(_env_file=None).cors_origins == expected  # type: ignore[call-arg]

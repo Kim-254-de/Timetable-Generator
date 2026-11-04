@@ -1,10 +1,11 @@
 """
-What the Timetable Allocator reads from the Generator: the terms (departments
-enter their teaching against them) and, once the Director has published a
-version, when and where each class meets, which departments see on their
-pages and downloads.
+What Smart Attendance's department Teaching page reads from the Generator:
+the terms (departments enter their teaching against them) and, once the
+Director has published a version, when and where each class meets, which
+departments see on their pages and downloads.
 
-Read-only, behind the Allocator's own shared key (X-API-Key = ALLOCATOR_API_KEY).
+Read-only, behind the key shared with Attendance (X-API-Key = ATTENDANCE_API_KEY
+here = GENERATOR_API_KEY there), the same one the Generator sends there.
 """
 
 from __future__ import annotations
@@ -23,9 +24,9 @@ from app.services.problem import times
 from app.services.setup import compact
 
 
-def require_allocator_key(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> None:
-    """Fails closed: with ALLOCATOR_API_KEY unset, every request is refused."""
-    expected = settings.allocator_api_key
+def require_attendance_key(request: Request, settings: Annotated[Settings, Depends(get_settings)]) -> None:
+    """Fails closed: with ATTENDANCE_API_KEY unset, every request is refused."""
+    expected = settings.attendance_api_key
     presented = request.headers.get("X-API-Key", "")
     if not expected or not hmac.compare_digest(presented.encode(), expected.encode()):
         raise ApiError(401, "INVALID_API_KEY", "A valid X-API-Key header is required.")
@@ -47,7 +48,7 @@ def latest_publication(db: Session, term: Term) -> Publication | None:
     )
 
 
-def allocator_terms(db: Session) -> list[dict[str, Any]]:
+def teaching_terms(db: Session) -> list[dict[str, Any]]:
     out = []
     for t in db.scalars(select(Term).order_by(Term.academic_year.desc(), Term.semester.desc())):
         publication = latest_publication(db, t)
@@ -69,7 +70,7 @@ def _meeting_order(m: dict[str, str]) -> tuple[int, str]:
     return ("MON", "TUE", "WED", "THU", "FRI").index(m["day_of_week"]), m["start_time"]
 
 
-def allocator_times(db: Session, term: Term) -> dict[str, Any]:
+def teaching_times(db: Session, term: Term) -> dict[str, Any]:
     """When and where each class meets in the latest approved version, by class key ('COSC103-GRA')."""
     publication = latest_publication(db, term)
     if publication is None:

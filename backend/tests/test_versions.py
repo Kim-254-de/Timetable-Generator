@@ -90,19 +90,35 @@ def test_runs_whose_worker_died_are_marked_failed(client, smarttt, db):
     assert "worker" in listed[str(lost.id)]["failure"]["reasons"][0]["message"]
 
 
-def test_the_allocator_learns_when_smarttt_has_the_version(client, smarttt):
+def test_attendance_learns_when_smarttt_has_the_version(client, smarttt):
     sign_in(client)
     term_id = setup_term(client)
-    headers = {"X-API-Key": "test-allocator-key"}
+    headers = {"X-API-Key": "test-attendance-key"}
     draft_id = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))["draft_id"]
 
     smarttt.down = True
     ok(client.post(f"/api/drafts/{draft_id}/publish", json={}))
     smarttt.down = False
-    terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
+    terms = ok(client.get("/api/integrations/attendance/terms", headers=headers))
     assert terms[0]["published_version"] == 1 and terms[0]["in_smarttt"] is False  # approved while SMARTTT was down
     assert terms[0]["smarttt_term_id"]
 
     ok(client.post(f"/api/terms/{term_id}/publications/1/send"))
-    terms = ok(client.get("/api/integrations/allocator/terms", headers=headers))
+    terms = ok(client.get("/api/integrations/attendance/terms", headers=headers))
     assert terms[0]["in_smarttt"] is True
+
+
+def test_a_version_is_sent_on_top_of_what_smarttt_has(client, smarttt):
+    sign_in(client)
+    term_id = setup_term(client)
+    first = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))["draft_id"]
+    smarttt.down = True
+    ok(client.post(f"/api/drafts/{first}/publish", json={}))  # SMARTTT never gets version 1
+    smarttt.down = False
+
+    copy = ok(client.post(f"/api/drafts/{first}/copy"))
+    second = ok(client.post(f"/api/drafts/{copy['id']}/publish", json={}))
+    assert second["version"] == 2 and second["smarttt"]["sent"] is True
+    assert smarttt.payloads[-1]["based_on_version"] is None  # SMARTTT's latest, not the Generator's
+    third = ok(client.post(f"/api/drafts/{ok(client.post(f'/api/drafts/{copy["id"]}/copy'))['id']}/publish", json={}))
+    assert third["smarttt"]["sent"] is True and smarttt.payloads[-1]["based_on_version"] == 2

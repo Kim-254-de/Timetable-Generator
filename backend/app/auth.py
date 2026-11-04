@@ -1,16 +1,18 @@
 """
-Sign-in. Staff use their SMARTTT account; SMARTTT checks the password and
-says what they may do here (identity). Only the Directorate of Examinations
-and Timetabling (SMARTTT's timetabling_office group) may use the Generator.
-The Generator then keeps its own server-side session:
+Sign-in. The Directorate of Examinations and Timetabling (the timetabling
+office) is invited by an administrator in Smart Attendance, like any other
+officer, and signs in here with that email and the password they chose;
+Attendance checks it and says whether the account is the timetabling
+office's (identity). Only they may use the Generator. The Generator then
+keeps its own server-side session:
 
 - an opaque random token in an httpOnly, SameSite=Lax cookie; only its
   SHA-256 is stored, so a database leak can't be replayed as sessions;
 - a CSRF token, readable by the web app from the tg_xsrf cookie and
   required back in the X-XSRF-TOKEN header on every state-changing request;
 - idle and absolute expiry, and revocation on sign-out;
-- roles re-read from SMARTTT every IDENTITY_REFRESH_SECONDS, so someone who
-  leaves the Directorate, or an account that is deactivated, loses access quickly.
+- the account re-checked with Attendance every IDENTITY_REFRESH_SECONDS, so
+  someone the administrator removes loses access quickly.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from fastapi import Depends, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.clients.smarttt import SmartttClient, SmartttError, get_smarttt
+from app.clients.attendance import AttendanceClient, AttendanceError, AttendanceSignInError, get_attendance
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import ApiError
@@ -47,7 +49,7 @@ class Identity:
     session_id: str
 
     @classmethod
-    def from_smarttt(cls, data: dict[str, Any], session_id: str) -> Identity:
+    def from_attendance(cls, data: dict[str, Any], session_id: str) -> Identity:
         account = data["account"]
         return cls(
             account_id=str(account["id"]),
@@ -112,7 +114,7 @@ def sign_in(
     request: Request,
     identifier: str,
     password: str,
-    smarttt: SmartttClient,
+    attendance: AttendanceClient,
     settings: Settings,
 ) -> Identity:
     ip = request.client.host if request.client else "unknown"
@@ -120,16 +122,23 @@ def sign_in(
     if _too_many_attempts(db, keys, settings):
         raise ApiError(429, "TOO_MANY_ATTEMPTS", "Too many sign-in attempts. Please wait a few minutes.")
 
-    data = smarttt.authenticate(identifier.strip(), password)
+    try:
+        data = attendance.authenticate(identifier.strip(), password)
+    except AttendanceSignInError as exc:
+        raise ApiError(503, "ATTENDANCE_UNAVAILABLE", exc.message) from exc
+    except AttendanceError as exc:
+        raise ApiError(
+            503, "ATTENDANCE_UNAVAILABLE", "Sign-in is unavailable right now. Try again in a minute."
+        ) from exc
     if data is None:
         _record_failure(db, keys)
-        raise ApiError(401, "INVALID_CREDENTIALS", "Wrong staff ID, email or password.")
+        raise ApiError(401, "INVALID_CREDENTIALS", "Wrong email or password.")
     if not data.get("timetabling_office"):
         raise ApiError(
             403,
             "NOT_TIMETABLING_OFFICE",
             "The Timetable Generator is for the Directorate of Examinations and Timetabling. Ask the "
-            "SMARTTT administrator to add you to the timetabling office.",
+            "Smart Attendance administrator to invite you as the timetabling office.",
         )
 
     db.execute(delete(LoginAttempt).where(LoginAttempt.key == keys[0]))
@@ -150,7 +159,7 @@ def sign_in(
     db.add(session)
     db.commit()
     _set_cookies(response, token, csrf, settings)
-    return Identity.from_smarttt(data, str(session.id))
+    return Identity.from_attendance(data, str(session.id))
 
 
 def sign_out(db: Session, request: Request, response: Response, settings: Settings) -> None:
@@ -193,7 +202,7 @@ def current_identity(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
-    smarttt: Annotated[SmartttClient, Depends(get_smarttt)],
+    attendance: Annotated[AttendanceClient, Depends(get_attendance)],
 ) -> Identity:
     token = request.cookies.get(settings.session_cookie_name)
     if not token:
@@ -215,9 +224,9 @@ def current_identity(
 
     if _aware(session.identity_checked_at) + timedelta(seconds=settings.identity_refresh_seconds) <= now:
         try:
-            fresh = smarttt.identity(session.account_id)
-        except SmartttError:
-            # SMARTTT down: carry on with the roles last confirmed rather than
+            fresh = attendance.identity(session.account_id)
+        except AttendanceError:
+            # Attendance down: carry on with the roles last confirmed rather than
             # locking everyone out; they are re-checked as soon as it is back.
             logger.warning("Could not refresh identity for %s; using cached roles", session.account_id)
         else:
@@ -230,10 +239,10 @@ def current_identity(
             if not fresh.get("timetabling_office"):
                 session.revoked_at = now
                 db.commit()
-                raise ApiError(403, "NOT_TIMETABLING_OFFICE", "You are no longer in the timetabling office.")
+                raise ApiError(403, "NOT_TIMETABLING_OFFICE", "You are no longer the timetabling office.")
 
     # Idle expiry only needs minute precision; don't write on every request.
     if _aware(session.last_seen_at) + timedelta(seconds=60) <= now or db.is_modified(session):
         session.last_seen_at = now
         db.commit()
-    return Identity.from_smarttt(session.identity, str(session.id))
+    return Identity.from_attendance(session.identity, str(session.id))

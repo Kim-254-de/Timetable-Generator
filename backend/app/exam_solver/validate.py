@@ -1,10 +1,10 @@
-"""Every hard-rule violation (H-E1 to H-E6) in an exam timetable and its seating."""
+"""Every hard-rule violation (H-E1 to H-E9) in an exam timetable and its seating."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 
-from app.exam_solver.model import ExamProblem, ExamViolation, Seat
+from app.exam_solver.model import POSTGRADUATE, ExamProblem, ExamViolation, Seat
 
 
 def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None = None) -> list[ExamViolation]:
@@ -24,6 +24,12 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         elif p.pinned is not None and p.pinned != t:
             out.append(ExamViolation("H-E4", f"{p.label} is pinned and was moved.", (p.id,)))
 
+    for p in problem.papers:
+        t = slots.get(p.id, -1)
+        if problem.edges_only(p) and 0 <= t < problem.slots and not problem.is_edge(t):
+            message = f"{p.label} is a {problem.category(p)} paper: it sits in the first or last session of a day."
+            out.append(ExamViolation("H-E8", message, (p.id,)))
+
     by_row_slot: dict[tuple[str, int], list[str]] = defaultdict(list)
     by_row_day: dict[tuple[str, int], list[str]] = defaultdict(list)
     load: dict[int, int] = defaultdict(int)
@@ -31,10 +37,35 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         paper = papers.get(pid)
         if paper is None or not 0 <= t < problem.slots:
             continue
-        load[t] += paper.students
+        if not problem.is_health(paper):  # the health unit's rooms hold only health papers
+            load[t] += paper.students
         for r in paper.row_ids:
             by_row_slot[(r, t)].append(pid)
             by_row_day[(r, problem.day_of(t))].append(pid)
+    by_staff_slot: dict[tuple[str, int], list[str]] = defaultdict(list)
+    for pid, t in slots.items():
+        paper = papers.get(pid)
+        if paper is not None and paper.invigilator and 0 <= t < problem.slots:
+            by_staff_slot[(paper.invigilator, t)].append(pid)
+    # With the seating known, one person can cover several papers in one room. Without it, only postgraduate
+    # papers are taken to share a room.
+    biggest_room: dict[str, str] = {}
+    if seats is not None:
+        totals: dict[tuple[str, str], int] = defaultdict(int)
+        for s in seats:
+            totals[(s.paper_id, s.room_id)] += s.students
+        for (pid, room_id), _students in sorted(totals.items(), key=lambda kv: (kv[1], kv[0][1])):
+            biggest_room[pid] = room_id
+    for (staff, t), ids in by_staff_slot.items():
+        if seats is not None:
+            places = {biggest_room[i] for i in ids if i in biggest_room}
+            clash = len(places) > 1
+        else:
+            apart = [i for i in ids if problem.category(papers[i]) != POSTGRADUATE]
+            clash = len(apart) > 1 or (len(apart) == 1 and len(ids) > 1)
+        if clash:
+            labels = " and ".join(papers[i].label for i in ids)
+            out.append(ExamViolation("H-E7", f"{staff} invigilates {labels} on {when(t)}.", tuple(ids)))
     for (r, t), ids in by_row_slot.items():
         if len(ids) > 1:
             out.append(
@@ -48,9 +79,9 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
                 )
             )
     for t, students in load.items():
-        if students > problem.total_seats:
+        if students > problem.general_seats:
             out.append(
-                ExamViolation("H-E3", f"{when(t)} has {students} students for {problem.total_seats} exam seats.")
+                ExamViolation("H-E3", f"{when(t)} has {students} students for {problem.general_seats} exam seats.")
             )
 
     if seats is not None:
@@ -69,6 +100,23 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
                 )
                 continue
             used[(s.room_id, slots.get(s.paper_id, -1))] += s.students
+            is_health = problem.is_health(papers[s.paper_id])
+            if problem.rules_on and is_health and not room.health:
+                out.append(
+                    ExamViolation(
+                        "H-E9",
+                        f"{papers[s.paper_id].label} is a health paper in {room.code}, outside the health unit.",
+                        (s.paper_id,),
+                    )
+                )
+            if problem.rules_on and room.health and not is_health:
+                out.append(
+                    ExamViolation(
+                        "H-E9",
+                        f"{papers[s.paper_id].label} isn't a health paper; {room.code} is in the health unit.",
+                        (s.paper_id,),
+                    )
+                )
             seated[(s.paper_id, s.row_id)] += s.students
             kinds[(s.paper_id, s.room_id)].add(odel.get((s.paper_id, s.row_id), False))
         for (room_id, t), students in used.items():

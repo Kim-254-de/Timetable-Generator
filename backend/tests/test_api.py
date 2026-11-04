@@ -46,8 +46,10 @@ def test_import_builds_class_rows_and_offerings(client, smarttt):
         "offerings_created": 4,
         "unresolved": [],
         "rooms_created": 5,
-        "departments_created": 2,
     }
+    # Departments come from Attendance; SMARTTT's lecturer numbers fill their counts (H9).
+    departments = {d["id"]: d for d in ok(client.get("/api/departments"))["departments"]}
+    assert {i: d["lecturer_count"] for i, d in departments.items()} == {1: 4, 2: 4}
     again = ok(client.post(f"/api/terms/{term['id']}/setup/import"))
     assert again["class_rows_created"] == 0  # idempotent: nothing duplicated
 

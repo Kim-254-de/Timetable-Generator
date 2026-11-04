@@ -4,11 +4,15 @@ import type {
   BulkResult,
   ClassRow,
   Department,
+  DepartmentList,
+  DepartmentSync,
   DepartmentStatus,
   ExamDraftSummary,
   ExamGrid,
   ExamOverview,
+  ExamCategory,
   ExamPeriod,
+  HealthListReview,
   ExamSwitchAction,
   ExamSwitchState,
   DraftSummary,
@@ -50,6 +54,8 @@ export const keys = {
 
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
 const patch = <T>(url: string, body: unknown) => api.patch<T>(url, body).then((r) => r.data)
+const put = <T>(url: string, body: unknown) => api.put<T>(url, body).then((r) => r.data)
+const del = <T>(url: string) => api.delete<T>(url).then((r) => r.data)
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => get<Me>('/auth/me'), retry: false })
 export const useSmartttTerms = () => useQuery({ queryKey: keys.smartttTerms, queryFn: () => get<SmartttTerm[]>('/smarttt/terms') })
@@ -96,7 +102,6 @@ function useTermMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
   return useMutation({
     mutationFn: fn,
     onSettled: () => {
-      // Typing a new department on a class row or unit adds it to Departments.
       for (const k of [keys.term(termId), keys.rows(termId), keys.offerings(termId), keys.rooms(termId), keys.runs(termId), keys.departments]) {
         void qc.invalidateQueries({ queryKey: k })
       }
@@ -144,7 +149,8 @@ export interface RoomInput {
   unavailable?: number[]
   /** 0 or empty: capacity x the term's exam spacing. */
   exam_seats?: number | null
-  for_exams?: boolean
+  /** The Director's choice: true or false overrules the administrator, null follows them. */
+  for_exams?: boolean | null
 }
 export const useRoomList = () => useQuery({ queryKey: keys.roomList, queryFn: () => get<RoomRecord[]>('/rooms') })
 export const useSaveRoom = () =>
@@ -152,20 +158,29 @@ export const useSaveRoom = () =>
     id ? patch<RoomRecord>(`/rooms/${id}`, body) : post<RoomRecord>('/rooms', body),
   )
 export const useDeleteRoom = () => useMasterMutation(keys.roomList, (id: string) => api.delete(`/rooms/${id}`))
+/** The rooms and capacities the admin uploaded to SMARTTT, brought in by code. */
+export const useSyncRooms = () =>
+  useMasterMutation(keys.roomList, () => post<{ added: string[]; updated: string[]; only_here: string[]; merged: string[] }>('/rooms/sync', {}))
 export const useBulkRooms = () =>
   useMasterMutation(keys.roomList, (rows: Record<string, string>[]) => post<BulkResult>('/rooms/bulk', { rows }))
 
+/** The Generator's own fields; a department's name, and its code when it has one there, come from Smart Attendance. */
 export interface DepartmentInput {
   code?: string
-  name?: string
-  school?: string
   lecturer_count?: number | null
 }
-export const useDepartments = () => useQuery({ queryKey: keys.departments, queryFn: () => get<Department[]>('/departments') })
+const fetchDepartments = () => get<DepartmentList>('/departments')
+/** Departments, read from Smart Attendance (at most once a minute) and kept here. */
+export const useDepartmentList = () => useQuery({ queryKey: keys.departments, queryFn: fetchDepartments })
+export const useDepartments = () =>
+  useQuery({ queryKey: keys.departments, queryFn: fetchDepartments, select: (d) => d.departments })
 export const useSaveDepartment = () =>
-  useMasterMutation(keys.departments, ({ id, body }: { id?: number; body: DepartmentInput }) =>
-    id ? patch<Department>(`/departments/${id}`, body) : post<Department>('/departments', body),
+  useMasterMutation(keys.departments, ({ id, body }: { id: number; body: DepartmentInput }) =>
+    patch<Department>(`/departments/${id}`, body),
   )
+/** Reads the departments from Smart Attendance now. */
+export const useSyncDepartments = () =>
+  useMasterMutation(keys.departments, () => post<DepartmentSync>('/departments/sync'))
 export const useDeleteDepartment = () =>
   useMasterMutation(keys.departments, (id: number) => api.delete(`/departments/${id}`))
 export const useBulkDepartments = () =>
@@ -178,7 +193,7 @@ export interface ClassRowInput {
   study_year?: number
   study_semester?: number
   sub_class?: string
-  /** A department's name or code; a new name is added to the Departments list. */
+  /** A department's name or code, from the Departments list (Smart Attendance's). */
   department?: string
   student_count?: number | null
 }
@@ -194,7 +209,7 @@ export const useBulkClassRows = (termId: string) =>
 export interface OfferingInput {
   unit_code?: string
   unit_name?: string
-  /** A department's name or code; a new name is added to the Departments list. */
+  /** A department's name or code, from the Departments list (Smart Attendance's). */
   department?: string
   weekly_hours?: number
   session_length?: number
@@ -278,7 +293,7 @@ export const useResolve = (termId: string, draftId: string) =>
   useTermMutation(termId, ({ time_limit_s, keep_published }: { time_limit_s: number; keep_published: boolean }) =>
     post<Run>(`/drafts/${draftId}/resolve`, { time_limit_s, keep_published }))
 
-// -- departments' teaching, from the Allocator ------------------------------------------------
+// -- departments' teaching, from Smart Attendance ------------------------------------------------
 
 export const useDepartmentStatus = (termId: string) =>
   useQuery({ queryKey: keys.submissions(termId), queryFn: () => get<DepartmentStatus>(`/terms/${termId}/departments`), retry: false })
@@ -343,8 +358,49 @@ function useExamMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
 }
 
 export const usePatchExamPeriod = (termId: string) =>
-  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
+  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing' | 'exam_health_prefixes'>>) =>
     patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
+
+export const useReadHealthList = (termId: string) =>
+  useMutation({
+    mutationFn: async (file: File) => {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      let text = ''
+      for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+      return post<HealthListReview>(`/terms/${termId}/health-papers/read`, { file: btoa(text) })
+    },
+  })
+
+export const useSaveHealthList = (termId: string) =>
+  useExamMutation(termId, (papers: { codes: string[]; title: string; sitting: string; classes: HealthRowInput[] }[]) =>
+    post<{ created: number; updated: number; listed_by_departments: string[]; smarttt: { available: boolean; reason: string | null } }>(`/terms/${termId}/health-papers`, { papers }))
+
+export const useRecountHealthPapers = (termId: string) =>
+  useExamMutation(termId, () => post<{ papers: number; available: boolean; reason: string | null }>(`/terms/${termId}/health-papers/recount`))
+
+export const useSetHealthRows = (termId: string) =>
+  useExamMutation(termId, ({ paperId, rows }: { paperId: string; rows: HealthRowInput[] }) =>
+    put(`/terms/${termId}/health-papers/${paperId}/rows`, { rows }))
+
+export const useDeleteHealthPaper = (termId: string) =>
+  useExamMutation(termId, (paperId: string) => del(`/terms/${termId}/health-papers/${paperId}`))
+
+export const useSetHealthInvigilators = (termId: string) =>
+  useExamMutation(termId, ({ paperId, invigilators }: { paperId: string; invigilators: Record<string, { staff_number: string; name: string }> }) =>
+    put(`/terms/${termId}/health-papers/${paperId}/invigilators`, { invigilators }))
+
+export const useChangeExamVenue = (termId: string, draftId: string) =>
+  useExamMutation(termId, ({ paperId, from_room, to_room }: { paperId: string; from_room: string; to_room: string }) =>
+    patch<ExamDraftSummary>(`/exam-drafts/${draftId}/papers/${paperId}/venue`, { from_room, to_room }))
+
+export interface HealthRowInput { programme: string; year: number; semester: number; stream: string; students: number }
+
+export const useSetPaperCategory = (termId: string) =>
+  useExamMutation(termId, ({ paperId, category }: { paperId: string; category: ExamCategory | null }) =>
+    patch(`/terms/${termId}/exam-papers/${paperId}/category`, { category }))
+
+export const useSetCurrentTerm = (termId: string) =>
+  useExamMutation(termId, () => post<{ is_current: boolean; smarttt_term_id: string | null }>(`/terms/${termId}/set-current`))
 
 export const useImportExams = (termId: string) =>
   useExamMutation(termId, () =>
@@ -364,7 +420,7 @@ export const useMoveExamPaper = (termId: string, draftId: string) =>
 
 export const useExamDraftAction = (termId: string, draftId: string) =>
   useExamMutation(termId, (action: 'share' | 'copy' | 'publish' | 'resolve') =>
-    post<ExamDraftSummary & { version?: number; id: string; draft_id?: string }>(`/exam-drafts/${draftId}/${action}`, action === 'resolve' ? { time_limit_s: 120 } : {}))
+    post<ExamDraftSummary & { version?: number; id: string; draft_id?: string; smarttt?: { sent?: boolean; reason?: string } }>(`/exam-drafts/${draftId}/${action}`, action === 'resolve' ? { time_limit_s: 120 } : {}))
 
 export const examExportUrl = (draftId: string, kind: 'timetable' | 'rooms' | 'roster', format: 'docx' | 'pdf') =>
   `${import.meta.env.VITE_API_URL ?? '/api'}/exam-drafts/${draftId}/export/${kind}.${format}`

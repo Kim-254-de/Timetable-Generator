@@ -1,7 +1,7 @@
 """switching SMARTTT from teaching to exams: the switch and the close of the exam period
 
-Revision ID: 0007
-Revises: 0006
+Revision ID: 0010
+Revises: 0009
 Create Date: 2026-10-24 09:00:00.000000
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0007"
-down_revision: str | None = "0006"
+revision: str = "0010"
+down_revision: str | None = "0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

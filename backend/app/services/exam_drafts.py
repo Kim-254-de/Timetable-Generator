@@ -3,27 +3,27 @@ Exam drafts: the date x session grid, room sheets, moving a paper, sharing
 the draft with departments (so they name invigilators), and publishing.
 
 A published version is frozen (`record`) so later edits never change it, and
-`payload` is what SMARTTT is sent: each paper's codes, date, times and seating
-with its invigilator. SMARTTT can't take exam timetables yet, so a version is
-approved here and marked "not yet in SMARTTT" (see the README).
+`payload` is what SMARTTT is sent (its generator/exam-publish/): each paper's
+codes, date, times and seating, with each class row's programme, year and
+stream so SMARTTT can show students their own room, and the practicals.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.auth import Identity
-from app.clients.allocator import AllocatorClient
 from app.clients.smarttt import SmartttClient, SmartttMisconfigured, SmartttRefused, SmartttUnavailable
+from app.clients.teaching import TeachingClient
 from app.errors import ApiError
 from app.exam_solver import rooms as seating
-from app.exam_solver.model import ExamProblem, Seat
+from app.exam_solver.model import ExamProblem, ExamWeights, Seat
 from app.exam_solver.solve import soft_scores
 from app.exam_solver.validate import check
 from app.models import (
@@ -37,6 +37,7 @@ from app.models import (
     ExamPublication,
     ExamSeat,
     Room,
+    Run,
     Term,
     utcnow,
 )
@@ -63,9 +64,15 @@ def room_invigilator(paper: dict[str, Any], room: str) -> dict[str, Any]:
 
 
 def missing_invigilators(papers: list[dict[str, Any]]) -> list[str]:
-    """Each paper without its main invigilator, and each extra room without its own."""
+    """
+    Each paper without its main invigilator, and each extra room without its
+    own. A paper nobody is known to sit (no class rows yet) has no room, so it
+    needs none: it is published with its date and session, room to be announced.
+    """
     out = []
     for p in papers:
+        if not p["seating"]:
+            continue
         if not p["invigilators"].get(MAIN):
             out.append(f"{p['codes']} (main)")
         out.extend(f"{p['codes']} in {room}" for room in p["extra_rooms"] if not p["invigilators"].get(room))
@@ -94,7 +101,12 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
     term = db.get(Term, draft.term_id)
     if term is None:
         raise ApiError(404, "NOT_FOUND", "No such term.")
-    problem = build(db, term, draft)
+    # The run's weights: a run with category_rules 0, or made before those rules, is checked without H-E8 and H-E9.
+    run = db.get(Run, draft.run_id) if draft.run_id else None
+    weights = None
+    if run is not None and run.weights is not None:
+        weights = ExamWeights.from_dict({"category_rules": 0, **run.weights})
+    problem = build(db, term, draft, weights)
     slots: dict[str, int] = {}
     seats: list[Seat] = []
     for pl in draft.placements:
@@ -107,6 +119,57 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
         slots[pid] = slot
         seats.extend(Seat(pid, str(s.class_row_id), s.room_id, s.students, s.part, s.parts) for s in pl.seats)
     return _Built(term, problem, slots, seats)
+
+
+def change_venue(
+    db: Session, identity: Identity, draft: ExamDraft, paper_id: str, from_room: str, to_room: str
+) -> dict[str, Any]:
+    """
+    Moves a paper's students from one room to another, checked: the room must be
+    open for exams, have the seats that session, and be the right kind (the
+    health unit for health papers only). The paper is pinned and keeps this venue.
+    """
+    _require_editable(draft)
+    built = _built(db, draft)
+    problem = built.problem
+    placement = next((pl for pl in draft.placements if str(pl.paper_id) == paper_id), None)
+    if placement is None:
+        raise ApiError(404, "NOT_FOUND", "That paper isn't in this draft.")
+    target = next((r for r in problem.rooms if r.code.upper() == to_room.strip().upper()), None)
+    if target is None:
+        raise ApiError(409, "ROOM_NOT_OPEN", f"{to_room} isn't open for exams.")
+    names = {r.id: r.code for r in problem.rooms} | {r.id: r.code for r in db.scalars(select(Room))}
+    moving = [s for s in placement.seats if names.get(s.room_id, "").upper() == from_room.strip().upper()]
+    if not moving:
+        raise ApiError(404, "NOT_FOUND", f"That paper has nobody in {from_room}.")
+    if target.id == moving[0].room_id:
+        return draft_summary(db, draft, built)
+    ids = {s.id for s in moving}
+    after: list[Seat] = []
+    for pl in draft.placements:
+        for s in pl.seats:
+            room = target.id if s.id in ids else s.room_id
+            after.append(Seat(str(pl.paper_id), str(s.class_row_id), room, s.students, s.part, s.parts))
+    before = {v.message for v in check(problem, built.slots, built.seats)}
+    broken = [v for v in check(problem, built.slots, after) if v.message not in before]
+    if broken:
+        raise ApiError(409, "BREAKS_RULE", broken[0].message, {"violations": [v.__dict__ for v in broken]})
+    for s in moving:
+        s.room_id = target.id
+    placement.pinned = True
+    placement.rooms_locked = True
+    draft.updated_at = utcnow()
+    audit(
+        db,
+        identity,
+        "exam_draft.venue",
+        "exam_draft",
+        str(draft.id),
+        {"paper": paper_id, "room": from_room},
+        {"room": target.code},
+    )
+    db.commit()
+    return draft_summary(db, draft)
 
 
 def draft_summary(db: Session, draft: ExamDraft, built: _Built | None = None) -> dict[str, Any]:
@@ -122,14 +185,14 @@ def draft_summary(db: Session, draft: ExamDraft, built: _Built | None = None) ->
         "papers": len(built.problem.papers),
         "placed": sum(1 for p in built.problem.papers if built.slots.get(p.id, -1) >= 0),
         "pinned": sum(1 for pl in draft.placements if pl.pinned),
-        "soft_scores": soft_scores(built.problem, {k: v for k, v in built.slots.items() if v >= 0}),
+        "soft_scores": soft_scores(built.problem, {k: v for k, v in built.slots.items() if v >= 0}, built.seats),
         "violations": [v.__dict__ for v in violations[:100]],
         "publishable": not violations and draft.status == DraftStatus.DRAFT,
     }
 
 
 def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The draft as views, downloads and the Allocator see it."""
+    """The draft as views, downloads and the departments' invigilator pages see it."""
     built = _built(db, draft)
     term = built.term
     papers = {p.id: p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id))}
@@ -139,6 +202,7 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
     departments = {d.id: d.code for d in db.scalars(select(Department))}
     odel = {(p.id, r.class_row_id): r.odel for p in papers.values() for r in p.rows}
     placed = {pl.paper_id: pl for pl in draft.placements}
+    problems = {p.id: p for p in built.problem.papers}
     out = []
     for p in sorted(papers.values(), key=lambda p: p.label):
         pl = placed.get(p.id)
@@ -147,6 +211,8 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                 "id": str(p.id),
                 "allocator_ref": p.allocator_ref,
                 "codes": p.label,
+                "code_list": list(p.codes),
+                "sitting": p.sitting,
                 "title": p.title,
                 "department": departments.get(p.department_id, "?"),
                 "examiner": p.examiner_name,
@@ -159,6 +225,7 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                     (
                         {
                             "room_id": s.room_id,
+                            "row_id": str(s.class_row_id),
                             "room": rooms[s.room_id].code if s.room_id in rooms else s.room_id,
                             "block": rooms[s.room_id].block if s.room_id in rooms else "",
                             "row": labels.get(s.class_row_id, "?"),
@@ -176,10 +243,17 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                     ),
                     key=lambda s: (s["room"], s["row"]),
                 ),
-                "invigilators": (invigilators or {}).get(p.allocator_ref, {}),
+                # A paper the Director uploaded has no department: the Director names its invigilators.
+                "invigilators": (
+                    dict(p.director_invigilators or {})
+                    if p.is_director_paper
+                    else (invigilators or {}).get(p.allocator_ref, {})
+                ),
+                "category": built.problem.category(problems[str(p.id)]),
+                "director_paper": p.is_director_paper,
             }
         )
-        seating = out[-1]["seating"]
+        seating = cast(list[dict[str, Any]], out[-1]["seating"])
         out[-1]["main_room"] = main_room(seating)
         out[-1]["extra_rooms"] = sorted({s["room"] for s in seating} - {out[-1]["main_room"]})
     return {
@@ -228,27 +302,31 @@ def room_sheets(rec: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _invigilators(allocator: AllocatorClient | None, draft: ExamDraft) -> dict[str, Any]:
-    if allocator is None or draft.shared_at is None:
+def _invigilators(teaching: TeachingClient | None, draft: ExamDraft) -> dict[str, Any]:
+    if teaching is None or draft.shared_at is None:
         return {}
     try:
-        return allocator.invigilators(str(draft.term_id))
+        return teaching.invigilators(str(draft.term_id))
     except ApiError:
         return {}
 
 
-def grid(db: Session, draft: ExamDraft, allocator: AllocatorClient | None = None) -> dict[str, Any]:
+def grid(db: Session, draft: ExamDraft, teaching: TeachingClient | None = None) -> dict[str, Any]:
     """The draft, or a published version exactly as approved."""
     publication = db.scalar(
         select(ExamPublication).where(ExamPublication.draft_id == draft.id).order_by(ExamPublication.version.desc())
     )
-    rec = publication.record if publication is not None else record(db, draft, _invigilators(allocator, draft))
+    rec = publication.record if publication is not None else record(db, draft, _invigilators(teaching, draft))
     return {
         "draft": draft_summary(db, draft),
         "as_approved": publication is not None,
         "version": publication.version if publication else None,
         **rec,
         "rooms": room_sheets(rec),
+        "exam_rooms": [
+            {"code": r.code, "seats": r.seats, "health": r.health, "block": r.block}
+            for r in _built(db, draft).problem.rooms
+        ],
     }
 
 
@@ -274,20 +352,23 @@ def move_paper(
     new = days.index(day) * problem.sessions + session
     slots = {**built.slots, paper_id: new}
     unpinned = ExamProblem(
-        papers=[p if p.id != paper_id else type(p)(p.id, p.label, p.rows) for p in problem.papers],
+        papers=[p if p.id != paper_id else replace(p, pinned=None, fixed_seats=()) for p in problem.papers],
         days=problem.days,
         sessions=problem.sessions,
         rooms=problem.rooms,
+        weights=problem.weights,
         row_labels=problem.row_labels,
+        row_programmes=problem.row_programmes,
     )
     broken = [
         v
         for v in check(unpinned, slots)
-        if (v.rule in ("H-E1", "H-E2") and paper_id in v.paper_ids) or (v.rule == "H-E3" and not v.paper_ids)
+        if (v.rule in ("H-E1", "H-E2", "H-E7", "H-E8") and paper_id in v.paper_ids)
+        or (v.rule == "H-E3" and not v.paper_ids)
     ]
     if broken:
         raise ApiError(409, "BREAKS_RULE", broken[0].message, {"violations": [v.__dict__ for v in broken]})
-    papers = {p.id: p for p in problem.papers}
+    papers = {p.id: p for p in unpinned.papers}  # the moved paper is seated afresh; other chosen venues stay
     by_id = {str(pl.paper_id): pl for pl in draft.placements}
     for slot in {old, new} - {-1}:
         in_slot = [papers[pid] for pid, t in slots.items() if t == slot and pid in papers]
@@ -306,6 +387,7 @@ def move_paper(
     placement.day = problem.days[problem.day_of(new)]
     placement.session = session
     placement.pinned = pinned
+    placement.rooms_locked = False
     draft.updated_at = utcnow()
     audit(db, identity, "exam_draft.move", "exam_draft", str(draft.id), {"paper": paper_id, "slot": old}, {"slot": new})
     db.commit()
@@ -324,7 +406,10 @@ def share(db: Session, identity: Identity, draft: ExamDraft) -> dict[str, Any]:
 def copy_draft(db: Session, identity: Identity, draft: ExamDraft) -> ExamDraft:
     count = len(list(db.scalars(select(ExamDraft.id).where(ExamDraft.term_id == draft.term_id))))
     new = ExamDraft(
-        term_id=draft.term_id, name=f"Exam draft {count + 1} (copy of {draft.name})", soft_scores=draft.soft_scores
+        term_id=draft.term_id,
+        run_id=draft.run_id,  # its run's weights still say which rules it's checked by
+        name=f"Exam draft {count + 1} (copy of {draft.name})",
+        soft_scores=draft.soft_scores,
     )
     for pl in draft.placements:
         new.placements.append(
@@ -333,6 +418,7 @@ def copy_draft(db: Session, identity: Identity, draft: ExamDraft) -> ExamDraft:
                 day=pl.day,
                 session=pl.session,
                 pinned=pl.pinned,
+                rooms_locked=pl.rooms_locked,
                 seats=[
                     ExamSeat(
                         room_id=s.room_id, class_row_id=s.class_row_id, part=s.part, parts=s.parts, students=s.students
@@ -374,7 +460,8 @@ def smarttt_payload(
         "papers": [
             {
                 "key": p["allocator_ref"],
-                "unit_codes": p["codes"].split("/"),
+                "unit_codes": p.get("code_list") or p["codes"].split("/"),
+                "sitting": p.get("sitting") or "regular",
                 "title": p["title"],
                 "date": p["day"],
                 "start_time": sessions[p["session"]]["start"],
@@ -429,7 +516,7 @@ def _send(smarttt: SmartttClient, term: Term, payload: dict[str, Any]) -> dict[s
 
 
 def publish(
-    db: Session, allocator: AllocatorClient, smarttt: SmartttClient, identity: Identity, draft: ExamDraft
+    db: Session, smarttt: SmartttClient, teaching: TeachingClient, identity: Identity, draft: ExamDraft
 ) -> dict[str, Any]:
     """
     The Director approves the exam draft as the term's next exam version, and
@@ -448,7 +535,7 @@ def publish(
         )
     if draft.shared_at is None:
         raise ApiError(409, "NOT_SHARED", "Share the draft with departments first, so they name the invigilators.")
-    invigilators = allocator.invigilators(str(draft.term_id))
+    invigilators = teaching.invigilators(str(draft.term_id))
     rec = record(db, draft, invigilators)
     missing = missing_invigilators(rec["papers"])
     if missing:
@@ -565,9 +652,12 @@ def drafts_of(db: Session, term: Term) -> list[dict[str, Any]]:
 
 
 def publications(db: Session, term: Term) -> list[dict[str, Any]]:
-    found = db.scalars(
-        select(ExamPublication).where(ExamPublication.term_id == term.id).order_by(ExamPublication.version.desc())
+    found = list(
+        db.scalars(
+            select(ExamPublication).where(ExamPublication.term_id == term.id).order_by(ExamPublication.version.desc())
+        )
     )
+    latest = found[0].version if found else None
     return [
         {
             "version": p.version,
@@ -576,13 +666,15 @@ def publications(db: Session, term: Term) -> list[dict[str, Any]]:
             "published_at": p.published_at.isoformat(),
             "sent_to_smarttt": bool(p.smarttt_response.get("sent")),
             "not_sent_reason": p.smarttt_response.get("reason"),
+            # Only the latest version, and only to a term SMARTTT knows.
+            "can_send": not p.smarttt_response.get("sent") and p.version == latest and bool(term.smarttt_term_id),
         }
         for p in found
     ]
 
 
 def allocator_draft(db: Session, term: Term) -> dict[str, Any]:
-    """The draft the Director shared, for departments to name invigilators on: papers by the Allocator's ids."""
+    """The draft the Director shared, for departments to name invigilators on: papers by Attendance's ids."""
     draft = db.scalar(
         select(ExamDraft)
         .where(ExamDraft.term_id == term.id, ExamDraft.shared_at.is_not(None))
@@ -603,7 +695,9 @@ def allocator_draft(db: Session, term: Term) -> dict[str, Any]:
         "papers": [
             {
                 "paper_ref": p["allocator_ref"],
-                "codes": p["codes"],
+                # A list, as Smart Attendance reads it (the label, with "(ODEL)", is not a code).
+                "codes": p["code_list"],
+                "sitting": p["sitting"],
                 "date": p["day"],
                 "session": p["session"],
                 "start_time": sessions[p["session"]]["start"] if p["session"] is not None else None,

@@ -7,6 +7,46 @@
 
 ---
 
+## Update, 25 October 2026: the Timetable Allocator is retired
+
+What departments do moved into Smart Attendance's department portal; the
+`Timetable-Allocator` repo and deployment are no longer needed. Everything
+below that describes the Allocator is history.
+
+- **Departments** enter their teaching on the **Teaching** page of the
+  Attendance department portal (`ATTENDANCE_backend` `src/modules/teaching`,
+  `/api/v1/departments/teaching/*`; tables `teaching_*`, migration 040):
+  courses (cohorts), units, group splits, the department's own lecturer list
+  (staff number, FT/PT, weekly hour limit), paste from Excel, publish/reopen,
+  and the allocation form as PDF, Word or Excel. Any department officer can
+  publish. It replaces the portal's old Courses page (`course_offerings`).
+- **Exams too**: departments' exam papers (one per unit, or shared:
+  "BITE 131/COSC 130"), examiners, units with no written exam, practicals,
+  the moderation letter, and the invigilators named on the exam draft the
+  Director shares (Attendance `src/modules/teaching` exams/invigilation,
+  migration 041). Teaching, exam papers and invigilators each publish and
+  lock on their own. The Generator reads `.../terms/{term}/exams` and
+  `.../invigilators` from Attendance and serves the shared draft at
+  `/api/integrations/attendance/terms/{id}/exam-draft`.
+- **Signing in to the Generator**: the timetabling office is invited by an
+  administrator in Attendance (role `TIMETABLING`, migration 042) and signs in
+  at the Generator, which checks the login with Attendance
+  (`/api/v1/integrations/generator/authenticate` and `/identity`). The SMARTTT
+  `generator/authenticate|identity` endpoints (never built) are no longer needed.
+- **The Generator imports** what is published from Attendance:
+  `GET /api/v1/integrations/generator/terms/{term}/submissions`, the same
+  JSON the Allocator served (`app/clients/teaching.py`,
+  `app/services/allocator_import.py`; `allocator_ref` keeps its name).
+- **Attendance reads** the Generator's terms and published times from
+  `GET /api/integrations/attendance/terms[/{id}/times]`.
+- **One key** between Attendance and the Generator, both ways:
+  `ATTENDANCE_API_KEY` (Generator) = `GENERATOR_API_KEY` (Attendance). Attendance
+  also needs `GENERATOR_BASE_URL`. Gone: `ALLOCATOR_API_KEY`,
+  `ALLOCATOR_BASE_URL`, `ALLOCATOR_CLIENT_KEY` (Generator), `ALLOCATOR_API_KEY`
+  and `/integrations/allocator/departments` (Attendance).
+
+---
+
 ## 0. Status after the Phase 1–4 build (18 October 2026)
 
 Phases 1–4 are built and committed on local branches (not pushed):

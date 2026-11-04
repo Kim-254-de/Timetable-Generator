@@ -1,5 +1,5 @@
 """
-Departments publish their teaching in the Allocator; the Director imports it,
+Departments publish their teaching in Smart Attendance; the Director imports it,
 adds rooms, generates and publishes, with each group's lecturer.
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.models import DraftSession, Group, Publication
 from app.solver.model import covered
 from tests.conftest import sign_in
-from tests.fake_allocator import FakeAllocator, course, group, unit
+from tests.fake_teaching import FakeTeaching, course, group, unit
 
 
 def ok(response: Any) -> Any:
@@ -30,11 +30,11 @@ def new_term(client: TestClient) -> str:
     return str(term["id"])
 
 
-def cs_and_ed(allocator: FakeAllocator) -> None:
+def cs_and_ed(teaching: FakeTeaching) -> None:
     """CS teaches COSC 103 in two groups and COSC 110 to Education's students; one lecturer has three of them."""
-    allocator.courses = [course("c-cs1", "CS", "BSC.CS", 120), course("c-ed1", "ED", "BED.SCI", 80)]
-    allocator.publish(
-        "CS",
+    teaching.courses = [course("c-cs1", "DCOMP", "BSC.CS", 120), course("c-ed1", "DEDU", "BED.SCI", 80)]
+    teaching.publish(
+        "DCOMP",
         "Computer Science",
         [
             unit(
@@ -55,20 +55,20 @@ def offerings(client: TestClient, term_id: str) -> dict[str, Any]:
     return {o["unit_code"]: o for o in ok(client.get(f"/api/terms/{term_id}/offerings"))}
 
 
-def test_import_creates_class_rows_units_and_groups_with_lecturers(client, allocator):
+def test_import_creates_class_rows_units_and_groups_with_lecturers(client, teaching):
     sign_in(client)
     term_id = new_term(client)
-    cs_and_ed(allocator)
-    allocator.waiting("ED", "Education")
+    cs_and_ed(teaching)
+    teaching.waiting("DEDU", "Education")
 
     status = ok(client.get(f"/api/terms/{term_id}/departments"))
     assert [(d["code"], d["published"], d["needs_import"]) for d in status["departments"]] == [
-        ("CS", True, True),
-        ("ED", False, False),
+        ("DCOMP", True, True),
+        ("DEDU", False, False),
     ]
     result = ok(client.post(f"/api/terms/{term_id}/departments/import"))
-    assert result["departments"] == ["CS"] and result["not_published"] == [{"code": "ED", "name": "Education"}]
-    assert sorted(result["units"]["CS"]["added"]) == ["COSC 103", "COSC 110"]
+    assert result["departments"] == ["DCOMP"] and result["not_published"] == [{"code": "DEDU", "name": "Education"}]
+    assert sorted(result["units"]["DCOMP"]["added"]) == ["COSC 103", "COSC 110"]
     assert sorted(result["class_rows"]["added"]) == ["BED.SCI Y1S1", "BSC.CS Y1S1"]
 
     units = offerings(client, term_id)
@@ -80,32 +80,32 @@ def test_import_creates_class_rows_units_and_groups_with_lecturers(client, alloc
     ]
     rows = {r["label"]: r for r in ok(client.get(f"/api/terms/{term_id}/class-rows"))}
     assert rows["BED.SCI Y1S1"]["student_count"] == 80 and rows["BED.SCI Y1S1"]["from_allocator"] is True
-    departments = {d["code"] for d in ok(client.get("/api/departments"))}
-    assert {"CS", "ED"} <= departments
+    departments = {d["code"] for d in ok(client.get("/api/departments"))["departments"]}
+    assert {"DCOMP", "DEDU"} <= departments
     assert ok(client.get(f"/api/terms/{term_id}/departments"))["needs_import"] == 0
 
     # Importing again changes nothing; then CS's changes come in place.
     again = ok(client.post(f"/api/terms/{term_id}/departments/import"))
     assert again["units"] == {} and again["class_rows"] == {"added": [], "changed": [], "removed": []}
-    allocator.publish(
-        "CS",
+    teaching.publish(
+        "DCOMP",
         "Computer Science",
         [unit("u-103", "COSC 103", ["c-cs1"], [group("g-103a", "", [("c-cs1", 120)], "STF/9")], hours=4, length=2)],
         at="2026-10-21T08:00:00+00:00",
     )
     assert ok(client.get(f"/api/terms/{term_id}/departments"))["needs_import"] == 1
     changed = ok(client.post(f"/api/terms/{term_id}/departments/import"))
-    assert changed["units"]["CS"] == {"added": [], "changed": ["COSC 103"], "removed": ["COSC 110"]}
+    assert changed["units"]["DCOMP"] == {"added": [], "changed": ["COSC 103"], "removed": ["COSC 110"]}
     units = offerings(client, term_id)
     assert set(units) == {"COSC 103"}
     assert units["COSC 103"]["weekly_hours"] == 4 and units["COSC 103"]["session_length"] == 2
     assert [(g["label"], g["student_count"]) for g in units["COSC 103"]["groups"]] == [("", 120)]
 
 
-def test_imported_rows_are_edited_in_the_allocator(client, allocator):
+def test_imported_rows_are_edited_by_their_department(client, teaching):
     sign_in(client)
     term_id = new_term(client)
-    cs_and_ed(allocator)
+    cs_and_ed(teaching)
     ok(client.post(f"/api/terms/{term_id}/departments/import"))
     cosc103 = offerings(client, term_id)["COSC 103"]
     refused = client.patch(f"/api/offerings/{cosc103['id']}", json={"weekly_hours": 5})
@@ -126,13 +126,13 @@ def _lecturer_slots(db: Session, draft_id: str, staff: str) -> list[set[int]]:
     return [set(covered(s.start_slot, s.length)) for s in sessions if s.group_id in groups]
 
 
-def test_the_solver_never_puts_a_lecturer_in_two_classes_at_once(client, allocator, db):
+def test_the_solver_never_puts_a_lecturer_in_two_classes_at_once(client, teaching, db):
     sign_in(client)
     term_id = new_term(client)
-    cs_and_ed(allocator)
+    cs_and_ed(teaching)
     # Education gives the same person (same staff number) a class of its own.
-    allocator.publish(
-        "ED", "Education", [unit("u-edfo", "EDFO 111", ["c-ed1"], [group("g-edfo", "", [("c-ed1", 80)], "stf/9")])]
+    teaching.publish(
+        "DEDU", "Education", [unit("u-edfo", "EDFO 111", ["c-ed1"], [group("g-edfo", "", [("c-ed1", 80)], "stf/9")])]
     )
     ok(client.post(f"/api/terms/{term_id}/departments/import"))
     run = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))
@@ -147,10 +147,10 @@ def test_the_solver_never_puts_a_lecturer_in_two_classes_at_once(client, allocat
     assert any(c.get("lecturer") == "Dr. Jane Otieno (FT)" for e in grid["entities"] for c in e["cells"])
 
 
-def test_a_lecturer_given_more_than_the_week_is_named_before_solving(client, allocator):
+def test_a_lecturer_given_more_than_the_week_is_named_before_solving(client, teaching):
     sign_in(client)
     term_id = new_term(client)
-    allocator.courses = [course(f"c{i}", "CS", f"BSC.P{i}", 50) for i in range(4)]
+    teaching.courses = [course(f"c{i}", "DCOMP", f"BSC.P{i}", 50) for i in range(4)]
     units = [
         unit(
             f"u{i}",
@@ -162,7 +162,7 @@ def test_a_lecturer_given_more_than_the_week_is_named_before_solving(client, all
         )
         for i in range(4)
     ]
-    allocator.publish("CS", "Computer Science", units)
+    teaching.publish("DCOMP", "Computer Science", units)
     ok(client.post(f"/api/terms/{term_id}/departments/import"))
     run = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))
     assert run["status"] == "failed"
@@ -170,11 +170,11 @@ def test_a_lecturer_given_more_than_the_week_is_named_before_solving(client, all
     assert any(r["rule"] == "H13" and "Dr. Busy is given 64 teaching hours" in r["message"] for r in reasons)
 
 
-def test_a_late_department_is_added_without_moving_published_classes(client, allocator, db):
+def test_a_late_department_is_added_without_moving_published_classes(client, teaching, db):
     sign_in(client)
     term_id = new_term(client)
-    cs_and_ed(allocator)
-    allocator.waiting("ED", "Education")
+    cs_and_ed(teaching)
+    teaching.waiting("DEDU", "Education")
     ok(client.post(f"/api/terms/{term_id}/departments/import"))
     first = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))
     ok(client.post(f"/api/drafts/{first['draft_id']}/publish", json={}))
@@ -184,8 +184,8 @@ def test_a_late_department_is_added_without_moving_published_classes(client, all
     }
 
     # Education publishes late, with the same lecturer, and is imported.
-    allocator.publish(
-        "ED",
+    teaching.publish(
+        "DEDU",
         "Education",
         [unit("u-edfo", "EDFO 111", ["c-ed1"], [group("g-edfo", "", [("c-ed1", 80)], "STF/9")])],
         at="2026-10-22T08:00:00+00:00",
@@ -206,20 +206,20 @@ def test_a_late_department_is_added_without_moving_published_classes(client, all
     assert len(slots) == 4 and all(not (a & b) for i, a in enumerate(slots) for b in slots[i + 1 :])
 
 
-def test_keeping_published_classes_needs_a_published_timetable(client, allocator):
+def test_keeping_published_classes_needs_a_published_timetable(client, teaching):
     sign_in(client)
     term_id = new_term(client)
-    cs_and_ed(allocator)
+    cs_and_ed(teaching)
     ok(client.post(f"/api/terms/{term_id}/departments/import"))
     first = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))
     refused = client.post(f"/api/drafts/{first['draft_id']}/resolve", json={"keep_published": True})
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "NOTHING_PUBLISHED"
 
 
-def test_the_published_timetable_carries_each_lecturer(client, allocator, db):
+def test_the_published_timetable_carries_each_lecturer(client, teaching, db):
     sign_in(client)
     term_id = new_term(client)
-    cs_and_ed(allocator)
+    cs_and_ed(teaching)
     ok(client.post(f"/api/terms/{term_id}/departments/import"))
     run = ok(client.post("/api/runs", json={"term_id": term_id, "time_limit_s": 20}))
     ok(client.post(f"/api/drafts/{run['draft_id']}/publish", json={}))
@@ -232,9 +232,9 @@ def test_the_published_timetable_carries_each_lecturer(client, allocator, db):
     assert xlsx.status_code == 200
 
 
-def test_import_needs_a_published_department(client, allocator):
+def test_import_needs_a_published_department(client, teaching):
     sign_in(client)
     term_id = new_term(client)
-    allocator.waiting("CS", "Computer Science")
+    teaching.waiting("DCOMP", "Computer Science")
     refused = client.post(f"/api/terms/{term_id}/departments/import")
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "NOTHING_PUBLISHED"

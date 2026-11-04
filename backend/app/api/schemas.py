@@ -83,17 +83,13 @@ class RoomPatch(_Strict):
 DepartmentText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
 
 
-class DepartmentBody(_Strict):
-    code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
-    school: Text = ""
-    lecturer_count: Annotated[int, Field(ge=1, le=2000)] | None = None
-
-
 class DepartmentPatch(_Strict):
+    """
+    The Generator's own fields; a department's name, and its code when it has
+    one there, come from Smart Attendance.
+    """
+
     code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)] | None = None
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
-    school: Text | None = None
     lecturer_count: Annotated[int, Field(ge=0, le=2000)] | None = None  # 0 clears the count
 
 
@@ -207,6 +203,57 @@ class ExamPeriodBody(_Strict):
     exam_sessions: Annotated[list[ExamSession], Field(min_length=1, max_length=6)] | None = None
     # Exam seats as a share of each room's teaching capacity.
     exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
+    # Code prefixes of health and nursing papers.
+    exam_health_prefixes: (
+        Annotated[list[Annotated[str, StringConstraints(max_length=8)]], Field(max_length=60)] | None
+    ) = None
+
+
+class ExamListFile(_Strict):
+    file: Annotated[str, StringConstraints(min_length=1, max_length=8_000_000)]  # .docx as base64
+
+
+class PaperRowBody(_Strict):
+    programme: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    year: Annotated[int, Field(ge=1, le=10)]
+    semester: Annotated[int, Field(ge=1, le=3)]
+    stream: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)] = ""
+    students: Annotated[int, Field(ge=0, le=5000)]
+
+
+class HealthPaperBody(_Strict):
+    codes: Annotated[list[Annotated[str, StringConstraints(max_length=30)]], Field(min_length=1, max_length=12)]
+    title: Annotated[str, StringConstraints(max_length=255)]
+    sitting: str = "regular"
+    # The classes the letter names for it, as the Director reviewed them.
+    classes: Annotated[list[PaperRowBody], Field(max_length=60)] = []
+
+
+class HealthPapersBody(_Strict):
+    papers: Annotated[list[HealthPaperBody], Field(min_length=1, max_length=1500)]
+
+
+class PaperRowsBody(_Strict):
+    rows: Annotated[list[PaperRowBody], Field(max_length=200)]
+
+
+class InvigilatorName(_Strict):
+    staff_number: Annotated[str, StringConstraints(max_length=64)] = ""
+    name: Annotated[str, StringConstraints(max_length=255)] = ""
+
+
+class PaperInvigilatorsBody(_Strict):
+    invigilators: dict[str, InvigilatorName]
+
+
+class ExamVenueBody(_Strict):
+    from_room: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+    to_room: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+
+
+class PaperCategoryBody(_Strict):
+    # health | postgraduate | common | regular; null: work it out from the codes and class rows.
+    category: str | None = None
 
 
 class ExamRunBody(_Strict):

@@ -26,14 +26,14 @@ export const CLASS_ROW_COLUMNS: BulkColumn[] = [
   { key: 'year', label: 'Year', example: '1', required: true },
   { key: 'semester', label: 'Semester', example: '1', required: true, hint: "The student's own semester (the S1 in Y1S1)" },
   { key: 'sub_class', label: 'Sub class', example: '2', hint: 'Blank, or 1, 2, 3… for a cohort printed as several rows, e.g. "(2)"' },
-  { key: 'department', label: 'Department', example: 'Education', hint: 'Its name or code. A new name is added to Departments.' },
+  { key: 'department', label: 'Department', example: 'Education', hint: 'Its name or code, from Departments (Smart Attendance adds new ones).' },
   { key: 'students', label: 'Students', example: '120' },
 ]
 
 export const UNIT_COLUMNS: BulkColumn[] = [
   { key: 'unit_code', label: 'Unit code', example: 'COSC 103', required: true },
   { key: 'unit_title', label: 'Unit title', example: 'Introduction to ICT Skills', required: true },
-  { key: 'department', label: 'Department', example: 'Computer Science', required: true, hint: 'The name or code of the department that owns the unit. A new name is added to Departments.' },
+  { key: 'department', label: 'Department', example: 'Computer Science', required: true, hint: 'The name or code of the department that owns the unit, from Departments (Smart Attendance adds new ones).' },
   { key: 'hours_per_week', label: 'Hours per week', example: '3', hint: "Blank = the term's class length" },
   { key: 'class_length', label: 'Class length', example: '3', hint: 'Hours per meeting' },
   { key: 'room_type', label: 'Room type', example: 'Lecture hall', hint: 'Lecture hall, Lab or Seminar room. COSC units go to a lab whenever one seats the group' },
@@ -193,7 +193,7 @@ export function ClassRowForm({ termId, row, onClose }: { termId: string; row: Cl
             <input type="number" min={0} value={form.student_count ?? ''} onChange={(e) => setForm({ ...form, student_count: e.target.value === '' ? null : Number(e.target.value) })} className={inputClass} />
           </Field>
           <div className="col-span-2">
-            <Field label="Department" hint="Type its name. A new one is added to Departments when you save.">
+            <Field label="Department" hint="Type its name or code, from Departments. New departments are added in Smart Attendance.">
               <DepartmentInput value={form.department ?? ''} onChange={(department) => setForm({ ...form, department })} />
             </Field>
           </div>
@@ -257,7 +257,7 @@ export function OfferingForm({
           <div className="sm:col-span-2">
             <Field label="Unit title"><input required value={form.unit_name} onChange={(e) => setForm({ ...form, unit_name: e.target.value })} className={inputClass} /></Field>
           </div>
-          <Field label="Department that owns it" hint="It allocates the lecturer. Type its name; a new one is added to Departments.">
+          <Field label="Department that owns it" hint="It allocates the lecturer. Type its name or code, from Departments; new ones are added in Smart Attendance.">
             <DepartmentInput required value={form.department ?? ''} onChange={(department) => setForm({ ...form, department })} />
           </Field>
           <Field label="Hours per week">

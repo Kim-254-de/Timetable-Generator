@@ -159,6 +159,34 @@ def open_term(db: Session, smarttt: SmartttClient, identity: Identity, smarttt_t
 LOCAL = "local"
 
 
+def set_current(db: Session, smarttt: SmartttClient, identity: Identity, term: Term) -> dict[str, Any]:
+    """Makes the term SMARTTT's current one, and links it to SMARTTT's term so exams can be sent there."""
+    response = smarttt.set_current(
+        {
+            "term_id": term.smarttt_term_id,
+            "academic_year": term.academic_year,
+            "semester": term.semester,
+            "term_start": term.start_date.isoformat() if term.start_date else None,
+            "term_end": term.end_date.isoformat() if term.end_date else None,
+            "by": identity.actor,
+        }
+    )
+    linked = str(response.get("id") or "")
+    if linked and term.smarttt_term_id != linked:
+        taken = db.scalar(select(Term).where(Term.smarttt_term_id == linked, Term.id != term.id))
+        if taken is not None:
+            raise ApiError(
+                409,
+                "TERM_TAKEN",
+                f"Another term here is already linked to SMARTTT's {response.get('academic_year')} "
+                f"semester {response.get('semester')}.",
+            )
+        term.smarttt_term_id = linked
+    audit(db, identity, "term.set_current", "term", str(term.id), None, {"smarttt_term_id": linked})
+    db.commit()
+    return {**term_dict(term), "is_current": bool(response.get("is_current"))}
+
+
 def latest_smarttt_snapshot(db: Session, term: Term) -> Snapshot | None:
     """The latest snapshot read from SMARTTT (not one built from the Generator's own data)."""
     for snapshot in db.scalars(
@@ -321,12 +349,12 @@ def snapshot_summary(snapshot: Snapshot) -> dict[str, Any]:
 
 
 def require_local(obj: Any) -> None:
-    """Class rows, units and groups imported from the Allocator are edited there, by their department."""
+    """Class rows, units and groups imported from a department's Teaching page are edited there, by the department."""
     if getattr(obj, "allocator_ref", None):
         raise ApiError(
             409,
             "FROM_ALLOCATOR",
-            "This comes from the department's list in the Timetable Allocator; edit it there.",
+            "This comes from the department's Teaching page in Smart Attendance; the department edits it there.",
         )
 
 
@@ -353,7 +381,7 @@ def import_setup(db: Session, identity: Identity, term: Term) -> dict[str, Any]:
     if snapshot is None:
         raise ApiError(409, "NO_SNAPSHOT", "Take a snapshot of SMARTTT first.")
     data = snapshot.data
-    rooms_added, departments_added = _import_master_data(db, data)
+    rooms_added = _import_master_data(db, data)
     programs = {p["id"]: p for p in data["programs"]}
     units = {u["id"]: u for u in data["units"]}
     rooms = {r["id"]: r for r in data["rooms"]}
@@ -509,7 +537,6 @@ def import_setup(db: Session, identity: Identity, term: Term) -> dict[str, Any]:
             "class_rows": created_rows,
             "offerings": created_offerings,
             "rooms": rooms_added,
-            "departments": departments_added,
             "snapshot_id": str(snapshot.id),
         },
     )
@@ -518,13 +545,18 @@ def import_setup(db: Session, identity: Identity, term: Term) -> dict[str, Any]:
         "class_rows_created": created_rows,
         "offerings_created": created_offerings,
         "rooms_created": rooms_added,
-        "departments_created": departments_added,
         "unresolved": sorted(set(unresolved))[:200],
     }
 
 
-def _import_master_data(db: Session, data: dict[str, Any]) -> tuple[int, int]:
-    """Adds SMARTTT's lecture halls and departments the Generator doesn't have yet (by code)."""
+def _import_master_data(db: Session, data: dict[str, Any]) -> int:
+    """
+    Adds SMARTTT's lecture halls the Generator doesn't have yet (by code).
+    Departments are not imported: they come from Smart Attendance
+    (app.services.departments), keyed by SMARTTT's id like the snapshot's;
+    a department's lecturer count, when not yet set, is taken from SMARTTT's
+    full- and part-time lecturers.
+    """
     room_codes = {code.upper() for code in db.scalars(select(Room.code))}
     rooms_added = 0
     for r in data.get("rooms") or []:
@@ -544,30 +576,18 @@ def _import_master_data(db: Session, data: dict[str, Any]) -> tuple[int, int]:
         )
         room_codes.add(code.upper())
         rooms_added += 1
-    department_codes = {code.upper() for code in db.scalars(select(Department.code))}
-    departments_added = 0
+    # Departments themselves come from Attendance; SMARTTT's lecturer numbers
+    # fill in a count the Director hasn't set (rule H9).
     for d in data.get("departments") or []:
-        if db.get(Department, int(d["id"])) is not None:
-            continue
-        code = str(d.get("code") or f"D{d['id']}").strip()
-        if code.upper() in department_codes:
-            code = f"{code}-{d['id']}"
+        local = db.scalar(select(Department).where(Department.smarttt_department_id == int(d["id"]))) or db.get(
+            Department, int(d["id"])
+        )
         lecturers = d.get("lecturers") or {}
         count = int(lecturers.get("full_time", 0)) + int(lecturers.get("part_time", 0))
-        db.add(
-            Department(
-                id=int(d["id"]),
-                code=code,
-                name=d.get("name") or code,
-                school=d.get("faculty") or "",
-                lecturer_count=count or None,
-                smarttt_department_id=int(d["id"]),
-            )
-        )
-        department_codes.add(code.upper())
-        departments_added += 1
+        if local is not None and local.lecturer_count is None and count:
+            local.lecturer_count = count
     db.flush()
-    return rooms_added, departments_added
+    return rooms_added
 
 
 def _hours(start: str, end: str) -> int:

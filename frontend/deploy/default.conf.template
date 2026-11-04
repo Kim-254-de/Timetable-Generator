@@ -30,7 +30,11 @@ server {
   location /api/ {
     set $api_upstream ${API_UPSTREAM};
     proxy_pass $api_upstream;
-    proxy_set_header Host $host;
+    # The API's own name, not ours: an HTTPS upstream on a shared host (Render,
+    # behind Cloudflare) refuses the TLS handshake without SNI and routes by Host.
+    proxy_ssl_server_name on;
+    proxy_set_header Host $proxy_host;
+    proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $forwarded_proto;
     # Reading a big workbook or exporting a full timetable can take a while.

@@ -6,9 +6,10 @@ each solver run, drafts and their sessions, publications, the audit trail,
 and sign-in sessions.
 
 Departments enter their class rows (courses), units and groups, with each
-group's lecturer, in the Timetable Allocator and publish them; the Director
-imports what is published ("Import published departments"), and those rows
-carry `allocator_ref` and are edited only in the Allocator. The Director adds
+group's lecturer, in Smart Attendance's department portal and publish them;
+the Director imports what is published ("Import published departments"), and
+those rows carry `allocator_ref` (named for the Timetable Allocator that used
+to hold them) and are edited only by their department. The Director adds
 the lecture halls, generates and publishes. SMARTTT is optional: "Import from
 SMARTTT" pre-fills the same tables, and publishing sends the finished
 timetable there, lecturers included.
@@ -35,6 +36,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -103,6 +105,8 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
+    # Code prefixes of health and nursing papers ("NURS", "HPA").
+    exam_health_prefixes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:
     # when the switch is set for (or happened), by whom, and the close of the exam period.
     exam_switch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -116,9 +120,14 @@ class Term(Base):
 
 class Department(Base):
     """
-    A department that owns units. `lecturer_count` caps how many of its
+    A department that owns units. Departments are created in Smart Attendance
+    by an administrator, with a name and a code (Attendance creates them in
+    SMARTTT first), and read from there (app.services.departments): the name,
+    and the code when Attendance has one (`code_from_attendance`), are
+    Attendance's. A code is made here only for a department Attendance has
+    none for. `lecturer_count` is the Generator's own: it caps how many of its
     classes may run at once (rule H9); left empty, no cap is applied. The id
-    is SMARTTT's department id when imported, else a number from 100000 up.
+    is SMARTTT's department id when known, else a number from 100000 up.
     """
 
     __tablename__ = "departments"
@@ -126,9 +135,15 @@ class Department(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(255))
-    school: Mapped[str] = mapped_column(String(255), default="")
+    # True while the code is the one Attendance gives it, which can only be changed there.
+    code_from_attendance: Mapped[bool] = mapped_column(Boolean, default=False)
     lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     smarttt_department_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
+    # Attendance's id for the department; None for one entered here before
+    # departments came from Attendance (it can't own new units).
+    attendance_department_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    # Active lecturers Attendance has placed in it: a guide for lecturer_count.
+    attendance_lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Room(Base):
@@ -148,7 +163,15 @@ class Room(Base):
     # fixed number is only for a room that can't be used at that share (fixed
     # benches); it is never more than the capacity.
     exam_seats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The administrator's say in SMARTTT (synced). The Director's choice, when they made one, overrules it.
     for_exams: Mapped[bool] = mapped_column(Boolean, default=True)
+    exam_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # In the health unit, as set in SMARTTT: health and nursing papers sit only in these rooms.
+    health_unit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+    @property
+    def used_for_exams(self) -> bool:
+        return self.for_exams if self.exam_override is None else self.exam_override
 
     @property
     def block(self) -> str:
@@ -191,7 +214,7 @@ class ClassRow(Base):
     student_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Slots (0-59) this class row can't be taught, e.g. teaching practice.
     unavailable: Mapped[list[int]] = mapped_column(JSON, default=list)
-    # The Allocator's course this row was imported from; None for a row entered here.
+    # Attendance's course (a department's Teaching page) this row was imported from; None for a row entered here.
     allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
 
@@ -213,7 +236,7 @@ class UnitOffering(Base):
     session_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     room_type: Mapped[str] = mapped_column(String(30), default="lecture_hall")
     source: Mapped[str] = mapped_column(String(30))  # curriculum | published | manual | allocator
-    # The Allocator's unit this offering was imported from; None for one entered here.
+    # Attendance's unit (a department's Teaching page) this offering was imported from; None for one entered here.
     allocator_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
     class_rows: Mapped[list[OfferingClassRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
@@ -241,7 +264,7 @@ class OfferingClassRow(Base):
 class Group(Base):
     """
     One class of an offering ("GR A"; "" when the unit isn't split). Imported
-    from the Allocator, the department decided the split and gave the
+    from a department's Teaching page, the department decided the split and gave the
     lecturer, who is known by staff number to the solver (rule H13) and SMARTTT.
     """
 
@@ -365,7 +388,7 @@ class DepartmentImport(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     term_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("terms.id", ondelete="CASCADE"), index=True)
     department_code: Mapped[str] = mapped_column(String(32))
-    # When the department published what was imported (the Allocator's time).
+    # When the department published what was imported (Attendance's time).
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     imported_by: Mapped[str] = mapped_column(String(255))
@@ -415,10 +438,14 @@ class LoginAttempt(Base):
 # -- exams ---------------------------------------------------------------------------------
 
 
+DIRECTOR_REF = "director:"  # the start of allocator_ref on a paper the Director uploaded
+
+
 class ExamPaper(Base):
     """
-    A written exam paper a department published in the Allocator: one or more
+    A written exam paper a department published in Smart Attendance: one or more
     unit codes sat together ("BITE 131/COSC 130"), and the class rows that sit it.
+    `sitting` is "regular" or "odel": ODEL and part-time classes sit separate papers.
     """
 
     __tablename__ = "exam_papers"
@@ -433,12 +460,25 @@ class ExamPaper(Base):
     examiner_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     examiner_name: Mapped[str] = mapped_column(String(255), default="")
     notes: Mapped[str] = mapped_column(String(500), default="")
+    sitting: Mapped[str] = mapped_column(String(10), default="regular", server_default="regular")
+    # The main invigilator a department named before the timetable is generated: their papers go in different sessions.
+    invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The Director's choice of category; empty: worked out from the codes and class rows.
+    category_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # A paper the Director uploaded (allocator_ref "director:..."): the invigilators they named, by room
+    # ("" is the main one).
+    director_invigilators: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+
+    @property
+    def is_director_paper(self) -> bool:
+        return self.allocator_ref.startswith(DIRECTOR_REF)
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
     @property
     def label(self) -> str:
-        return "/".join(self.codes)
+        """'MATH 241', or 'MATH 241 (ODEL)' for the ODEL paper of the same unit."""
+        return "/".join(self.codes) + (" (ODEL)" if self.sitting == "odel" else "")
 
     @property
     def students(self) -> int:
@@ -454,6 +494,11 @@ class ExamPaperRow(Base):
     class_row_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("class_rows.id", ondelete="CASCADE"), primary_key=True)
     students: Mapped[int] = mapped_column(Integer)
     odel: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The class is a guess from the paper's code, not who is known to sit it: it takes seats, no hard rule holds it.
+    guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # On a paper the Director uploaded: their number or class, kept when SMARTTT is read again.
+    # 0 here: it doesn't sit it.
+    edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class ExamPractical(Base):
@@ -505,6 +550,8 @@ class ExamPlacement(Base):
     day: Mapped[date] = mapped_column(Date)
     session: Mapped[int] = mapped_column(Integer)  # index into the term's exam sessions
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The Director chose its venues on the draft: re-seating a session keeps them.
+    rooms_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     seats: Mapped[list[ExamSeat]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

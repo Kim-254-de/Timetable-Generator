@@ -7,12 +7,12 @@ import time
 from collections import defaultdict
 
 from app.exam_solver import precheck, rooms, sessions
-from app.exam_solver.model import ExamProblem, ExamSolution, Paper, Seat
+from app.exam_solver.model import COMMON, POSTGRADUATE, ExamProblem, ExamSolution, Paper, Seat
 from app.exam_solver.validate import check
 
 
-def soft_scores(problem: ExamProblem, slots: dict[str, int]) -> dict[str, float]:
-    """S-E1 back-to-back class rows, S-E2 class rows with two papers a day, S-E3 student-days into the period."""
+def soft_scores(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None = None) -> dict[str, float]:
+    """S-E1 back-to-back class rows, S-E2 two papers a day, S-E3 student-days into the period, S-E4, S-E7, S-E8."""
     taken: dict[str, set[int]] = defaultdict(set)
     for p in problem.papers:
         if p.id in slots:
@@ -29,7 +29,33 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int]) -> dict[str, float]
                 same_day += 1
             back_to_back += sum(1 for a, b in itertools.pairwise(day_sessions) if b == a + 1)
     late = sum(p.students * problem.day_of(slots[p.id]) for p in problem.papers if p.id in slots)
-    return {"back_to_back": back_to_back, "same_day": same_day, "student_days": late}
+    # S-E4: papers nobody is known to sit that share a guessed class and a session.
+    guessed = 0
+    for papers in problem.guessed_classes().values():
+        per_slot: dict[int, int] = defaultdict(int)
+        for p in papers:
+            if p.id in slots:
+                per_slot[slots[p.id]] += 1
+        guessed += sum(n - 1 for n in per_slot.values() if n > 1)
+    # S-E7: common papers on the busiest day.
+    per_day: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        if p.id in slots and problem.category(p) == COMMON:
+            per_day[problem.day_of(slots[p.id])] += 1
+    # S-E8: rooms beyond one for a session's postgraduate papers.
+    graduate_rooms: dict[int, set[str]] = defaultdict(set)
+    kinds = {p.id: problem.category(p) for p in problem.papers}
+    for s in seats or []:
+        if kinds.get(s.paper_id) == POSTGRADUATE and s.paper_id in slots:
+            graduate_rooms[slots[s.paper_id]].add(s.room_id)
+    return {
+        "back_to_back": back_to_back,
+        "same_day": same_day,
+        "student_days": late,
+        "guessed_clashes": guessed,
+        "common_busiest_day": max(per_day.values(), default=0),
+        "postgraduate_extra_rooms": sum(len(rooms_) - 1 for rooms_ in graduate_rooms.values()),
+    }
 
 
 def seat_all(problem: ExamProblem, slots: dict[str, int]) -> list[Seat]:
@@ -101,6 +127,6 @@ def solve(problem: ExamProblem, time_limit_s: float = 300, workers: int = 8) -> 
         slots=slots,
         seats=seats,
         status=status,
-        soft_scores=soft_scores(problem, slots),
+        soft_scores=soft_scores(problem, slots, seats),
         solve_seconds=time.monotonic() - started,
     )

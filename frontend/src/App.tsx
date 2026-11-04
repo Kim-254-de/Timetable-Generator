@@ -180,10 +180,10 @@ function LoginPage() {
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border border-line bg-card p-8 shadow-sm">
         <div>
           <h1 className="text-xl font-semibold text-ink">Timetable Generator</h1>
-          <p className="mt-1 text-sm text-muted">Directorate of Examinations and Timetabling. Sign in with your university (SMARTTT) account.</p>
+          <p className="mt-1 text-sm text-muted">Directorate of Examinations and Timetabling. Sign in with the email and password from your Smart Attendance invitation.</p>
         </div>
-        <label className="block text-sm"><span className="font-medium text-ink">Staff ID or email</span>
-          <input className="mt-1 w-full rounded-md border border-line px-3 py-2" autoComplete="username" value={identifier}
+        <label className="block text-sm"><span className="font-medium text-ink">Email</span>
+          <input type="email" className="mt-1 w-full rounded-md border border-line px-3 py-2" autoComplete="username" value={identifier}
             onChange={(e) => setIdentifier(e.target.value)} required />
         </label>
         <label className="block text-sm"><span className="font-medium text-ink">Password</span>
