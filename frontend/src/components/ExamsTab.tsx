@@ -292,7 +292,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
           className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
       </label>
       <p className="text-xs text-muted">
-        Common and postgraduate (7xx to 9xx) papers sit only in the first or last session of a day. A paper of over 3000 students counts as common, and sits first or last whenever it can.
+        Postgraduate (7xx to 9xx) papers sit only in the first or last session of a day. Common papers sit first or last when they can, and take a middle session when the timetable needs it. A paper of over 3000 students counts as common.
         Postgraduate papers also sit only in the first week: from the first exam day to that week's Friday.
       </p>
       <p className="text-muted">
