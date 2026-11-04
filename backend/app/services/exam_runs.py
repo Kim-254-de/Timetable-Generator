@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import Identity
 from app.config import get_settings
 from app.errors import ApiError
-from app.exam_solver.model import ExamProblem, ExamWeights, Paper, Sitting
+from app.exam_solver.model import ExamProblem, ExamWeights, Paper, Seat, Sitting, paper_kind
 from app.exam_solver.solve import solve
 from app.models import ClassRow, ExamDraft, ExamPaper, ExamPlacement, ExamSeat, Run, RunMode, RunStatus, Term, utcnow
 from app.services.exam_setup import exam_days, exam_rooms
@@ -41,11 +41,19 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
             Paper(
                 id=str(p.id),
                 label=p.label,
-                rows=tuple(Sitting(str(r.class_row_id), r.students, r.odel) for r in p.rows),
+                rows=tuple(
+                    Sitting(str(r.class_row_id), r.students, r.odel, r.guessed) for r in p.rows if r.students or not r.edited
+                ),
                 pinned=slot if pl is not None and pl.pinned else None,
                 previous=slot,
                 invigilator=p.invigilator_staff_number,
                 codes=tuple(p.codes or ()),
+                kind=paper_kind(p.codes or (), term.exam_health_prefixes or [], p.category_override),
+                fixed_seats=tuple(
+                    Seat(str(p.id), str(s.class_row_id), s.room_id, s.students, s.part, s.parts) for s in pl.seats
+                )
+                if pl is not None and pl.rooms_locked
+                else (),
             )
         )
     class_rows = list(db.scalars(select(ClassRow).where(ClassRow.term_id == term.id)))
@@ -139,6 +147,7 @@ def solve_run(db: Session, run: Run) -> None:
     for s in result.seats:
         seats_by_paper.setdefault(s.paper_id, []).append(s)
     pinned = {p.id for p in problem.papers if p.pinned is not None}
+    locked = {p.id for p in problem.papers if p.fixed_seats}
     for paper_id, slot in result.slots.items():
         draft.placements.append(
             ExamPlacement(
@@ -146,6 +155,7 @@ def solve_run(db: Session, run: Run) -> None:
                 day=problem.days[problem.day_of(slot)],
                 session=problem.session_of(slot),
                 pinned=paper_id in pinned,
+                rooms_locked=paper_id in locked,
                 seats=[
                     ExamSeat(
                         room_id=s.room_id,

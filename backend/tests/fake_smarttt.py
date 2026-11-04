@@ -171,6 +171,9 @@ class FakeSmarttt:
         self.refuse_exams: dict[str, Any] | None = None
         # The rooms the admin uploaded (generator/rooms/); none unless a test adds them.
         self.rooms: list[dict[str, Any]] = []
+        self.set_current_calls: list[dict[str, Any]] = []
+        self.enrolment: dict[str, dict[str, Any]] = {}  # /unit-enrolment/: by code, as SMARTTT answers
+        self.programs: list[dict[str, str]] = []  # /programs/
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -185,6 +188,17 @@ class FakeSmarttt:
         params = dict(request.url.params)
         if route == "/rooms/":
             return httpx.Response(200, json={"rooms": self.rooms})
+        if route == "/programs/":
+            return httpx.Response(200, json={"programs": self.programs})
+        if route == "/unit-enrolment/":
+            units = {c: self.enrolment[c] for c in body["codes"] if c in self.enrolment}
+            return httpx.Response(200, json={"term": None, "units": units, "unknown": [c for c in body["codes"] if c not in self.enrolment]})
+        if request.url.path.endswith("/set-current/"):
+            if self.down:
+                return httpx.Response(503, json={"detail": "down"})
+            body = json.loads(request.content)
+            self.set_current_calls.append(body)
+            return httpx.Response(200, json={"id": body.get("term_id") or "smarttt-term-new", "academic_year": body["academic_year"], "semester": body["semester"], "is_current": True})
         if route == "/terms/":
             return httpx.Response(200, json={"terms": [TERM]})
         if route == "/snapshot/":

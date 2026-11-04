@@ -90,38 +90,59 @@ See `SYSTEM_HANDOFF.md` for the whole platform.
 
 On the term's **Exams** tab:
 
+0. **Set as current term in SMARTTT** (an administrator can too) also links a
+   term made here to SMARTTT's, so its exam timetable can be sent there.
 1. **Exam period**: first and last day, weekdays used, days off, and the
    sessions of each day (default 08:30-10:30, 11:30-13:30, 14:30-16:30).
    **Spacing**: exam seats are 0.9 x the teaching capacity in every room, big
    halls included (110 seats -> 99; 200 -> 180); the Director can change the
    0.9 for the exam period. A room's own number ("Fixed exam seats" on the
    Rooms page, never above its capacity) is only for one that can't be used at
-   that share, e.g. fixed benches; "For exams" keeps a room out.
+   that share, e.g. fixed benches. "Used for exams" and "Health unit" are set by
+   the administrator under Venues in the admin console and read on each room
+   sync; the Director's own "Used for exams" overrules the administrator's.
    A room's block is its building, so a big paper stays within one block.
-2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
+2. **Health and nursing papers**: the Director uploads the moderation letter
+   (Word; a scan must be typed into Word first), reviews it and saves it, here
+   rather than through a department. Each paper's classes are those its headings
+   name ("... Y1S1 (107 STUDENTS)"), matched to SMARTTT's programmes in the review,
+   and those on SMARTTT's master timetable and who synced. The Director corrects
+   numbers and classes, and names the invigilators on the draft. A code prefix on
+   the exam period's list makes a health paper; the letter's other units are
+   ordinary papers. A unit a department already listed stays theirs, not doubled.
+   **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
    per day, each session's students fit the exam seats, pinned papers stay,
-   and the second day of the period is for common units only (H-E8).
-   Soft: back-to-back sessions (heavily weighted), two papers on one day, big
-   papers late, and every common unit on the second day (S-E6). A common
-   unit is a paper sat by class rows of more than one programme (with no
-   class rows yet: codes of more than one programme, "BITE 131/COSC 130").
-   All of them go on day 2 unless a hard rule stops it (a class sitting three
-   common papers, more common students than the day's seats); then the
-   biggest keep day 2 and the draft shows how many went to other days. Weight
-   `common_day: 0` turns it off. Phase 2 seats each session: every class row (or part of one
-   bigger than any room) gets one room; small papers share rooms, a big paper
-   uses few rooms in one block, a paper's ODEL students sit apart. The
+   common, postgraduate and health papers sit only in the first or last session
+   of a day, on any exam day (H-E8), and health papers sit only in the health
+   unit (H-E9). Soft: back-to-back sessions (heavily weighted), two papers on
+   one day, big papers late, and common units spread over the days (S-E7).
+   A common unit is a paper sat by class rows of more than one programme (with
+   no class rows yet: codes of more than one programme, "BITE 131/COSC 130").
+   A postgraduate paper has a code numbered 7xx to 9xx. A health paper has a code
+   prefix on the exam period's list; health wins when a paper is more than one.
+   The Director can set any paper's category on the Exams tab. Phase 2 seats
+   each session: every class row (or part of one bigger than any room) gets one
+   room; small papers share rooms, a big paper uses few rooms in one block, a
+   paper's ODEL students sit apart, health papers take the health unit first,
+   and all of a session's postgraduate papers share one room when they fit, with
+   undergraduates kept out of it while another room is free (S-E8). The
    pre-check and conflict explanations name the class row or session at fault.
+   The health unit's rooms are for health papers alone, in the first and last
+   sessions: no other paper is seated there, even when other rooms are full.
 4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
-   as room sheets; **move** a paper (checked; both sessions re-seated; pinned)
-   and **re-solve around pins**.
+   as room sheets; **move** a paper (checked; both sessions re-seated; pinned),
+   **change its venue** (checked for open room, seats and the health unit; pinned,
+   and kept when its session is re-seated) and **re-solve around pins**.
 5. **Share with departments** so they name invigilators on their Teaching page
    in Smart Attendance: each paper's main invigilator (in its main room, the
    one with most of its students; collects every room's scripts) and one extra
    invigilator for each extra room.
+   A class that takes a unit on SMARTTT's master timetable comes in with the
+   paper even before anyone has synced: it holds to every hard rule, so its
+   papers never clash, and gets its room once it has a number.
    Papers nobody is known to sit yet are still kept apart: units of one
    subject and year ("BPPA 110", "BPPA 121") are taken to be one class, kept
    to one paper a session and two a day (S-E4), and these papers are spread
@@ -129,7 +150,8 @@ On the term's **Exams** tab:
    impossible; real numbers from the department replace the guess.
    A main invigilator a department names before the timetable is generated
    comes in with the papers, and the solver keeps that person's papers in
-   different sessions (rule H-E7). A paper nobody is known to sit (no class
+   different sessions (rule H-E7), except postgraduate papers, which share a room:
+   one person can cover several papers in one room. A paper nobody is known to sit (no class
    rows: nobody synced it, e.g. part-time students) still gets a date and
    session, with no room ("room to be announced") and no invigilator needed.
 6. **Approve and publish**: refused while any paper, or any extra room of a

@@ -36,6 +36,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -104,6 +105,8 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
+    # Code prefixes of health and nursing papers ("NURS", "HPA").
+    exam_health_prefixes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:
     # when the switch is set for (or happened), by whom, and the close of the exam period.
     exam_switch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -160,7 +163,15 @@ class Room(Base):
     # fixed number is only for a room that can't be used at that share (fixed
     # benches); it is never more than the capacity.
     exam_seats: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The administrator's say in SMARTTT (synced). The Director's choice, when they made one, overrules it.
     for_exams: Mapped[bool] = mapped_column(Boolean, default=True)
+    exam_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # In the health unit, as set in SMARTTT: health and nursing papers sit only in these rooms.
+    health_unit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+    @property
+    def used_for_exams(self) -> bool:
+        return self.for_exams if self.exam_override is None else self.exam_override
 
     @property
     def block(self) -> str:
@@ -427,6 +438,9 @@ class LoginAttempt(Base):
 # -- exams ---------------------------------------------------------------------------------
 
 
+DIRECTOR_REF = "director:"  # the start of allocator_ref on a paper the Director uploaded
+
+
 class ExamPaper(Base):
     """
     A written exam paper a department published in Smart Attendance: one or more
@@ -449,6 +463,14 @@ class ExamPaper(Base):
     sitting: Mapped[str] = mapped_column(String(10), default="regular", server_default="regular")
     # The main invigilator a department named before the timetable is generated: their papers go in different sessions.
     invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The Director's choice of category; empty: worked out from the codes and class rows.
+    category_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # A paper the Director uploaded (allocator_ref "director:..."): the invigilators they named, by room ("" is the main one).
+    director_invigilators: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+
+    @property
+    def is_director_paper(self) -> bool:
+        return self.allocator_ref.startswith(DIRECTOR_REF)
 
     rows: Mapped[list[ExamPaperRow]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
@@ -471,6 +493,10 @@ class ExamPaperRow(Base):
     class_row_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("class_rows.id", ondelete="CASCADE"), primary_key=True)
     students: Mapped[int] = mapped_column(Integer)
     odel: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The class is a guess from the paper's code, not who is known to sit it: it takes seats, no hard rule holds it.
+    guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # On a paper the Director uploaded: their number or class, kept when SMARTTT is read again. 0 here: it doesn't sit it.
+    edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class ExamPractical(Base):
@@ -522,6 +548,8 @@ class ExamPlacement(Base):
     day: Mapped[date] = mapped_column(Date)
     session: Mapped[int] = mapped_column(Integer)  # index into the term's exam sessions
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The Director chose its venues on the draft: re-seating a session keeps them.
+    rooms_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     seats: Mapped[list[ExamSeat]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 

@@ -139,6 +139,18 @@ class SmartttClient:
         body.update({"now": True} if action in ("switch_now", "close_now") else {"at": at})
         return dict(self._json(self._request("POST", path, json=body)))
 
+    def programs(self) -> list[dict[str, Any]]:
+        """Programme codes and names."""
+        return list(self._json(self._request("GET", "/programs/")).get("programs") or [])
+
+    def unit_enrolment(self, codes: list[str]) -> dict[str, Any]:
+        """The classes taking each unit this term (master timetable, or who synced), and how many students synced."""
+        return dict(self._json(self._request("POST", "/unit-enrolment/", json={"codes": codes})))
+
+    def set_current(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Makes a term SMARTTT's current one, creating it when it has dates. The answer's `id` links the term."""
+        return dict(self._json(self._request("POST", "/set-current/", json=payload)))
+
     def publish_exams(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """(status, result). 201 = published now, 200 = this exam version was already published."""
         response = self._request("POST", "/exam-publish/", json=payload)

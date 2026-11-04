@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { Download } from 'lucide-react'
 import { errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
-import { examExportUrl, useExamDraft, useExamDraftAction, useMoveExamPaper } from '@/lib/queries'
+import { examExportUrl, useChangeExamVenue, useExamDraft, useExamDraftAction, useMoveExamPaper, useSetHealthInvigilators } from '@/lib/queries'
 import type { ExamGrid, ExamGridPaper } from '@/lib/types'
 
 const roomsOf = (p: ExamGridPaper) => [...new Set(p.seating.map((s) => s.room))].sort()
@@ -12,7 +12,7 @@ const roomsOf = (p: ExamGridPaper) => [...new Set(p.seating.map((s) => s.room))]
 /**
  * An exam draft as the Director reviews it: the date x session grid of
  * `paper -> rooms` (like the printed timetable), or the room sheets. A paper
- * can be moved (checked); the draft is shared with departments for
+ * can be moved or given another venue (checked); the draft is shared with departments for
  * invigilators, then published.
  */
 export function ExamDraftPage() {
@@ -42,7 +42,7 @@ export function ExamDraftPage() {
             {draft.placed} of {draft.papers} papers placed · {draft.pinned} pinned · <span className="capitalize">{draft.status}</span>
             {draft.shared_at && ` · shared with departments ${dateTime(draft.shared_at)}`}
             {' '}· back-to-back {draft.soft_scores.back_to_back ?? 0} · two a day {draft.soft_scores.same_day ?? 0}
-            {draft.soft_scores.common_elsewhere ? ` · ${draft.soft_scores.common_elsewhere} common units not on day 2` : ''}
+            {draft.soft_scores.postgraduate_extra_rooms ? ` · Postgraduate papers in ${draft.soft_scores.postgraduate_extra_rooms} extra rooms` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -189,32 +189,115 @@ function RoomSheets({ data, search }: { data: ExamGrid; search: string }) {
   )
 }
 
-function MoveDialog({ termId, draftId, data, paper, onClose }: {
+/** Students of the paper in a room, and what else that session has in each room. */
+function freeSeats(data: ExamGrid, paper: ExamGridPaper): Map<string, number> {
+  const used = new Map<string, number>()
+  for (const p of data.papers) {
+    if (p.day !== paper.day || p.session !== paper.session) continue
+    for (const s of p.seating) used.set(s.room, (used.get(s.room) ?? 0) + s.students)
+  }
+  return new Map(data.exam_rooms.map((r) => [r.code, r.seats - (used.get(r.code) ?? 0)]))
+}
+
+/** One of the paper's rooms and where its students could go instead. The health unit is for health papers alone. */
+function VenueRow({ termId, draftId, data, paper, room }: { termId: string; draftId: string; data: ExamGrid; paper: ExamGridPaper; room: string }) {
+  const change = useChangeExamVenue(termId, draftId)
+  const [to, setTo] = useState('')
+  const free = freeSeats(data, paper)
+  const students = paper.seating.filter((s) => s.room === room).reduce((n, s) => n + s.students, 0)
+  const options = data.exam_rooms
+    .filter((r) => r.code !== room && r.health === (paper.category === 'health'))
+    .sort((a, b) => a.code.localeCompare(b.code))
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-28 font-medium">{room} <span className="font-normal text-muted">({students})</span></span>
+        <span aria-hidden>→</span>
+        <select aria-label={`New venue instead of ${room}`} value={to} onChange={(e) => setTo(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line px-2 py-1">
+          <option value="">Choose a venue</option>
+          {options.map((r) => {
+            const left = free.get(r.code) ?? r.seats
+            return <option key={r.code} value={r.code} disabled={left < students}>{r.code} · {left} of {r.seats} seats free</option>
+          })}
+        </select>
+        <button type="button" disabled={!to || change.isPending} onClick={() => change.mutate({ paperId: paper.id, from_room: room, to_room: to }, { onSuccess: () => setTo('') })}
+          className="rounded-md border border-line px-3 py-1 disabled:opacity-50">Change</button>
+      </div>
+      {change.isError && <p role="alert" className="mt-1 text-danger">{errorMessage(change.error)}</p>}
+    </div>
+  )
+}
+
+/** A paper the Director uploaded has no department to name its invigilators. */
+function DirectorInvigilators({ termId, paper }: { termId: string; paper: ExamGridPaper }) {
+  const save = useSetHealthInvigilators(termId)
+  const slots = [{ key: '', label: paper.main_room ? `Main (${paper.main_room})` : 'Main' }, ...paper.extra_rooms.map((r) => ({ key: r, label: r }))]
+  const [named, setNamed] = useState<Record<string, { staff_number: string; name: string }>>(
+    Object.fromEntries(slots.map((s) => [s.key, { staff_number: paper.invigilators[s.key]?.staff_number ?? '', name: paper.invigilators[s.key]?.name ?? '' }])),
+  )
+  const set = (key: string, patch: Partial<{ staff_number: string; name: string }>) => setNamed({ ...named, [key]: { ...named[key], ...patch } })
+  return (
+    <fieldset className="space-y-2 border-t border-line pt-3">
+      <legend className="font-semibold">Invigilators</legend>
+      <p className="text-xs text-muted">You uploaded this paper, so you name them. SMARTTT needs to know the staff numbers when you publish.</p>
+      {slots.map((s) => (
+        <div key={s.key} className="flex flex-wrap items-center gap-2">
+          <span className="w-28">{s.label}</span>
+          <input aria-label={`Staff number, ${s.label}`} placeholder="Staff number" value={named[s.key]?.staff_number ?? ''} onChange={(e) => set(s.key, { staff_number: e.target.value })} className="w-32 rounded-md border border-line px-2 py-1" />
+          <input aria-label={`Name, ${s.label}`} placeholder="Name" value={named[s.key]?.name ?? ''} onChange={(e) => set(s.key, { name: e.target.value })} className="min-w-0 flex-1 rounded-md border border-line px-2 py-1" />
+        </div>
+      ))}
+      {save.isError && <p role="alert" className="text-danger">{errorMessage(save.error)}</p>}
+      {save.isSuccess && <p role="status" className="text-muted">Saved.</p>}
+      <button type="button" disabled={save.isPending} onClick={() => save.mutate({ paperId: paper.id, invigilators: named })} className="rounded-md border border-line px-3 py-1">Save invigilators</button>
+    </fieldset>
+  )
+}
+
+function MoveDialog({ termId, draftId, data, paper: picked, onClose }: {
   termId: string; draftId: string; data: ExamGrid; paper: ExamGridPaper; onClose: () => void
 }) {
   const move = useMoveExamPaper(termId, draftId)
+  const paper = data.papers.find((p) => p.id === picked.id) ?? picked // refreshed after a change
   const [day, setDay] = useState(paper.day ?? data.days[0]?.date ?? '')
   const [session, setSession] = useState(paper.session ?? 0)
+  const rooms = roomsOf(paper)
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Move ${paper.codes}`} className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md space-y-3 rounded-xl bg-card p-5 text-sm shadow-xl">
-        <h2 className="text-lg font-semibold">Move {paper.codes}</h2>
-        <p className="text-muted">{paper.title} · {paper.students} students. The move is checked, and both sessions are re-seated. It stays pinned.</p>
-        <label className="block">Date
-          <select value={day} onChange={(e) => setDay(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1">
-            {data.days.map((d) => <option key={d.date} value={d.date}>{d.label}</option>)}
-          </select>
-        </label>
-        <label className="block">Session
-          <select value={session} onChange={(e) => setSession(Number(e.target.value))} className="mt-1 block w-full rounded-md border border-line px-2 py-1">
-            {data.sessions.map((s, i) => <option key={s.start} value={i}>{s.start}–{s.end}</option>)}
-          </select>
-        </label>
-        {move.isError && <p role="alert" className="text-danger">{errorMessage(move.error)}</p>}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border border-line px-3 py-2">Cancel</button>
+    <div role="dialog" aria-modal="true" aria-label={`Change ${paper.codes}`} className="fixed inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/40 px-4 py-6">
+      <div className="max-h-full w-full max-w-lg space-y-3 overflow-y-auto rounded-xl bg-card p-5 text-sm shadow-xl">
+        <h2 className="text-lg font-semibold">{paper.codes}</h2>
+        <p className="text-muted">{paper.title} · {paper.students} students · {paper.category}.</p>
+
+        <section className="space-y-2">
+          <h3 className="font-semibold">Venue</h3>
+          {rooms.length === 0
+            ? <p className="text-muted">No students known yet, so no room. Enter its numbers and generate again.</p>
+            : rooms.map((room) => <VenueRow key={room} termId={termId} draftId={draftId} data={data} paper={paper} room={room} />)}
+          {rooms.length > 0 && <p className="text-xs text-muted">Checked for seats. The paper is pinned and keeps this venue when its session is re-seated.</p>}
+        </section>
+
+        <section className="space-y-2 border-t border-line pt-3">
+          <h3 className="font-semibold">Date and session</h3>
+          <p className="text-muted">The move is checked, and both sessions are re-seated, so this paper's venues may change. It stays pinned.</p>
+          <label className="block">Date
+            <select value={day} onChange={(e) => setDay(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1">
+              {data.days.map((d) => <option key={d.date} value={d.date}>{d.label}</option>)}
+            </select>
+          </label>
+          <label className="block">Session
+            <select value={session} onChange={(e) => setSession(Number(e.target.value))} className="mt-1 block w-full rounded-md border border-line px-2 py-1">
+              {data.sessions.map((s, i) => <option key={s.start} value={i}>{s.start}–{s.end}</option>)}
+            </select>
+          </label>
+          {move.isError && <p role="alert" className="text-danger">{errorMessage(move.error)}</p>}
           <button onClick={() => move.mutate({ paperId: paper.id, day, session }, { onSuccess: onClose })} disabled={move.isPending}
             className="rounded-md bg-brand px-4 py-2 text-white disabled:opacity-50">Move</button>
+        </section>
+
+        {paper.director_paper && paper.seating.length > 0 && <DirectorInvigilators key={paper.extra_rooms.join()} termId={termId} paper={paper} />}
+
+        <div className="flex justify-end">
+          <button onClick={onClose} className="rounded-md border border-line px-3 py-2">Close</button>
         </div>
       </div>
     </div>

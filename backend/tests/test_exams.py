@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ExamPaper, ExamPublication
+from app.models import ClassRow, ExamPaper, ExamPublication
 from tests.conftest import sign_in
 from tests.fake_smarttt import TERM
 from tests.fake_teaching import FakeTeaching, course, paper
@@ -356,3 +356,83 @@ def test_a_paper_nobody_synced_is_timetabled_and_published_without_a_room(client
     assert ok(client.post(f"/api/exam-drafts/{draft_id}/publish"))["smarttt"]["sent"] is True
     sent = next(p for p in smarttt.exam_payloads[-1]["papers"] if p["key"] == "p-nobody")
     assert sent["seating"] == [] and sent["date"]
+
+
+def test_a_class_guessed_from_the_code_is_seated_but_cant_stop_a_run(client, teaching, smarttt, db: Session):
+    sign_in(client)
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
+    # Nine papers of one guessed class over four days: more than two a day allows for a known class.
+    teaching.exam_courses.append(course("c-guess", "CS", "COSC", 10))
+    for i in range(9):
+        guessed = paper(f"p-g{i}", [f"COSC 10{i}"], [("c-guess", 10, "regular")])
+        guessed["rows"][0]["guessed"] = True
+        teaching.exam_published[0]["papers"].append(guessed)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    stored = db.scalar(select(ExamPaper).where(ExamPaper.allocator_ref == "p-g0"))
+    assert stored is not None and [r.guessed for r in stored.rows] == [True]
+    grid = ok(client.get(f"/api/exam-drafts/{_generate(client, term_id)}"))
+    assert grid["draft"]["violations"] == []
+    placed = next(p for p in grid["papers"] if p["codes"] == "COSC 100")
+    assert placed["day"] is not None and sum(s["students"] for s in placed["seating"]) == 10
+
+    # The department corrects the class: re-importing clears the mark.
+    guessed = next(p for p in teaching.exam_published[0]["papers"] if p["id"] == "p-g0")
+    guessed["rows"][0]["guessed"] = False
+    changed = ok(client.post(f"/api/terms/{term_id}/exams/import"))["papers"]["changed"]
+    db.expire_all()
+    assert changed == ["COSC 100"] and [r.guessed for r in stored.rows] == [False]
+
+
+def test_a_class_with_no_number_yet_keeps_its_papers_apart_and_waits_for_a_room(client, teaching, smarttt, db: Session):
+    """The master timetable names the class before anyone syncs: no clash, no seat, no invigilator needed yet."""
+    sign_in(client)
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
+    teaching.exam_courses.append(course("listed:BCOM|2|2|", "CS", "BCOM", 0, year=2))
+    for code in ("BCOM 201", "BCOM 202", "BCOM 203"):
+        teaching.exam_published[0]["papers"].append(paper(f"p-{code}", [code], [("listed:BCOM|2|2|", 0, "regular")]))
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    grid = ok(client.get(f"/api/exam-drafts/{_generate(client, term_id)}"))
+    assert grid["draft"]["violations"] == []
+    placed = [p for p in grid["papers"] if p["codes"].startswith("BCOM")]
+    assert all(p["seating"] == [] for p in placed)
+    assert len({(p["day"], p["session"]) for p in placed}) == 3
+
+    # A department's number for a class row doesn't get wiped by a later read with none.
+    row = db.scalar(select(ClassRow).where(ClassRow.allocator_ref == "c-cs1"))
+    assert row is not None and row.student_count == 120
+    teaching.exam_courses = [
+        {**c, "students": 0} if c["id"] == "c-cs1" else c for c in teaching.exam_courses
+    ]
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    db.expire_all()
+    assert row.student_count == 120
+
+
+def test_set_as_current_links_the_term_so_exams_can_be_sent(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    assert ok(client.get(f"/api/terms/{term_id}"))["smarttt_term_id"] is None
+    result = ok(client.post(f"/api/terms/{term_id}/set-current"))
+    assert result["is_current"] is True and result["smarttt_term_id"] == "smarttt-term-new"
+    assert smarttt.set_current_calls[0]["academic_year"]
+    assert ok(client.get(f"/api/terms/{term_id}"))["smarttt_term_id"] == "smarttt-term-new"
+
+
+def test_the_director_sets_a_papers_category_and_the_prefix_list_makes_health_papers(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/terms/{term_id}/exams"))["papers"]}
+    assert papers["BITE 131/COSC 130"]["category"] == "common" and papers["COSC 200"]["category"] == "regular"
+    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": "postgraduate"}))
+    ok(client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_health_prefixes": ["epsc ", "EPSC"]}))
+    data = ok(client.get(f"/api/terms/{term_id}/exams"))
+    assert data["period"]["exam_health_prefixes"] == ["EPSC"]
+    papers = {p["codes"]: p for p in data["papers"]}
+    assert papers["COSC 200"]["category"] == "postgraduate" and papers["EPSC 121"]["category"] == "health"
+    bad = client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": "x"})
+    assert bad.status_code == 422
+    ok(client.patch(f"/api/terms/{term_id}/exam-papers/{papers['COSC 200']['id']}/category", json={"category": None}))
+    # Health papers need health rooms, and the pre-check says so.
+    run = client.post("/api/exam-runs", json={"term_id": term_id, "time_limit_s": 30})
+    assert run.status_code < 300

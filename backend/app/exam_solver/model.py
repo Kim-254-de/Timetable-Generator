@@ -12,27 +12,30 @@ Hard rules:
   H-E4 papers only in the period's slots, pinned papers stay;
   H-E6 every class row (or part of one) sits in one room, rooms within their
        exam seats, a paper's ODEL students apart from its other students;
-  H-E7 a main invigilator named before generating is in one paper per slot;
+  H-E7 a main invigilator named before generating is in one room per slot: their
+       papers go in different sessions, except postgraduate ones, which share a room;
   H-E8 the second day of the period is for common units only.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
 
-Papers nobody is known to sit (no class rows: nobody synced the unit yet) are
-still kept apart, by a guess: units of one subject and year ("BPPA 110",
+Papers nobody is known to sit (no class rows, or only a class the department's
+page guessed so it could take a number: nobody synced the unit yet) are still
+kept apart, by a guess: units of one subject and year ("BPPA 110",
 "BPPA 121": BPPA, year 1) are usually sat by the same class. S-E4 keeps such a
 guessed class to one paper a session and two a day, and S-E5 spreads these
 papers evenly over the period instead of stacking them in one session. Both
 are soft (heavily weighted): a guess must never make a timetable impossible.
 
-Common units, papers sat by more than one programme (or, with nobody known to
-sit them, papers whose codes come from more than one programme: "BITE 131/
-COSC 130"), carry the most students and are all sat on the second day of the
-period, which has nothing else (H-E8). Every common paper goes there unless
-a hard rule can't allow it (a class row with three common papers, more common
-students than the day's seats); S-E6 weighs each one left out by its
-hundreds of students, so the biggest keep the day and the rest go to
-others. A period of one day, a term with no common papers, or weight
-common_day 0 turns this off.
+Papers of three kinds sit only in the first or last session of a day, on any
+exam day (H-E8): common units (sat by more than one programme, or with nobody
+known to sit them, codes from more than one programme: "BITE 131/COSC 130"),
+postgraduate papers (a code numbered 7xx to 9xx) and health and nursing papers
+(a code prefix on the term's list). Health wins when a paper is more than one.
+The health unit is theirs alone: health papers sit only in its rooms, and no
+other paper does (H-E9). All of a session's
+postgraduate papers share one room when they fit, undergraduates kept out of it
+while there is another room (S-E8). Common papers spread over the days (S-E7).
+Weight category_rules 0 turns H-E8 and H-E9 off, as for drafts made before them.
 """
 
 from __future__ import annotations
@@ -43,7 +46,24 @@ from datetime import date
 
 _CODE = re.compile(r"^\s*([A-Za-z]{2,6})\s*-?\s*0*([1-9])\d*")
 _LETTERS = re.compile(r"^\s*([A-Za-z]{2,6})")
-COMMON_DAY = 1  # the second day of the period
+_POSTGRADUATE = re.compile(r"^\s*[A-Za-z]{2,6}\s*-?\s*[7-9]\d{2,3}[A-Za-z]?\s*$")
+HEALTH, POSTGRADUATE, COMMON, REGULAR = "health", "postgraduate", "common", "regular"
+CATEGORIES = (HEALTH, POSTGRADUATE, COMMON, REGULAR)
+
+
+def paper_kind(codes: list[str] | tuple[str, ...], health_prefixes: list[str], override: str | None = None) -> str:
+    """
+    What a paper is from its codes, or the Director's choice: "health", "postgraduate",
+    "regular", "common". "" leaves it to the class rows: common when they span programmes.
+    """
+    if override:
+        return override
+    prefixes = {p.upper().strip() for p in health_prefixes if p.strip()}
+    for code in codes:
+        m = _LETTERS.match(code)
+        if m and m.group(1).upper() in prefixes:
+            return HEALTH
+    return POSTGRADUATE if any(_POSTGRADUATE.match(c) for c in codes) else ""
 
 
 def guessed_class(code: str) -> str | None:
@@ -58,6 +78,7 @@ class ExamRoom:
     code: str
     block: str  # the building block a big paper is kept within
     seats: int  # exam seats
+    health: bool = False  # in the health unit
 
 
 @dataclass(frozen=True)
@@ -67,6 +88,7 @@ class Sitting:
     row_id: str
     students: int
     odel: bool = False
+    guessed: bool = False  # the class is a guess from the code: it takes seats, but no hard rule holds it
 
 
 @dataclass(frozen=True)
@@ -78,10 +100,17 @@ class Paper:
     previous: int | None = None  # where a re-solve's base draft had it (a hint)
     invigilator: str | None = None  # the main invigilator's staff number, when named before generating
     codes: tuple[str, ...] = ()  # its unit codes, to guess who sits it when no class row is known
+    kind: str = ""  # paper_kind(): "" is decided by its class rows (ExamProblem.category)
+    fixed_seats: tuple[Seat, ...] = ()  # the venues the Director chose on the draft: kept when the session is re-seated
 
     @property
     def unknown_students(self) -> bool:
-        return not self.rows
+        return not self.row_ids
+
+    @property
+    def no_numbers(self) -> bool:
+        """No student number yet (S-E5): nothing but this keeps such papers out of one session."""
+        return self.students == 0
 
     @property
     def students(self) -> int:
@@ -89,7 +118,8 @@ class Paper:
 
     @property
     def row_ids(self) -> frozenset[str]:
-        return frozenset(r.row_id for r in self.rows)
+        """The classes known to sit it: the ones the hard rules hold apart."""
+        return frozenset(r.row_id for r in self.rows if not r.guessed)
 
 
 @dataclass(frozen=True)
@@ -100,12 +130,14 @@ class ExamWeights:
     guessed_clash: int = 1000  # S-E4 per extra paper of a guessed class in one session
     guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
     spread: int = 20  # S-E5 per paper with no students known over an even share of a session
-    common_day: int = 5000  # S-E6 per 100 students of a common paper not on day 2; 0 turns H-E8/S-E6 off
+    common_spread: int = 30  # S-E7 per common paper over an even share of a day
+    category_rules: int = 1  # 0 turns H-E8 and H-E9 off
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
         if not data:
             return cls()
+        data = {k: v for k, v in data.items() if k != "common_day"}  # retired with the common-units day
         known = set(cls.__dataclass_fields__)
         unknown = set(data) - known
         if unknown:
@@ -147,20 +179,40 @@ class ExamProblem:
 
     def is_common(self, paper: Paper) -> bool:
         """Sat by more than one programme; with no class rows, codes from more than one programme."""
-        if paper.rows:
+        if paper.row_ids:
             return len({self.row_programmes[r] for r in paper.row_ids if r in self.row_programmes}) > 1
         return len({m.group(1).upper() for m in map(_LETTERS.match, paper.codes) if m}) > 1
 
-    @property
-    def common_day(self) -> int | None:
-        """The day kept for common papers (H-E8), or None when the rule is off."""
-        if len(self.days) <= COMMON_DAY or not self.weights.common_day:
-            return None
-        return COMMON_DAY if any(self.is_common(p) for p in self.papers) else None
+    def category(self, paper: Paper) -> str:
+        if paper.kind:
+            return paper.kind
+        return COMMON if self.is_common(paper) else REGULAR
 
-    def common_day_slots(self) -> range:
-        d = self.common_day
-        return range(0) if d is None else range(d * self.sessions, (d + 1) * self.sessions)
+    @property
+    def rules_on(self) -> bool:
+        return bool(self.weights.category_rules)
+
+    def edges_only(self, paper: Paper) -> bool:
+        """It may sit only in the first or last session of a day (H-E8)."""
+        return self.rules_on and self.category(paper) != REGULAR
+
+    def is_edge(self, slot: int) -> bool:
+        return self.session_of(slot) in (0, self.sessions - 1)
+
+    def edge_slots(self) -> list[int]:
+        return [t for t in range(self.slots) if self.is_edge(t)]
+
+    @property
+    def health_seats(self) -> int:
+        return sum(r.seats for r in self.rooms if r.health)
+
+    @property
+    def general_seats(self) -> int:
+        """The seats open to papers other than health ones."""
+        return self.total_seats - self.health_seats if self.rules_on else self.total_seats
+
+    def is_health(self, paper: Paper) -> bool:
+        return self.rules_on and self.category(paper) == HEALTH
 
     def invigilators(self) -> dict[str, list[Paper]]:
         """Each main invigilator's papers, for those named before generating."""

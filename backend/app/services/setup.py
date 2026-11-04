@@ -159,6 +159,29 @@ def open_term(db: Session, smarttt: SmartttClient, identity: Identity, smarttt_t
 LOCAL = "local"
 
 
+def set_current(db: Session, smarttt: SmartttClient, identity: Identity, term: Term) -> dict[str, Any]:
+    """Makes the term SMARTTT's current one, and links it to SMARTTT's term so exams can be sent there."""
+    response = smarttt.set_current(
+        {
+            "term_id": term.smarttt_term_id,
+            "academic_year": term.academic_year,
+            "semester": term.semester,
+            "term_start": term.start_date.isoformat() if term.start_date else None,
+            "term_end": term.end_date.isoformat() if term.end_date else None,
+            "by": identity.actor,
+        }
+    )
+    linked = str(response.get("id") or "")
+    if linked and term.smarttt_term_id != linked:
+        taken = db.scalar(select(Term).where(Term.smarttt_term_id == linked, Term.id != term.id))
+        if taken is not None:
+            raise ApiError(409, "TERM_TAKEN", f"Another term here is already linked to SMARTTT's {response.get('academic_year')} semester {response.get('semester')}.")
+        term.smarttt_term_id = linked
+    audit(db, identity, "term.set_current", "term", str(term.id), None, {"smarttt_term_id": linked})
+    db.commit()
+    return {**term_dict(term), "is_current": bool(response.get("is_current"))}
+
+
 def latest_smarttt_snapshot(db: Session, term: Term) -> Snapshot | None:
     """The latest snapshot read from SMARTTT (not one built from the Generator's own data)."""
     for snapshot in db.scalars(

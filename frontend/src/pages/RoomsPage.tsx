@@ -48,7 +48,7 @@ export function RoomsPage() {
         </div>
         <div className="flex gap-2 text-sm">
           <button onClick={() => sync.mutate()} disabled={sync.isPending} className="rounded-md border border-line bg-card px-3 py-2"
-            title="The rooms and capacities the admin uploaded to SMARTTT. Exam seats and blocked hours set here stay.">
+            title="The rooms the admin set in SMARTTT: capacities, exam use and the health unit. Exam seats, blocked hours and your own exam choice stay.">
             {sync.isPending ? 'Bringing in…' : 'Bring in from SMARTTT'}
           </button>
           <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
@@ -63,7 +63,8 @@ export function RoomsPage() {
       {sync.data && (
         <p role="status" className="text-sm text-muted">
           From SMARTTT: {sync.data.added.length} added, {sync.data.updated.length} updated.
-          {sync.data.only_here.length > 0 && ` Only here, not in SMARTTT: ${sync.data.only_here.join(', ')}.`}
+          {sync.data.merged.length > 0 && ` One room under two codes, merged: ${sync.data.merged.join(', ')}.`}
+          {sync.data.only_here.length > 0 && ` Only here, not in SMARTTT, so not used for exams unless you choose them: ${sync.data.only_here.join(', ')}.`}
         </p>
       )}
       <div className="overflow-x-auto rounded-lg border border-line bg-card">
@@ -86,7 +87,7 @@ export function RoomsPage() {
                 <td className="px-3 py-2">
                   <button onClick={() => setHours(r)} className="text-brand-ink">{r.unavailable.length ? `${r.unavailable.length} hours` : 'None'}</button>
                 </td>
-                <td className="px-3 py-2">{r.for_exams ? (r.exam_seats ?? <span className="text-muted">× spacing</span>) : <span className="text-muted">Not for exams</span>}</td>
+                <td className="px-3 py-2">{r.for_exams ? (r.exam_seats ?? <span className="text-muted">× spacing</span>) : <span className="text-muted">Not for exams</span>}{r.health_unit && <span className="ml-1 text-xs text-brand-ink">Health unit</span>}</td>
                 <td className="space-x-3 px-3 py-2 text-right">
                   <button onClick={() => setEditing(r)} className="text-brand-ink">Edit</button>
                   <button onClick={() => { if (window.confirm(`Delete ${r.code}?`)) remove.mutate(r.id) }} className="text-danger"
@@ -124,7 +125,7 @@ function RoomForm({ room, onClose }: { room: RoomRecord | null; onClose: () => v
     room_type: room?.room_type ?? 'lecture_hall',
     active: room?.active ?? true,
     exam_seats: room?.exam_seats ?? null,
-    for_exams: room?.for_exams ?? true,
+    for_exams: room ? room.exam_override : null,
   })
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -154,10 +155,14 @@ function RoomForm({ room, onClose }: { room: RoomRecord | null; onClose: () => v
             <input type="number" min={1} max={form.capacity} value={form.exam_seats ?? ''}
               onChange={(e) => setForm({ ...form, exam_seats: e.target.value === '' ? null : Number(e.target.value) })} className={inputClass} />
           </Field>
-          <label className="mt-6 flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.for_exams} onChange={(e) => setForm({ ...form, for_exams: e.target.checked })} />
-            Used for exams
-          </label>
+          <Field label="Used for exams" hint={`The administrator says ${room?.admin_for_exams === false ? 'no' : 'yes'}. Your choice overrules theirs.`}>
+            <select value={form.for_exams === null || form.for_exams === undefined ? '' : String(form.for_exams)} className={inputClass}
+              onChange={(e) => setForm({ ...form, for_exams: e.target.value === '' ? null : e.target.value === 'true' })}>
+              <option value="">{`As the administrator set (${room?.admin_for_exams === false ? 'no' : 'yes'})`}</option>
+              <option value="true">Yes, use it</option>
+              <option value="false">No, keep it out</option>
+            </select>
+          </Field>
         </div>
         {save.isError && <p role="alert" className="text-sm text-danger">{errorMessage(save.error)}</p>}
         <div className="flex justify-end gap-2">
