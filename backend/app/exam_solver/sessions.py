@@ -22,7 +22,7 @@ from typing import Any
 
 from ortools.sat.python import cp_model
 
-from app.exam_solver.model import COMMON, HEALTH, ExamProblem
+from app.exam_solver.model import COMMON, HEALTH, POSTGRADUATE, ExamProblem
 
 STATUS = {
     cp_model.OPTIMAL: "OPTIMAL",
@@ -107,14 +107,20 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
                 m.add(sum(day_terms) - 1 <= c)
                 mm.penalties.append(w.same_day * c)
 
-    # H-E7: one main invigilator, one paper per slot.
+    # H-E7: one main invigilator, one room per slot. A session's postgraduate papers share a
+    # room, so one person can cover them all; any other paper of theirs goes in another session.
     for staff, papers in problem.invigilators().items():
         if len(papers) < 2:
             continue
+        shared = [p for p in papers if problem.category(p) == POSTGRADUATE]
+        apart = [p for p in papers if problem.category(p) != POSTGRADUATE]
         for t in slots:
-            terms = [x[p.id, t] for p in papers if (p.id, t) in x]
+            terms = [x[p.id, t] for p in apart if (p.id, t) in x]
+            graduate = [x[p.id, t] for p in shared if (p.id, t) in x]
             if len(terms) > 1:
                 mm.limit(terms, 1, f"H-E7|{staff}")
+            for g in graduate if terms else []:
+                mm.limit([*terms, g], 1, f"H-E7|{staff}")
 
     seats = problem.general_seats
     others = [p for p in problem.papers if not problem.is_health(p)]
