@@ -18,7 +18,7 @@ from app.errors import ApiError
 from app.exam_solver.model import ExamProblem, ExamWeights, Paper, Seat, Sitting, paper_kind
 from app.exam_solver.solve import solve
 from app.models import ClassRow, ExamDraft, ExamPaper, ExamPlacement, ExamSeat, Run, RunMode, RunStatus, Term, utcnow
-from app.services.exam_setup import exam_days, exam_rooms
+from app.services.exam_setup import exam_days, exam_rooms, postgraduate_room
 from app.services.setup import audit, latest_snapshot
 
 
@@ -57,11 +57,14 @@ def build(db: Session, term: Term, base: ExamDraft | None = None, weights: ExamW
             )
         )
     class_rows = list(db.scalars(select(ClassRow).where(ClassRow.term_id == term.id)))
+    rooms = exam_rooms(db, term)
+    graduate = postgraduate_room(rooms, term)
     return ExamProblem(
         papers=papers,
         days=days,
         sessions=sessions,
-        rooms=exam_rooms(db, term),
+        rooms=rooms,
+        postgraduate_room=graduate.id if graduate else None,
         weights=weights or ExamWeights(),
         row_labels={str(r.id): r.label for r in class_rows},
         row_programmes={str(r.id): r.program_code.strip().upper() for r in class_rows},

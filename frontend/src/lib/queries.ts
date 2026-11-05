@@ -356,7 +356,7 @@ function useExamMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
 }
 
 export const usePatchExamPeriod = (termId: string) =>
-  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
+  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing' | 'exam_postgraduate_room'>>) =>
     patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
 
 export interface PaperRowInput { programme: string; year: number; semester: number; stream: string; students: number }
@@ -373,8 +373,8 @@ export const useSetDirectorInvigilators = (termId: string) =>
     put(`/terms/${termId}/director-papers/${paperId}/invigilators`, { invigilators }))
 
 export const useChangeExamVenue = (termId: string, draftId: string) =>
-  useExamMutation(termId, ({ paperId, from_room, to_room }: { paperId: string; from_room: string; to_room: string }) =>
-    patch<ExamDraftSummary>(`/exam-drafts/${draftId}/papers/${paperId}/venue`, { from_room, to_room }))
+  useExamMutation(termId, ({ paperId, from_room, to_room, make_room = false }: { paperId: string; from_room: string; to_room: string; make_room?: boolean }) =>
+    patch<ExamDraftSummary>(`/exam-drafts/${draftId}/papers/${paperId}/venue`, { from_room, to_room, make_room }))
 
 
 export const useSetPaperCategory = (termId: string) =>

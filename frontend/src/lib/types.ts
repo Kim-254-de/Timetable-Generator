@@ -325,6 +325,10 @@ export interface ExamPeriod {
   exam_days_off: string[]
   exam_sessions: ExamSessionTime[]
   exam_spacing: number
+  /** The room postgraduate papers sit in first, as typed ("TC 1"); "" for none. */
+  exam_postgraduate_room: string
+  /** That room as the rooms list has it; null when no such room is open for exams. */
+  postgraduate_room: { code: string; building: string; seats: number } | null
   days: string[]
   slots: number
   rooms: number
@@ -443,6 +447,8 @@ export interface ExamDraftSummary {
   soft_scores: Record<string, number>
   violations: { rule: string; message: string; paper_ids: string[] }[]
   publishable: boolean
+  /** After a venue change that made room: the papers moved out of the room, and where they went. */
+  made_room?: { paper: string; from: string; to: string[] }[]
 }
 
 export interface ExamGrid {

@@ -105,6 +105,9 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
+    # The room a session's postgraduate papers sit in first; when it is full they take other rooms in
+    # its building, which undergraduates share. Undergraduates keep out of this room only. "" = no such room.
+    exam_postgraduate_room: Mapped[str] = mapped_column(String(30), default="TC 1", server_default="TC 1")
     # No longer used: health and nursing papers are ordinary papers now.
     exam_health_prefixes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:

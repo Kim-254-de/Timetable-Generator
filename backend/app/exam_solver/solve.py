@@ -49,6 +49,14 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] |
     for s in seats or []:
         if kinds.get(s.paper_id) == POSTGRADUATE and s.paper_id in slots:
             graduate_rooms[slots[s.paper_id]].add(s.room_id)
+    # Postgraduate papers with students outside the postgraduate room's building (it was full, or the Director chose).
+    room_blocks = {r.id: r.block for r in problem.rooms}
+    home = room_blocks.get(problem.postgraduate_room or "")
+    outside = {
+        s.paper_id
+        for s in seats or []
+        if home and kinds.get(s.paper_id) == POSTGRADUATE and room_blocks.get(s.room_id) != home
+    }
     # H-E3's limit: sessions over it, from a run that couldn't keep to it or a paper moved by hand.
     load: dict[int, int] = defaultdict(int)
     for p in problem.papers:
@@ -62,6 +70,7 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] |
         "guessed_clashes": guessed,
         "common_busiest_day": max(per_day.values(), default=0),
         "postgraduate_extra_rooms": sum(len(rooms_) - 1 for rooms_ in graduate_rooms.values()),
+        "postgraduate_outside_building": len(outside),
         # S-E9: common papers that had to sit outside the first and last sessions.
         "common_midday": sum(
             1 for p in problem.papers if p.id in slots and problem.category(p) == COMMON and not problem.is_edge(slots[p.id])
@@ -76,7 +85,7 @@ def seat_all(problem: ExamProblem, slots: dict[str, int]) -> list[Seat]:
             by_slot[slots[p.id]].append(p)
     out: list[Seat] = []
     for t in sorted(by_slot):
-        out.extend(rooms.seat_session(by_slot[t], problem.rooms))
+        out.extend(rooms.seat_session(by_slot[t], problem.rooms, problem.postgraduate_room))
     return out
 
 
