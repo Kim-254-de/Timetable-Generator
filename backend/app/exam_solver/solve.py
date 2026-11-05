@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import time
 from collections import defaultdict
+from dataclasses import replace
 
 from app.exam_solver import precheck, rooms, sessions
 from app.exam_solver.model import COMMON, POSTGRADUATE, ExamProblem, ExamSolution, Paper, Seat
@@ -48,7 +49,13 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] |
     for s in seats or []:
         if kinds.get(s.paper_id) == POSTGRADUATE and s.paper_id in slots:
             graduate_rooms[slots[s.paper_id]].add(s.room_id)
+    # H-E3's limit: sessions over it, from a run that couldn't keep to it or a paper moved by hand.
+    load: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        if p.id in slots:
+            load[slots[p.id]] += p.students
     return {
+        "over_session_limit": sum(1 for n in load.values() if n > problem.session_limit()),
         "back_to_back": back_to_back,
         "same_day": same_day,
         "student_days": late,
@@ -85,6 +92,11 @@ def solve(problem: ExamProblem, time_limit_s: float = 300, workers: int = 8) -> 
             failure={"stage": "precheck", "reasons": findings[:50], "count": len(findings)},
         )
     status, slots, _objective = sessions.solve(problem, time_limit_s * 0.9, workers)
+    if status == "INFEASIBLE" and problem.session_limit() < problem.total_seats:
+        # The session limit is what's wanted, not what must hold: better a tighter timetable than none.
+        problem = replace(problem, weights=replace(problem.weights, session_fill=100))
+        left = time_limit_s * 0.9 - (time.monotonic() - started)
+        status, slots, _objective = sessions.solve(problem, left, workers)
     if not slots:
         reasons = (
             sessions.explain(problem, min(60.0, time_limit_s / 2))

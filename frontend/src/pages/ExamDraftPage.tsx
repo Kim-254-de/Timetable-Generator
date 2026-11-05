@@ -44,6 +44,7 @@ export function ExamDraftPage() {
             {' '}· back-to-back {draft.soft_scores.back_to_back ?? 0} · two a day {draft.soft_scores.same_day ?? 0}
             {draft.soft_scores.postgraduate_extra_rooms ? ` · Postgraduate papers in ${draft.soft_scores.postgraduate_extra_rooms} extra rooms` : ''}
             {draft.soft_scores.common_midday ? ` · ${draft.soft_scores.common_midday} common papers in a middle session` : ''}
+            {draft.soft_scores.over_session_limit ? ` · ${draft.soft_scores.over_session_limit} sessions fuller than the limit, so more papers are split across rooms` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">

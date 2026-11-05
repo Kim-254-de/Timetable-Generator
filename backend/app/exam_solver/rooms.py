@@ -1,13 +1,14 @@
 """
 Phase 2: where each session's papers sit (bin packing).
 
-A paper is cut into seating blocks of whole class rows; a class row bigger
-than every room is cut into equal parts, each given one room ("part 1 of 2").
-Blocks are placed biggest paper first, each block in one room within its exam
-seats, preferring in order:
-  1. a room the paper already uses;
-  2. a room already in use, so small papers share rooms;
-  3. the tightest fit, so as few rooms as possible are used.
+Papers are placed biggest first. A paper's students go in one room when any
+room has the seats for them all (its ODEL students and its others each count
+as one lot, as they sit apart), preferring a room the paper already uses, then
+a room already in use, so small papers share rooms, then the tightest fit.
+A paper no room can hold is cut into seating blocks of whole class rows; a class
+row bigger than every room is cut into equal parts, each given one room ("part
+1 of 2"). Each block goes in a room the paper already uses, else the emptiest,
+so the paper takes as few rooms as possible.
 A paper stays in one building. It starts in the building that holds all of it
 in the fewest rooms, and students who don't fit a room take other rooms there
 ("UTC 1", then "UTC 2"), even if that splits a class row. It moves on to
@@ -165,7 +166,50 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
         buildings = {by_id[r].block for r in own}
         # The first paper of a level picks the building for them all.
         to_seat = waiting[group] if group and not own else paper.students
-        for block in _blocks(paper, biggest):
+        # The first paper of a level picks the building for them all, even if it fits a room anywhere.
+        if group and not buildings:
+            first = _next_building([r for r in rooms if r.id not in others], left, buildings, waiting[group])
+            if first is not None:
+                buildings.add(first)
+        blocks = _blocks(paper, biggest)
+        cut: list[_Block] = []
+        for odel in (False, True):
+            lot = [b for b in blocks if b.odel == odel]
+            if not lot:
+                continue
+            students = sum(b.students for b in lot)
+            buildings |= {by_id[r].block for r in paper_rooms[paper.id]}
+            room = None
+            for pool in ([r for r in rooms if r.id not in others], rooms):
+                can = [
+                    r
+                    for r in pool
+                    if left[r.id] >= students and (not buildings or r.block in buildings) and allowed(lot[0], r.id)
+                ]
+                if can:
+                    room = min(
+                        can,
+                        key=lambda r, lot_size=students: (
+                            bool(group) and r.id not in own,
+                            r.id in others,
+                            r.id not in paper_rooms[paper.id],
+                            left[r.id] == r.seats,  # unused rooms last: small papers share
+                            left[r.id] - lot_size,
+                            r.code,
+                        ),
+                    )
+                    break
+            if room is None:
+                cut.extend(lot)
+                continue
+            for b in lot:
+                place(b, room.id, b.students, b.part, b.parts)
+            to_seat -= students
+            if group:
+                waiting[group] -= students
+                if room.id not in own:
+                    own.append(room.id)
+        for block in sorted(cut, key=lambda b: -b.students):
             mine = paper_rooms[paper.id]
             buildings |= {by_id[r].block for r in mine}
             # Stay in the paper's building(s) until they can't take this block. Rooms kept
@@ -195,8 +239,7 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
                         bool(group) and r.id not in own,
                         r.id in others,
                         r.id not in mine,
-                        left[r.id] == r.seats,  # unused rooms last: small papers share
-                        left[r.id] - block.students,
+                        -left[r.id],  # the emptiest: this paper needs as few rooms as it can get
                         r.code,
                     ),
                 )

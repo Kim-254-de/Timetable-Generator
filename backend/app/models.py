@@ -146,6 +146,10 @@ class Department(Base):
     attendance_lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+# SMARTTT's stand-in for a class with no venue yet: not a place anyone can sit an exam.
+PLACEHOLDER_ROOM = "TBA"
+
+
 class Room(Base):
     """A lecture hall, lab or seminar room. The id is SMARTTT's room id when imported, else a random one."""
 
@@ -171,6 +175,8 @@ class Room(Base):
 
     @property
     def used_for_exams(self) -> bool:
+        if self.code.strip().upper() == PLACEHOLDER_ROOM:
+            return False
         return self.for_exams if self.exam_override is None else self.exam_override
 
     @property

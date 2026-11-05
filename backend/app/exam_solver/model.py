@@ -8,7 +8,11 @@ one day: slot = day index x sessions per day + session.
 Hard rules:
   H-E1 no class row sits two papers in one slot;
   H-E2 at most two papers per class row per day;
-  H-E3 a slot's students fit the exam seats of all rooms;
+  H-E3 a slot's students fit the exam seats of all rooms, and when generating
+       no more than session_fill percent of them, so that papers needn't be cut
+       up to fit the last gaps. A session may pass that only for a paper bigger
+       than the limit or for pinned papers; if no timetable holds to it, the run
+       uses all the seats (session_limit());
   H-E4 papers only in the period's slots, pinned papers stay;
   H-E6 every class row (or part of one) sits in one room, rooms within their
        exam seats, a paper's ODEL students apart from its other students;
@@ -157,6 +161,7 @@ class ExamWeights:
     common_midday: int = 1000  # S-E9 per common paper outside the first and last sessions
     category_rules: int = 1  # 0 turns H-E8 and H-E10 off
     postgraduate_first_week: int = 1  # 0 turns H-E10 off
+    session_fill: int = 85  # H-E3 when generating: the percent of the exam seats a session may fill; 100 is all
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
@@ -169,6 +174,8 @@ class ExamWeights:
             raise ValueError(f"Unknown weights: {', '.join(sorted(unknown))}")
         if any(not isinstance(v, int) or v < 0 for v in data.values()):
             raise ValueError("Weights must be whole numbers from 0.")
+        if not 1 <= data.get("session_fill", 100) <= 100:
+            raise ValueError("session_fill must be a percent from 1 to 100.")
         return cls(**data)
 
     def as_dict(self) -> dict[str, int]:
@@ -201,6 +208,12 @@ class ExamProblem:
     @property
     def total_seats(self) -> int:
         return sum(r.seats for r in self.rooms)
+
+    def session_limit(self) -> int:
+        """The students a generated session may hold: at least the biggest paper, at most the seats."""
+        seats = self.total_seats
+        wanted = seats * self.weights.session_fill // 100
+        return min(seats, max(wanted, max((p.students for p in self.papers), default=0)))
 
     def is_common(self, paper: Paper) -> bool:
         """Sat by more than one programme; with no class rows, codes from more than one programme."""
