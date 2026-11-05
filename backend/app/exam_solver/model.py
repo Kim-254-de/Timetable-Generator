@@ -191,6 +191,7 @@ class ExamProblem:
     weights: ExamWeights = field(default_factory=ExamWeights)
     row_labels: dict[str, str] = field(default_factory=dict)  # for messages
     row_programmes: dict[str, str] = field(default_factory=dict)  # class row -> programme code, for common units
+    postgraduate_room: str | None = None  # the room id postgraduate papers sit in first ("TC 1"); see rooms.py
 
     def row_label(self, row_id: str) -> str:
         return self.row_labels.get(row_id, row_id)

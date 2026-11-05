@@ -203,6 +203,8 @@ class ExamPeriodBody(_Strict):
     exam_sessions: Annotated[list[ExamSession], Field(min_length=1, max_length=6)] | None = None
     # Exam seats as a share of each room's teaching capacity.
     exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
+    # The postgraduate papers' room ("TC 1"); "" leaves them to any room.
+    exam_postgraduate_room: Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)] | None = None
 
 
 class PaperRowBody(_Strict):
@@ -233,6 +235,8 @@ class PaperInvigilatorsBody(_Strict):
 class ExamVenueBody(_Strict):
     from_room: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
     to_room: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+    # The room is full: move the other papers' students out of it to free seats in the session.
+    make_room: bool = False
 
 
 class PaperCategoryBody(_Strict):

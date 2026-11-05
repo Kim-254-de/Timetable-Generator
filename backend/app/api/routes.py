@@ -623,7 +623,7 @@ def move_exam_paper(draft_id: str, paper_id: str, body: ExamMoveBody, identity: 
 def change_exam_venue(draft_id: str, paper_id: str, body: ExamVenueBody, identity: Me, db: Db) -> dict[str, Any]:
     """Moves a paper's students from one room to another, checked; the paper is pinned and keeps the venue."""
     draft = exam_drafts.get_draft(db, draft_id)
-    return ok(exam_drafts.change_venue(db, identity, draft, paper_id, body.from_room, body.to_room))
+    return ok(exam_drafts.change_venue(db, identity, draft, paper_id, body.from_room, body.to_room, body.make_room))
 
 
 @router.post("/exam-drafts/{draft_id}/resolve")

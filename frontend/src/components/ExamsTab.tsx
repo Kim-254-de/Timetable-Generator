@@ -239,6 +239,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
   const [daysOff, setDaysOff] = useState(period.exam_days_off.join(', '))
   const [sessions, setSessions] = useState<ExamSessionTime[]>(period.exam_sessions)
   const [spacing, setSpacing] = useState(period.exam_spacing)
+  const [graduateRoom, setGraduateRoom] = useState(period.exam_postgraduate_room ?? '')
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -249,6 +250,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       exam_days_off: daysOff.split(/[,\s]+/).filter(Boolean),
       exam_sessions: sessions,
       exam_spacing: spacing,
+      exam_postgraduate_room: graduateRoom.trim(),
     })
   }
 
@@ -290,6 +292,16 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       <label className="block">Exam seats, as a share of each room's capacity (spacing)
         <input type="number" min={0.3} max={1} step={0.05} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))}
           className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
+      </label>
+      <label className="block">Postgraduate room
+        <input value={graduateRoom} onChange={(e) => setGraduateRoom(e.target.value)} placeholder="TC 1"
+          className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
+        <span className="mt-1 block text-xs text-muted">
+          A session's postgraduate papers sit here first. When it is full they take other rooms in its building, and undergraduates fill the seats left in those rooms; undergraduates keep out of this room only while postgraduates sit. Leave empty for no postgraduate room. You can still give any paper another venue on the draft.
+          {period.exam_postgraduate_room && (period.postgraduate_room
+            ? ` Now: ${period.postgraduate_room.code}, ${period.postgraduate_room.seats} exam seats, building ${period.postgraduate_room.building}.`
+            : ` No room ${period.exam_postgraduate_room} is open for exams, so postgraduate papers sit in any room.`)}
+        </span>
       </label>
       <p className="text-xs text-muted">
         Postgraduate (7xx to 9xx) papers sit only in the first or last session of a day. Common papers sit first or last when they can, and take a middle session when the timetable needs it. A paper of over 3000 students counts as common.

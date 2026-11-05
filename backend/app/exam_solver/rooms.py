@@ -17,6 +17,11 @@ holds it all, it starts in the one with the most seats.
 A session's postgraduate papers share one room when they fit, and so do its
 certificate papers and its diploma papers, each level in its own room. Other
 papers keep out of those rooms while they can sit anywhere else.
+With a postgraduate room set for the term ("TC 1"), a session's postgraduate
+papers sit there first; students who don't fit take other rooms in its building
+(TC), and undergraduates fill the seats left in those rooms. Only the
+postgraduate room itself is kept from undergraduates, and only in sessions with
+postgraduate papers. When the building is full they go on to the next one.
 A paper's ODEL class rows sit apart from its other class rows.
 A paper the
 Director gave its venues on the draft keeps them; the rest are seated around it.
@@ -94,7 +99,7 @@ def _next_building(rooms: list[ExamRoom], left: dict[str, int], taken: set[str],
     return min(free, key=rank, default=None)
 
 
-def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
+def seat_session(papers: list[Paper], rooms: list[ExamRoom], postgraduate_room: str | None = None) -> list[Seat]:
     if not papers:
         return []
     if not rooms:
@@ -148,6 +153,19 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
         if p.id not in placed and level:
             waiting[level] += p.students
     settled = {g for g, kept in shared.items() if kept}
+    # The term's postgraduate room is their home, whatever else the Director chose for some of them.
+    graduate_room = postgraduate_room if postgraduate_room in by_id else None
+    if graduate_room and any(groups[p.id] == POSTGRADUATE for p in papers):
+        if graduate_room not in shared[POSTGRADUATE]:
+            shared[POSTGRADUATE].insert(0, graduate_room)
+        settled.add(POSTGRADUATE)
+    else:
+        graduate_room = None
+
+    def kept_for(level: str) -> list[str]:
+        """The rooms kept from other papers: with a postgraduate room, only that room is."""
+        return [graduate_room] if level == POSTGRADUATE and graduate_room else shared[level]
+
     unseated = (p for p in papers if p.id not in placed)
     for paper in sorted(unseated, key=lambda p: (order.get(groups[p.id] or "", 3), -p.students, p.label)):
         group = groups[paper.id]
@@ -161,9 +179,12 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom]) -> list[Seat]:
             if total and home:
                 shared[group].append(home[0].id)
         own = shared[group] if group else []
-        others = {room for g, kept in shared.items() if g != group for room in kept}
+        others = {room for g in list(shared) if g != group for room in kept_for(g)}
         biggest = max(r.seats for r in rooms)
-        buildings = {by_id[r].block for r in own}
+        if group == POSTGRADUATE and graduate_room:
+            buildings = {by_id[graduate_room].block}  # its building, not where a chosen venue put one of them
+        else:
+            buildings = {by_id[r].block for r in own}
         # The first paper of a level picks the building for them all.
         to_seat = waiting[group] if group and not own else paper.students
         # The first paper of a level picks the building for them all, even if it fits a room anywhere.

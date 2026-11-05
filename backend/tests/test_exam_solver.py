@@ -764,3 +764,51 @@ def test_session_fill_must_be_a_percent():
         except ValueError:
             continue
         raise AssertionError(bad)
+
+
+def _tc_rooms() -> list[ExamRoom]:
+    return [
+        _room("TC 1", 90, "TC"),
+        _room("TC 4", 90, "TC"),
+        _room("TC 5", 90, "TC"),
+        _room("UTC 3", 405, "UTC"),
+        _room("UTC 6", 226, "UTC"),
+    ]
+
+
+def test_postgraduate_papers_sit_in_their_room_not_the_smallest_that_fits():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 20)), kind=POSTGRADUATE) for i in range(4)]
+    seats = seating.seat_session([*graduates, _paper("BCOM 101", ("BCOM1", 300))], _tc_rooms(), "TC 1")
+    assert {s.room_id for s in seats if s.paper_id.startswith("M")} == {"TC 1"}
+    assert "TC 1" not in {s.room_id for s in seats if s.paper_id == "BCOM 101"}
+
+
+def test_postgraduates_overflow_into_their_building_and_undergraduates_share_those_rooms():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 30)), kind=POSTGRADUATE) for i in range(4)]  # 120 > TC 1's 90
+    small = _paper("BCOM 101", ("BCOM1", 50))
+    seats = seating.seat_session([*graduates, small], _tc_rooms(), "TC 1")
+    graduate_rooms = {s.room_id for s in seats if s.paper_id.startswith("M")}
+    assert "TC 1" in graduate_rooms and graduate_rooms <= {"TC 1", "TC 4", "TC 5"}
+    overflow = next(iter(graduate_rooms - {"TC 1"}))
+    # BCOM 101 joins the half-full overflow room, never TC 1.
+    assert {s.room_id for s in seats if s.paper_id == "BCOM 101"} == {overflow}
+    used: dict[str, int] = defaultdict(int)
+    for s in seats:
+        used[s.room_id] += s.students
+    assert all(used[r.id] <= r.seats for r in _tc_rooms())
+
+
+def test_postgraduates_leave_their_building_only_when_it_is_full_and_the_score_says_so():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 60)), kind=POSTGRADUATE) for i in range(5)]  # 300 > TC's 270
+    rooms = _tc_rooms()
+    seats = seating.seat_session(graduates, rooms, "TC 1")
+    # Four fill TC (the fourth split over the seats left); the fifth goes whole to the next building.
+    assert sum(s.students for s in seats if s.room_id.startswith("TC ")) == 240
+    assert {s.room_id for s in seats if s.paper_id == "M4"} <= {"UTC 3", "UTC 6"}
+    problem = ExamProblem(papers=graduates, days=DAYS[:1], sessions=3, rooms=rooms, postgraduate_room="TC 1")
+    assert soft_scores(problem, {p.id: 0 for p in graduates}, seats)["postgraduate_outside_building"] >= 1
+
+
+def test_the_postgraduate_room_is_open_to_all_in_a_session_without_postgraduates():
+    seats = seating.seat_session([_paper("BCOM 101", ("BCOM1", 85))], _tc_rooms(), "TC 1")
+    assert {s.room_id for s in seats} == {"TC 1"}  # the tightest fit
