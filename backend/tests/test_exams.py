@@ -460,3 +460,16 @@ def test_a_postgraduate_paper_stays_in_the_first_week_and_older_drafts_are_left_
     run.weights = {k: v for k, v in run.weights.items() if k != "postgraduate_first_week"}
     db.commit()
     ok(client.patch(f"/api/exam-drafts/{draft_id}/papers/{paper_id}", json={"day": "2026-11-30", "session": 0}))
+
+
+def test_the_placeholder_room_is_never_an_exam_room(client, teaching):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    before = ok(client.get(f"/api/terms/{term_id}/exams"))["period"]["exam_seats"]
+    placeholder = {"code": "TBA", "building": "", "capacity": "50", "room_type": "Lecture hall"}
+    ok(client.post("/api/rooms/bulk", json={"rows": [placeholder]}))
+    rooms = {r["code"]: r for r in ok(client.get("/api/rooms"))}
+    assert rooms["TBA"]["for_exams"] is False
+    # The Director's own choice can't open it either.
+    ok(client.patch(f"/api/rooms/{rooms['TBA']['id']}", json={"for_exams": True}))
+    assert ok(client.get(f"/api/terms/{term_id}/exams"))["period"]["exam_seats"] == before

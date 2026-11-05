@@ -692,3 +692,75 @@ def test_the_rule_at_fault_can_be_seats_or_an_invigilator_not_the_session_rule()
     named = [replace(_paper(f"P{i}", (f"R{i}", 5)), invigilator="STF/1") for i in range(3)]
     busy = ExamProblem(papers=named, days=DAYS[:1], sessions=2, rooms=[_room("A", 100)])
     assert "H-E7" in [r["rule"] for r in sessions.diagnose(busy, 20)]
+
+
+def test_a_paper_that_fits_a_room_is_not_split_over_gaps():
+    # The big paper leaves 10 seats in A, and B is empty: both classes of the small paper belong in B.
+    rooms = [_room("A", 100), _room("B", 40)]
+    papers = [_paper("BIG", ("R0", 90)), _paper("SMALL", ("R1", 10), ("R2", 15))]
+    placed = seating.seat_session(papers, rooms)
+    assert {s.room_id for s in placed if s.paper_id == "SMALL"} == {"B"}
+
+
+def test_odel_students_stay_apart_when_a_paper_fits_one_room():
+    placed = seating.seat_session([_paper("P", ("R1", 10), ("R2", 10, True))], [_room("A", 100), _room("B", 100)])
+    assert len({s.room_id for s in placed}) == 2
+
+
+def test_a_paper_no_room_holds_takes_the_fewest_rooms():
+    rooms = [_room("SMALL 1", 30), _room("SMALL 2", 30), _room("SMALL 3", 30), _room("BIG 1", 100), _room("BIG 2", 100)]
+    placed = seating.seat_session([_paper("P", ("R1", 60), ("R2", 60))], rooms)
+    assert {s.room_id for s in placed} == {"BIG 1", "BIG 2"}
+
+
+def _limited(*papers: Paper, seats: int = 100, days: int = 2, fill: int = 85) -> ExamProblem:
+    return ExamProblem(
+        papers=list(papers),
+        days=DAYS[:days],
+        sessions=1,
+        rooms=[_room("A", seats)],
+        weights=ExamWeights(session_fill=fill),
+    )
+
+
+def test_a_generated_session_keeps_to_the_limit_even_though_big_papers_go_early():
+    # All three fit the first day's 100 seats, and the early-date rule wants them there; only 85 may sit.
+    problem = _limited(_paper("P1", ("R1", 40)), _paper("P2", ("R2", 40)), _paper("P3", ("R3", 20)))
+    result = solve(problem, time_limit_s=10, workers=2)
+    load: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        load[result.slots[p.id]] += p.students
+    assert max(load.values()) <= 85
+    assert result.soft_scores["over_session_limit"] == 0
+
+
+def test_a_paper_bigger_than_the_limit_still_gets_a_session():
+    problem = _limited(_paper("HUGE", ("R1", 95)), _paper("P", ("R2", 10)))
+    assert problem.session_limit() == 95
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.failure is None and result.slots["HUGE"] != result.slots["P"]
+
+
+def test_pinned_papers_stay_over_the_limit():
+    problem = _limited(_paper("P1", ("R1", 50), pinned=0), _paper("P2", ("R2", 45), pinned=0), _paper("P3", ("R3", 5)))
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.failure is None and result.slots["P1"] == result.slots["P2"] == 0
+
+
+def test_when_no_timetable_keeps_to_the_limit_the_run_uses_all_the_seats_and_says_so():
+    # 180 students over two sessions of 85 are too many, and the 100 seats can hold them.
+    sizes = {"P1": 50, "P2": 50, "P3": 40, "P4": 40}
+    problem = _limited(*(_paper(p, (f"R-{p}", n)) for p, n in sizes.items()))
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.failure is None and len(result.slots) == 4
+    assert soft_scores(problem, result.slots, result.seats)["over_session_limit"] >= 1
+
+
+def test_session_fill_must_be_a_percent():
+    assert ExamWeights.from_dict({"session_fill": 70}).session_fill == 70
+    for bad in (0, 101):
+        try:
+            ExamWeights.from_dict({"session_fill": bad})
+        except ValueError:
+            continue
+        raise AssertionError(bad)

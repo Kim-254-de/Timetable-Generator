@@ -150,6 +150,11 @@ On the term's **Exams** tab:
    one person can cover several papers in one room. A paper nobody is known to sit (no class
    rows: nobody synced it, e.g. part-time students) still gets a date and
    session, with no room ("room to be announced") and no invigilator needed.
+   When generating, no session fills more than 85% of the exam seats (the
+   `session_fill` weight), so papers needn't be cut up to fit the last gaps; if no
+   timetable can keep to that, the run uses all the seats and the draft says so.
+   A paper goes in one room whenever a room has the seats for it. SMARTTT's
+   placeholder room `TBA` is never an exam room.
 6. **Approve and publish**: refused while any paper, or any extra room of a
    paper, has no invigilator. The
    version is frozen and sent to SMARTTT (`generator/exam-publish/`: papers

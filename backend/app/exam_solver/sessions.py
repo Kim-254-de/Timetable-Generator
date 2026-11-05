@@ -3,7 +3,7 @@ Phase 1: each paper to one slot (a session of a day), with CP-SAT.
 
 x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
-class row and day at most two; H-E3 per slot the students fit all exam seats;
+class row and day at most two; H-E3 per slot the students fit the session limit (ExamProblem.session_limit);
 H-E8 postgraduate papers only in the first or last session
 of a day (they get no other slot);
 H-E10 postgraduate papers only in the first week (they get no other slot).
@@ -120,12 +120,17 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
             for g in graduate if terms else []:
                 mm.limit([*terms, g], 1, f"H-E7|{staff}")
 
-    seats = problem.total_seats
+    seats = problem.session_limit()
+    pinned: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        if p.pinned is not None:
+            pinned[p.pinned] += p.students
     if sum(p.students for p in problem.papers) > seats:
         for t in slots:
             load = [p.students * x[p.id, t] for p in problem.papers if (p.id, t) in x]
             if load:
-                mm.limit(load, seats, f"H-E3|{t}")
+                # The Director's pinned papers stay even over the limit; the seats themselves still hold.
+                mm.limit(load, min(problem.total_seats, max(seats, pinned[t])), f"H-E3|{t}")
     if not families:
         _guesses(mm, problem)
         _spread_common(mm, problem)
