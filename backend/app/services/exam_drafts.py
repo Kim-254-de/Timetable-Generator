@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -101,11 +101,11 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
     term = db.get(Term, draft.term_id)
     if term is None:
         raise ApiError(404, "NOT_FOUND", "No such term.")
-    # The run's weights: a run with category_rules 0, or made before those rules, is checked without H-E8 and H-E9.
+    # The run's weights: a run with these rules off, or made before them, is checked without them.
     run = db.get(Run, draft.run_id) if draft.run_id else None
     weights = None
     if run is not None and run.weights is not None:
-        weights = ExamWeights.from_dict({"category_rules": 0, **run.weights})
+        weights = ExamWeights.from_dict({"category_rules": 0, "postgraduate_first_week": 0, **run.weights})
     problem = build(db, term, draft, weights)
     slots: dict[str, int] = {}
     seats: list[Seat] = []
@@ -121,13 +121,10 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
     return _Built(term, problem, slots, seats)
 
 
-def change_venue(
-    db: Session, identity: Identity, draft: ExamDraft, paper_id: str, from_room: str, to_room: str
-) -> dict[str, Any]:
+def change_venue(db: Session, identity: Identity, draft: ExamDraft, paper_id: str, from_room: str, to_room: str) -> dict[str, Any]:
     """
     Moves a paper's students from one room to another, checked: the room must be
-    open for exams, have the seats that session, and be the right kind (the
-    health unit for health papers only). The paper is pinned and keeps this venue.
+    open for exams and have the seats that session. The paper is pinned and keeps this venue.
     """
     _require_editable(draft)
     built = _built(db, draft)
@@ -159,15 +156,7 @@ def change_venue(
     placement.pinned = True
     placement.rooms_locked = True
     draft.updated_at = utcnow()
-    audit(
-        db,
-        identity,
-        "exam_draft.venue",
-        "exam_draft",
-        str(draft.id),
-        {"paper": paper_id, "room": from_room},
-        {"room": target.code},
-    )
+    audit(db, identity, "exam_draft.venue", "exam_draft", str(draft.id), {"paper": paper_id, "room": from_room}, {"room": target.code})
     db.commit()
     return draft_summary(db, draft)
 
@@ -245,15 +234,13 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                 ),
                 # A paper the Director uploaded has no department: the Director names its invigilators.
                 "invigilators": (
-                    dict(p.director_invigilators or {})
-                    if p.is_director_paper
-                    else (invigilators or {}).get(p.allocator_ref, {})
+                    dict(p.director_invigilators or {}) if p.is_director_paper else (invigilators or {}).get(p.allocator_ref, {})
                 ),
                 "category": built.problem.category(problems[str(p.id)]),
                 "director_paper": p.is_director_paper,
             }
         )
-        seating = cast(list[dict[str, Any]], out[-1]["seating"])
+        seating = out[-1]["seating"]
         out[-1]["main_room"] = main_room(seating)
         out[-1]["extra_rooms"] = sorted({s["room"] for s in seating} - {out[-1]["main_room"]})
     return {
@@ -324,8 +311,7 @@ def grid(db: Session, draft: ExamDraft, teaching: TeachingClient | None = None) 
         **rec,
         "rooms": room_sheets(rec),
         "exam_rooms": [
-            {"code": r.code, "seats": r.seats, "health": r.health, "block": r.block}
-            for r in _built(db, draft).problem.rooms
+            {"code": r.code, "seats": r.seats, "block": r.block} for r in _built(db, draft).problem.rooms
         ],
     }
 
@@ -363,7 +349,7 @@ def move_paper(
     broken = [
         v
         for v in check(unpinned, slots)
-        if (v.rule in ("H-E1", "H-E2", "H-E7", "H-E8") and paper_id in v.paper_ids)
+        if (v.rule in ("H-E1", "H-E2", "H-E7", "H-E8", "H-E10") and paper_id in v.paper_ids)
         or (v.rule == "H-E3" and not v.paper_ids)
     ]
     if broken:

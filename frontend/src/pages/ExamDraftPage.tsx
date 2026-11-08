@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { Download } from 'lucide-react'
 import { errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
-import { examExportUrl, useChangeExamVenue, useExamDraft, useExamDraftAction, useMoveExamPaper, useSetHealthInvigilators } from '@/lib/queries'
+import { examExportUrl, useChangeExamVenue, useExamDraft, useExamDraftAction, useMoveExamPaper, useSetDirectorInvigilators } from '@/lib/queries'
 import type { ExamGrid, ExamGridPaper } from '@/lib/types'
 
 const roomsOf = (p: ExamGridPaper) => [...new Set(p.seating.map((s) => s.room))].sort()
@@ -43,6 +43,7 @@ export function ExamDraftPage() {
             {draft.shared_at && ` · shared with departments ${dateTime(draft.shared_at)}`}
             {' '}· back-to-back {draft.soft_scores.back_to_back ?? 0} · two a day {draft.soft_scores.same_day ?? 0}
             {draft.soft_scores.postgraduate_extra_rooms ? ` · Postgraduate papers in ${draft.soft_scores.postgraduate_extra_rooms} extra rooms` : ''}
+            {draft.soft_scores.common_by_numbers_midday ? ` · ${draft.soft_scores.common_by_numbers_midday} papers of over 3000 students in a middle session` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -199,14 +200,14 @@ function freeSeats(data: ExamGrid, paper: ExamGridPaper): Map<string, number> {
   return new Map(data.exam_rooms.map((r) => [r.code, r.seats - (used.get(r.code) ?? 0)]))
 }
 
-/** One of the paper's rooms and where its students could go instead. The health unit is for health papers alone. */
+/** One of the paper's rooms and where its students could go instead. */
 function VenueRow({ termId, draftId, data, paper, room }: { termId: string; draftId: string; data: ExamGrid; paper: ExamGridPaper; room: string }) {
   const change = useChangeExamVenue(termId, draftId)
   const [to, setTo] = useState('')
   const free = freeSeats(data, paper)
   const students = paper.seating.filter((s) => s.room === room).reduce((n, s) => n + s.students, 0)
   const options = data.exam_rooms
-    .filter((r) => r.code !== room && r.health === (paper.category === 'health'))
+    .filter((r) => r.code !== room)
     .sort((a, b) => a.code.localeCompare(b.code))
   return (
     <div>
@@ -230,7 +231,7 @@ function VenueRow({ termId, draftId, data, paper, room }: { termId: string; draf
 
 /** A paper the Director uploaded has no department to name its invigilators. */
 function DirectorInvigilators({ termId, paper }: { termId: string; paper: ExamGridPaper }) {
-  const save = useSetHealthInvigilators(termId)
+  const save = useSetDirectorInvigilators(termId)
   const slots = [{ key: '', label: paper.main_room ? `Main (${paper.main_room})` : 'Main' }, ...paper.extra_rooms.map((r) => ({ key: r, label: r }))]
   const [named, setNamed] = useState<Record<string, { staff_number: string; name: string }>>(
     Object.fromEntries(slots.map((s) => [s.key, { staff_number: paper.invigilators[s.key]?.staff_number ?? '', name: paper.invigilators[s.key]?.name ?? '' }])),

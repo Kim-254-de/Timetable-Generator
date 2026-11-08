@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+import uuid
 from datetime import date, timedelta
 from typing import Any
 
@@ -32,7 +33,7 @@ from app.models import (
     Term,
 )
 from app.services.allocator_import import _department, upsert_class_rows
-from app.services.setup import audit
+from app.services.setup import audit, compact
 
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -58,7 +59,7 @@ def exam_seats(room: Room, spacing: float) -> int:
 def exam_rooms(db: Session, term: Term) -> list[ExamRoom]:
     rooms = db.scalars(select(Room).where(Room.active.is_(True)).order_by(Room.code))
     return [
-        ExamRoom(id=r.id, code=r.code, block=r.block, seats=exam_seats(r, term.exam_spacing), health=r.health_unit)
+        ExamRoom(id=r.id, code=r.code, block=r.block, seats=exam_seats(r, term.exam_spacing))
         for r in rooms
         if r.used_for_exams and exam_seats(r, term.exam_spacing) > 0
     ]
@@ -74,8 +75,6 @@ def period_dict(db: Session, term: Term) -> dict[str, Any]:
         "exam_days_off": term.exam_days_off,
         "exam_sessions": term.exam_sessions,
         "exam_spacing": term.exam_spacing,
-        "exam_health_prefixes": term.exam_health_prefixes or [],
-        "health_seats": sum(r.seats for r in rooms if r.health),
         "days": [d.isoformat() for d in days],
         "slots": len(days) * len(term.exam_sessions or []),
         "rooms": len(rooms),
@@ -105,10 +104,6 @@ def update_period(db: Session, identity: Identity, term: Term, fields: dict[str,
     for key in ("exam_start", "exam_end", "exam_weekdays", "exam_sessions", "exam_spacing"):
         if key in fields:
             setattr(term, key, fields[key])
-    if "exam_health_prefixes" in fields:
-        term.exam_health_prefixes = sorted(
-            {p.strip().upper() for p in fields["exam_health_prefixes"] or [] if p.strip()}
-        )
     if "exam_days_off" in fields:
         term.exam_days_off = sorted({d.isoformat() if isinstance(d, date) else str(d) for d in fields["exam_days_off"]})
     after = period_dict(db, term)
@@ -162,6 +157,7 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                 "invigilator_staff_number": (invigilator.get("staff_number") or "").strip().upper() or None,
             }
             paper = existing.get(p["id"])
+            sitting = _with_directors_numbers(paper, sitting)
             label = "/".join(p["codes"]) + (" (ODEL)" if values["sitting"] == "odel" else "")
             if paper is None:
                 paper = ExamPaper(term_id=term.id, allocator_ref=p["id"], **values)
@@ -176,7 +172,11 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
                     changed.append(label)
                 for k, v in values.items():
                     setattr(paper, k, v)
-            paper.rows = [ExamPaperRow(class_row_id=i, students=n, odel=o, guessed=g) for i, n, o, g in sitting]
+            mine = {r.class_row_id: r.students for r in paper.rows if r.edited}
+            paper.rows = [
+                ExamPaperRow(class_row_id=i, students=n, odel=o, guessed=g, edited=mine.get(i) == n and n > 0)
+                for i, n, o, g in sitting
+            ]
         for ref, paper in list(existing.items()):
             if paper.department_id == dept.id and ref not in kept and not paper.is_director_paper:
                 db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
@@ -203,6 +203,14 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
         for ref, found in list(practicals.items()):
             if found.department_id == dept.id and ref not in kept_practicals:
                 db.delete(found)
+    # A paper the Director uploaded earlier gives way to a department's list of the same unit.
+    listed = {(compact(c), p.sitting) for p in existing.values() if not p.is_director_paper for c in p.codes}
+    for ref, paper in list(existing.items()):
+        if paper.is_director_paper and any((compact(c), paper.sitting) in listed for c in paper.codes):
+            db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
+            db.delete(paper)
+            removed.append(paper.label)
+            del existing[ref]
     summary = {
         "departments": [d["code"] for d in published],
         "papers": {"added": sorted(added), "changed": sorted(changed), "removed": sorted(removed)},
@@ -214,6 +222,25 @@ def import_exams(db: Session, teaching: TeachingClient, identity: Identity, term
         **summary,
         "not_published": [{"code": d["code"], "name": d["name"]} for d in data.get("not_published") or []],
     }
+
+
+def _with_directors_numbers(
+    paper: ExamPaper | None, sitting: list[tuple[uuid.UUID, int, bool, bool]]
+) -> list[tuple[uuid.UUID, int, bool, bool]]:
+    """
+    What a department sent, with the numbers the Director entered where it sent none.
+    A number from the department (its letter, or who synced) replaces the Director's.
+    """
+    if paper is None:
+        return sitting
+    entered = {r.class_row_id: r for r in paper.rows if r.edited and r.students > 0}
+    sent = {i for i, _, _, _ in sitting}
+    out = [
+        (i, entered[i].students, o, g) if n == 0 and i in entered else (i, n, o, g)
+        for i, n, o, g in sitting
+    ]
+    out += [(i, r.students, r.odel, r.guessed) for i, r in entered.items() if i not in sent]
+    return sorted(out)
 
 
 def papers_of(db: Session, term: Term) -> list[dict[str, Any]]:
@@ -229,7 +256,7 @@ def papers_of(db: Session, term: Term) -> list[dict[str, Any]]:
         {
             "id": str(p.id),
             "category": category.get(str(p.id), REGULAR),
-            "category_override": p.category_override,
+            "category_override": p.category_override if p.category_override in CATEGORIES else None,
             "director_paper": p.is_director_paper,
             "codes": p.label,
             "title": p.title,
@@ -262,9 +289,7 @@ def set_category(db: Session, identity: Identity, term: Term, paper_id: str, cat
     """The Director's choice of a paper's category; None goes back to working it out."""
     if category is not None and category not in CATEGORIES:
         raise ApiError(422, "VALIDATION_ERROR", f"A paper is {', '.join(CATEGORIES)}.")
-    paper = next(
-        (p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)) if str(p.id) == paper_id), None
-    )
+    paper = next((p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)) if str(p.id) == paper_id), None)
     if paper is None:
         raise ApiError(404, "NOT_FOUND", "No such paper in this term.")
     before = paper.category_override

@@ -48,7 +48,7 @@ export function RoomsPage() {
         </div>
         <div className="flex gap-2 text-sm">
           <button onClick={() => sync.mutate()} disabled={sync.isPending} className="rounded-md border border-line bg-card px-3 py-2"
-            title="The rooms the admin set in SMARTTT: capacities, exam use and the health unit. Exam seats, blocked hours and your own exam choice stay.">
+            title="The rooms the admin set in SMARTTT: capacities and exam use. Exam seats, blocked hours and your own exam choice stay.">
             {sync.isPending ? 'Bringing in…' : 'Bring in from SMARTTT'}
           </button>
           <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
@@ -87,7 +87,7 @@ export function RoomsPage() {
                 <td className="px-3 py-2">
                   <button onClick={() => setHours(r)} className="text-brand-ink">{r.unavailable.length ? `${r.unavailable.length} hours` : 'None'}</button>
                 </td>
-                <td className="px-3 py-2">{r.for_exams ? (r.exam_seats ?? <span className="text-muted">× spacing</span>) : <span className="text-muted">Not for exams</span>}{r.health_unit && <span className="ml-1 text-xs text-brand-ink">Health unit</span>}</td>
+                <td className="px-3 py-2">{r.for_exams ? (r.exam_seats ?? <span className="text-muted">× spacing</span>) : <span className="text-muted">Not for exams</span>}</td>
                 <td className="space-x-3 px-3 py-2 text-right">
                   <button onClick={() => setEditing(r)} className="text-brand-ink">Edit</button>
                   <button onClick={() => { if (window.confirm(`Delete ${r.code}?`)) remove.mutate(r.id) }} className="text-danger"

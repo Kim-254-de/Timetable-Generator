@@ -98,43 +98,38 @@ On the term's **Exams** tab:
    halls included (110 seats -> 99; 200 -> 180); the Director can change the
    0.9 for the exam period. A room's own number ("Fixed exam seats" on the
    Rooms page, never above its capacity) is only for one that can't be used at
-   that share, e.g. fixed benches. "Used for exams" and "Health unit" are set by
+   that share, e.g. fixed benches. "Used for exams" is set by
    the administrator under Venues in the admin console and read on each room
    sync; the Director's own "Used for exams" overrules the administrator's.
    A room's block is its building, so a big paper stays within one block.
-2. **Health and nursing papers**: the Director uploads the moderation letter
-   (Word; a scan must be typed into Word first), reviews it and saves it, here
-   rather than through a department. Each paper's classes are those its headings
-   name ("... Y1S1 (107 STUDENTS)"), matched to SMARTTT's programmes in the review,
-   and those on SMARTTT's master timetable and who synced. The Director corrects
-   numbers and classes, and names the invigilators on the draft. A code prefix on
-   the exam period's list makes a health paper; the letter's other units are
-   ordinary papers. A unit a department already listed stays theirs, not doubled.
-   **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
+2. **Import exam papers** that departments published on their Teaching page in Smart Attendance (with
    the class rows sitting each, ODEL marked) and their practicals.
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
    per day, each session's students fit the exam seats, pinned papers stay,
-   common, postgraduate and health papers sit only in the first or last session
-   of a day, on any exam day (H-E8), and health papers sit only in the health
-   unit (H-E9). Soft: back-to-back sessions (heavily weighted), two papers on
+   common and postgraduate papers sit only in the first or last session
+   of a day (H-E8), and
+   postgraduate papers sit only in the first week, from the first exam day to the
+   Friday of that week (H-E10; a Saturday or Sunday start runs to the next Friday). Soft: back-to-back sessions (heavily weighted), two papers on
    one day, big papers late, and common units spread over the days (S-E7).
    A common unit is a paper sat by class rows of more than one programme (with
    no class rows yet: codes of more than one programme, "BITE 131/COSC 130").
-   A postgraduate paper has a code numbered 7xx to 9xx. A health paper has a code
-   prefix on the exam period's list; health wins when a paper is more than one.
+   Some shared units have no programmes on record, so a paper of more than 3000
+   students also counts as common; it sits first or last whenever it can (soft, S-E9).
+   A postgraduate paper has a code numbered 7xx to 9xx. Health and nursing papers
+   are ordinary papers, uploaded and published by their departments like any other.
    The Director can set any paper's category on the Exams tab. Phase 2 seats
    each session: every class row (or part of one bigger than any room) gets one
-   room; small papers share rooms, a big paper uses few rooms in one block, a
-   paper's ODEL students sit apart, health papers take the health unit first,
-   and all of a session's postgraduate papers share one room when they fit, with
-   undergraduates kept out of it while another room is free (S-E8). The
+   room; small papers share rooms, a paper stays in one building, taking other
+   rooms there when a room can't hold it all and moving on only when the building is
+   full, a paper's ODEL students sit apart, and all of a session's postgraduate
+   papers share one room when they fit, and so do its certificate papers (codes
+   numbered 00...) and its diploma papers (0...), each level in its own room, with
+   other papers kept out of those rooms while another is free (S-E8). The
    pre-check and conflict explanations name the class row or session at fault.
-   The health unit's rooms are for health papers alone, in the first and last
-   sessions: no other paper is seated there, even when other rooms are full.
 4. **Review** the exam draft as a date x session grid of `paper -> rooms`, or
    as room sheets; **move** a paper (checked; both sessions re-seated; pinned),
-   **change its venue** (checked for open room, seats and the health unit; pinned,
+   **change its venue** (checked for open room and seats; pinned,
    and kept when its session is re-seated) and **re-solve around pins**.
 5. **Share with departments** so they name invigilators on their Teaching page
    in Smart Attendance: each paper's main invigilator (in its main room, the

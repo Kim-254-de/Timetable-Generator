@@ -203,14 +203,6 @@ class ExamPeriodBody(_Strict):
     exam_sessions: Annotated[list[ExamSession], Field(min_length=1, max_length=6)] | None = None
     # Exam seats as a share of each room's teaching capacity.
     exam_spacing: Annotated[float, Field(ge=0.3, le=1.0)] | None = None
-    # Code prefixes of health and nursing papers.
-    exam_health_prefixes: (
-        Annotated[list[Annotated[str, StringConstraints(max_length=8)]], Field(max_length=60)] | None
-    ) = None
-
-
-class ExamListFile(_Strict):
-    file: Annotated[str, StringConstraints(min_length=1, max_length=8_000_000)]  # .docx as base64
 
 
 class PaperRowBody(_Strict):
@@ -219,18 +211,6 @@ class PaperRowBody(_Strict):
     semester: Annotated[int, Field(ge=1, le=3)]
     stream: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)] = ""
     students: Annotated[int, Field(ge=0, le=5000)]
-
-
-class HealthPaperBody(_Strict):
-    codes: Annotated[list[Annotated[str, StringConstraints(max_length=30)]], Field(min_length=1, max_length=12)]
-    title: Annotated[str, StringConstraints(max_length=255)]
-    sitting: str = "regular"
-    # The classes the letter names for it, as the Director reviewed them.
-    classes: Annotated[list[PaperRowBody], Field(max_length=60)] = []
-
-
-class HealthPapersBody(_Strict):
-    papers: Annotated[list[HealthPaperBody], Field(min_length=1, max_length=1500)]
 
 
 class PaperRowsBody(_Strict):
@@ -252,7 +232,7 @@ class ExamVenueBody(_Strict):
 
 
 class PaperCategoryBody(_Strict):
-    # health | postgraduate | common | regular; null: work it out from the codes and class rows.
+    # postgraduate | common | regular; null: work it out from the codes and class rows.
     category: str | None = None
 
 

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pypdfium2 as pdfium
+from PIL import Image
 import pytest
 from docx import Document
 from docx.oxml.ns import qn
@@ -98,52 +99,28 @@ def _check_docx(content: bytes) -> None:
     doc = Document(BytesIO(content))
     first = doc.element.body[0]
     assert first.tag == qn("w:tbl")
-    names, details = (_text(row) for row in first.iter(qn("w:tr")))
-    # The names share a row, so they stay level however a phone sets the lines below them.
-    assert "THARAKA" in names and "UNIVERSITY" in names
-    assert "+254 745 838 353" in details and "MARIMANTI, KENYA" in details
+    header_text = "".join(t.text or "" for t in first.iter(qn("w:t")))
+    assert "THARAKA" in header_text and "UNIVERSITY" in header_text and "+254 745 838 353" in header_text
     assert "THARAKA UNIVERSITY" not in "\n".join(p.text for p in doc.paragraphs), "the title doesn't repeat it"
 
     section = doc.sections[0]
     assert not section.different_first_page_header_footer, "page 1 gets the watermark and footer too"
     watermark = section.header._element.find(".//" + qn("wp:anchor"))
     assert watermark is not None and watermark.get("behindDoc") == "1"
-    # Faint in the image itself: a viewer that ignores Word's own transparency still shows it faint.
-    assert watermark.find(".//" + qn("a:alphaModFix")) is None
-    image_id = watermark.find(".//" + qn("a:blip")).get(qn("r:embed"))
-    assert section.header.part.related_parts[image_id].blob == letterhead.faded_logo()
+    # Pale in the image itself, so every viewer shows it faint, and in the logo's proportions.
+    blip = watermark.find(".//" + qn("a:blip")).get(qn("r:embed"))
+    picture = Image.open(BytesIO(section.header.part.related_parts[blip].blob)).convert("L")
+    assert picture.getextrema()[0] > 200
+    extent = watermark.find(qn("wp:extent"))
+    assert int(extent.get("cx")) / int(extent.get("cy")) == pytest.approx(365 / 359, abs=0.01)
+    assert int(extent.get("cy")) <= section.page_height * 0.6 and int(extent.get("cx")) <= section.page_width * 0.6
     footer = section.footer.paragraphs[0]
     assert letterhead.ISO_LINE in footer.text and letterhead.MOTTO in footer.text
     assert footer._p.find(".//" + qn("a:blip")) is not None, "the certification mark"
-
-
-def _text(element: Any) -> str:
-    return "".join(t.text or "" for t in element.iter(qn("w:t")))
-
-
-def test_the_watermark_is_faint_in_the_image_itself():
-    """Phone viewers and Word-to-PDF converters ignore "show at 12%" settings and printed the logo
-    at full strength over the timetable; an image that is faint in itself can't be shown dark."""
-    from PIL import Image
-
-    with Image.open(BytesIO(letterhead.faded_logo())) as image:
-        assert image.mode == "RGBA"
-        alpha = image.getchannel("A")
-        assert alpha.getextrema() == (0, round(letterhead.WATERMARK_OPACITY * 255))
-        assert alpha.getpixel((0, 0)) == 0, "the white around the logo is clear"
-
-
-def test_the_exam_timetable_in_word_is_a4_with_room_for_the_sessions():
-    rec = _busy_exam_timetable()
-    doc = Document(BytesIO(exam_export.timetable_docx(TERM, rec, 1, "Director")))  # type: ignore[arg-type]
-    section = doc.sections[0]
-    assert (round(section.page_width.mm), round(section.page_height.mm)) == (297, 210), "A4 landscape, as the PDF"
-    grid = doc.tables[1]
-    date, *sessions = (column.width for column in grid.columns)
-    assert len(sessions) == len(rec["sessions"]) and len(set(sessions)) == 1
-    assert round(date.mm) == 28 and sessions[0] > 2 * date, "the sessions get the width the date doesn't need"
-    text_width = section.page_width - section.left_margin - section.right_margin
-    assert round((date + sum(sessions)) / 36000) == round(text_width / 36000), "the table fills the page width"
+    tabs = {t.get(qn("w:val")): t.get(qn("w:pos")) for t in footer._p.iter(qn("w:tab")) if t.get(qn("w:val"))}
+    assert tabs["clear"] and int(tabs["right"]) * 635 == section.page_width - section.left_margin - section.right_margin
+    margins = first.find(qn("w:tblPr")).find(qn("w:tblCellMar"))
+    assert margins is not None and {m.get(qn("w:w")) for m in margins} == {"0"}, "the header text mustn't wrap"
 
 
 def test_every_download_is_on_the_letterhead(downloads):
@@ -154,3 +131,40 @@ def test_every_download_is_on_the_letterhead(downloads):
         if name.endswith(".docx"):
             _check_docx(content)
     assert len(downloads) == 9
+
+
+def test_the_exam_timetable_pdf_runs_on_from_the_letterhead_like_the_word_download():
+    """A PDF table can't split a row: uncut, a busy day left page 1 empty and gaps on later pages."""
+    rec = _busy_exam_timetable()
+    pdf = pdfium.PdfDocument(exam_export.timetable_pdf(TERM, rec, 1, "Director"))  # type: ignore[arg-type]
+    pages = [page.get_textpage().get_text_range() for page in pdf]
+    assert "DATE/DAY" in pages[0] and "DAY 01/12/2026" in pages[0] and "COSC 100" in pages[0]
+    text = "\n".join(pages)
+    assert all(f"COSC {100 + i} " in text for i in range(260)), "every paper is there"
+    assert all(text.count(f"COSC {100 + i} ") == 1 for i in range(260)), "and only once"
+    # Every page but the last is full: its last line of a paper sits near the footer.
+    for page in list(pdf)[:-1]:
+        lowest = min(o.get_bounds()[1] for o in page.get_objects() if o.type == pdfium.raw.FPDF_PAGEOBJ_TEXT and o.get_bounds()[1] > letterhead.FOOTER_HEIGHT)
+        assert lowest < letterhead.FOOTER_HEIGHT + 30
+
+
+def test_a_day_with_nothing_on_it_keeps_its_row_and_a_long_day_keeps_its_date():
+    rows = [["MON 01/12/2026", "", ""], ["TUE 02/12/2026", "\n".join(f"P{i}" for i in range(100)), "Q"]]
+    flowed = exam_export._flow_rows(rows, [80.0, 300.0, 300.0], 200.0, 400.0)
+    assert flowed[0] == ["MON 01/12/2026", "", ""]
+    assert [r[0] for r in flowed[1:]] == ["TUE 02/12/2026"] + ["TUE 02/12/2026 (cont.)"] * (len(flowed) - 2)
+    assert "\n".join(r[1] for r in flowed[1:]).split("\n") == [f"P{i}" for i in range(100)]
+    assert flowed[1][2] == "Q"
+
+
+def test_the_exam_word_downloads_are_a4_and_the_timetable_keeps_its_headings_on_every_page():
+    rec = _busy_exam_timetable()
+    doc = Document(BytesIO(exam_export.timetable_docx(TERM, rec, 1, "Director")))  # type: ignore[arg-type]
+    section = doc.sections[0]
+    assert (round(section.page_width.mm), round(section.page_height.mm)) == (297, 210)
+    grid = doc.tables[1]
+    assert grid.rows[0]._tr.trPr.find(qn("w:tblHeader")) is not None
+    assert round(grid.columns[0].width.mm) == 28
+    room = section.page_width - section.left_margin - section.right_margin
+    assert abs(sum(c.width for c in grid.columns) - room) < 12700  # within a point
+

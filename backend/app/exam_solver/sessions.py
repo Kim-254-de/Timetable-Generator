@@ -4,12 +4,14 @@ Phase 1: each paper to one slot (a session of a day), with CP-SAT.
 x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
 class row and day at most two; H-E3 per slot the students fit all exam seats;
-H-E8 common, postgraduate and health papers only in the first or last session
-of a day (they get no other slot); H-E9 per slot health students fit the health unit, and the others the rest.
+H-E8 common and postgraduate papers only in the first or last session
+of a day (they get no other slot);
+H-E10 postgraduate papers only in the first week (they get no other slot).
 Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
 S-E4 a guessed class (papers with no students known) one paper a session and
 two a day, S-E5 papers with no students known spread over the period, S-E7
-common papers spread over the days.
+common papers spread over the days, S-E9 papers common by their numbers in the
+first or last session of a day.
 
 When it is infeasible, it is solved again with one assumption per class row
 and per slot's seats, to name the ones that cannot all hold.
@@ -22,7 +24,7 @@ from typing import Any
 
 from ortools.sat.python import cp_model
 
-from app.exam_solver.model import COMMON, HEALTH, POSTGRADUATE, ExamProblem
+from app.exam_solver.model import COMMON, POSTGRADUATE, ExamProblem
 
 STATUS = {
     cp_model.OPTIMAL: "OPTIMAL",
@@ -60,14 +62,8 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     mm = _Model(problem, families)
     m, x = mm.m, mm.x
     slots = range(problem.slots)
-    edges = problem.edge_slots()
     for p in problem.papers:
-        if p.pinned is not None:
-            allowed = [p.pinned]
-        elif problem.edges_only(p):
-            allowed = edges
-        else:
-            allowed = list(slots)
+        allowed = [p.pinned] if p.pinned is not None else problem.allowed_slots(p)
         for t in allowed:
             x[p.id, t] = m.new_bool_var(f"x[{p.id},{t}]")
         m.add_exactly_one(x[p.id, t] for t in allowed)
@@ -122,23 +118,16 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
             for g in graduate if terms else []:
                 mm.limit([*terms, g], 1, f"H-E7|{staff}")
 
-    seats = problem.general_seats
-    others = [p for p in problem.papers if not problem.is_health(p)]
-    if sum(p.students for p in others) > seats:
+    seats = problem.total_seats
+    if sum(p.students for p in problem.papers) > seats:
         for t in slots:
-            load = [p.students * x[p.id, t] for p in others if (p.id, t) in x]
+            load = [p.students * x[p.id, t] for p in problem.papers if (p.id, t) in x]
             if load:
                 mm.limit(load, seats, f"H-E3|{t}")
-    # H-E9: the health unit holds health papers, and only them.
-    health = [p for p in problem.papers if problem.rules_on and problem.category(p) == HEALTH and p.students]
-    if health and sum(p.students for p in health) > problem.health_seats:
-        for t in slots:
-            load = [p.students * x[p.id, t] for p in health if (p.id, t) in x]
-            if load:
-                mm.limit(load, problem.health_seats, f"H-E9|{t}")
     if not families:
         _guesses(mm, problem)
         _spread_common(mm, problem)
+        _common_by_numbers(mm, problem)
     if not families and w.big_late:
         for p in problem.papers:
             hundreds = (p.students + 99) // 100
@@ -150,6 +139,18 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     return mm
 
 
+def _common_by_numbers(mm: _Model, problem: ExamProblem) -> None:
+    """S-E9: a paper common only by its numbers prefers the first or last session of a day."""
+    w = problem.weights
+    if not problem.rules_on or not w.common_by_numbers:
+        return
+    for p in problem.papers:
+        if problem.common_by_numbers(p):
+            for t in range(problem.slots):
+                if (p.id, t) in mm.x and not problem.is_edge(t):
+                    mm.penalties.append(w.common_by_numbers * mm.x[p.id, t])
+
+
 def _spread_common(mm: _Model, problem: ExamProblem) -> None:
     """S-E7: common papers over all the exam days, not bunched on a few."""
     m, x, w = mm.m, mm.x, problem.weights
@@ -159,12 +160,7 @@ def _spread_common(mm: _Model, problem: ExamProblem) -> None:
         return
     share = -(-len(common) // days)
     for d in range(days):
-        terms = [
-            x[p.id, t]
-            for p in common
-            for t in range(d * problem.sessions, (d + 1) * problem.sessions)
-            if (p.id, t) in x
-        ]
+        terms = [x[p.id, t] for p in common for t in range(d * problem.sessions, (d + 1) * problem.sessions) if (p.id, t) in x]
         if len(terms) > share:
             over = m.new_int_var(0, len(common), f"commonday[{d}]")
             m.add(sum(terms) - share <= over)
@@ -191,17 +187,21 @@ def _guesses(mm: _Model, problem: ExamProblem) -> None:
                 over = m.new_int_var(0, len(terms), f"guessday[{group},{d}]")
                 m.add(sum(terms) - 2 <= over)
                 mm.penalties.append(w.guessed_day * over)
-    # Papers that can sit any session spread over all of them; the others over the first and last.
+    # Papers spread over the sessions open to them: all, the first and last, or those of the first week.
     unknown = [p for p in problem.papers if p.unknown_students or p.no_numbers]
-    for name, members, count in (
+    week = [p for p in unknown if problem.first_week_only(p)]
+    edge = [p for p in unknown if problem.edges_only(p) and not problem.first_week_only(p)]
+    week_slots = len([t for t in problem.edge_slots() if problem.in_first_week(t)])
+    for name, group, count in (
         ("any", [p for p in unknown if not problem.edges_only(p)], problem.slots),
-        ("edge", [p for p in unknown if problem.edges_only(p)], len(problem.edge_slots())),
+        ("edge", edge, len(problem.edge_slots())),
+        ("week", week, week_slots),
     ):
-        if len(members) < 2 or not count or not w.spread:
+        if len(group) < 2 or not count or not w.spread:
             continue
-        share = -(-len(members) // count)  # an even share of the sessions, rounded up
+        share = -(-len(group) // count)  # an even share of the sessions, rounded up
         for t in slots:
-            terms = [x[p.id, t] for p in members if (p.id, t) in x]
+            terms = [x[p.id, t] for p in group if (p.id, t) in x]
             if len(terms) > share:
                 over = m.new_int_var(0, len(terms), f"spread[{name},{t}]")
                 m.add(sum(terms) - share <= over)
@@ -239,20 +239,7 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
         grouped[rule].append(entity)
     for rule, entities in grouped.items():
         for entity in entities[:20]:
-            if rule == "H-E9":
-                t = int(entity)
-                day = problem.days[problem.day_of(t)]
-                reasons.append(
-                    {
-                        "rule": rule,
-                        "entity": f"{day:%a %d %b} session {problem.session_of(t) + 1}",
-                        "message": (
-                            f"Health papers need more than the health unit's {problem.health_seats} seats "
-                            "in the first and last sessions."
-                        ),
-                    }
-                )
-            elif rule == "H-E3":
+            if rule == "H-E3":
                 t = int(entity)
                 day = problem.days[problem.day_of(t)]
                 reasons.append(
@@ -261,7 +248,7 @@ def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
                         "entity": f"{day:%a %d %b} session {problem.session_of(t) + 1}",
                         "message": (
                             f"The papers that must sit on {day:%a %d %b} session {problem.session_of(t) + 1} "
-                            f"need more than the {problem.general_seats} exam seats."
+                            f"need more than the {problem.total_seats} exam seats."
                         ),
                     }
                 )

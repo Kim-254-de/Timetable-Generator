@@ -14,7 +14,9 @@ Hard rules:
        exam seats, a paper's ODEL students apart from its other students;
   H-E7 a main invigilator named before generating is in one room per slot: their
        papers go in different sessions, except postgraduate ones, which share a room;
-  H-E8 the second day of the period is for common units only.
+  H-E8 common and postgraduate papers only in the first or last session
+       of a day;
+  H-E10 postgraduate papers only in the first week of the period.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
 papers on one day for a class row, S-E3 big papers late in the period.
 
@@ -26,16 +28,24 @@ guessed class to one paper a session and two a day, and S-E5 spreads these
 papers evenly over the period instead of stacking them in one session. Both
 are soft (heavily weighted): a guess must never make a timetable impossible.
 
-Papers of three kinds sit only in the first or last session of a day, on any
+Papers of two kinds sit only in the first or last session of a day, on any
 exam day (H-E8): common units (sat by more than one programme, or with nobody
-known to sit them, codes from more than one programme: "BITE 131/COSC 130"),
-postgraduate papers (a code numbered 7xx to 9xx) and health and nursing papers
-(a code prefix on the term's list). Health wins when a paper is more than one.
-The health unit is theirs alone: health papers sit only in its rooms, and no
-other paper does (H-E9). All of a session's
+known to sit them, codes from more than one programme: "BITE 131/COSC 130")
+and postgraduate papers (a code numbered 7xx to 9xx).
+Some shared units have no programmes on record, so a paper of more than
+COMMON_STUDENTS students also counts as common. Those are kept to the first or
+last session softly (S-E9): a number is only a sign that a unit is shared.
+Postgraduate papers also sit only in the first week: from the first exam day to
+the Friday of that week, so Tuesday to Friday when exams start on a Tuesday (a
+Saturday or Sunday start runs to the next Friday) (H-E10).
+All of a session's
 postgraduate papers share one room when they fit, undergraduates kept out of it
-while there is another room (S-E8). Common papers spread over the days (S-E7).
-Weight category_rules 0 turns H-E8 and H-E9 off, as for drafts made before them.
+while there is another room (S-E8). So do a session's certificate papers (codes
+numbered 00..., "COSC 00101") and its diploma papers (0..., "DIBM 0112"), each
+level in its own room; that is all their level changes.
+Common papers spread over the days (S-E7).
+Weight category_rules 0 turns H-E8 and H-E10 off, and postgraduate_first_week 0
+turns H-E10 off alone, as for drafts made before them.
 """
 
 from __future__ import annotations
@@ -47,23 +57,38 @@ from datetime import date
 _CODE = re.compile(r"^\s*([A-Za-z]{2,6})\s*-?\s*0*([1-9])\d*")
 _LETTERS = re.compile(r"^\s*([A-Za-z]{2,6})")
 _POSTGRADUATE = re.compile(r"^\s*[A-Za-z]{2,6}\s*-?\s*[7-9]\d{2,3}[A-Za-z]?\s*$")
-HEALTH, POSTGRADUATE, COMMON, REGULAR = "health", "postgraduate", "common", "regular"
-CATEGORIES = (HEALTH, POSTGRADUATE, COMMON, REGULAR)
+_LEADING_ZEROS = re.compile(r"^\s*[A-Za-z]{2,6}\s*-?\s*(0+)[1-9]\d*[A-Za-z]?\s*$")
+POSTGRADUATE, COMMON, REGULAR = "postgraduate", "common", "regular"
+CATEGORIES = (POSTGRADUATE, COMMON, REGULAR)
+COMMON_STUDENTS = 3000  # more students than this and a paper counts as common
+CERTIFICATE, DIPLOMA = "certificate", "diploma"  # levels that share a venue; not categories
+FRIDAY = 4  # date.weekday()
 
 
-def paper_kind(codes: list[str] | tuple[str, ...], health_prefixes: list[str], override: str | None = None) -> str:
+def paper_kind(codes: list[str] | tuple[str, ...], override: str | None = None) -> str:
     """
-    What a paper is from its codes, or the Director's choice: "health", "postgraduate",
-    "regular", "common". "" leaves it to the class rows: common when they span programmes.
+    What a paper is from its codes, or the Director's choice: "postgraduate", "regular",
+    "common". "" leaves it to the class rows and numbers. A choice of a category that no
+    longer exists ("health", set before it was revoked) counts for nothing.
     """
-    if override:
+    if override in CATEGORIES:
         return override
-    prefixes = {p.upper().strip() for p in health_prefixes if p.strip()}
-    for code in codes:
-        m = _LETTERS.match(code)
-        if m and m.group(1).upper() in prefixes:
-            return HEALTH
     return POSTGRADUATE if any(_POSTGRADUATE.match(c) for c in codes) else ""
+
+
+def _level(code: str) -> str | None:
+    m = _LEADING_ZEROS.match(code)
+    if not m:
+        return None
+    return CERTIFICATE if len(m.group(1)) >= 2 else DIPLOMA
+
+
+def venue_group(kind: str, codes: tuple[str, ...]) -> str | None:
+    """Whose papers share one room in a session (S-E8). Certificate or diploma only when all its codes say so."""
+    if kind == POSTGRADUATE:
+        return POSTGRADUATE
+    levels = {_level(c) for c in codes}
+    return levels.pop() if len(levels) == 1 else None
 
 
 def guessed_class(code: str) -> str | None:
@@ -78,7 +103,6 @@ class ExamRoom:
     code: str
     block: str  # the building block a big paper is kept within
     seats: int  # exam seats
-    health: bool = False  # in the health unit
 
 
 @dataclass(frozen=True)
@@ -131,7 +155,9 @@ class ExamWeights:
     guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
     spread: int = 20  # S-E5 per paper with no students known over an even share of a session
     common_spread: int = 30  # S-E7 per common paper over an even share of a day
-    category_rules: int = 1  # 0 turns H-E8 and H-E9 off
+    common_by_numbers: int = 1000  # S-E9 per paper common by its numbers outside the first and last sessions
+    category_rules: int = 1  # 0 turns H-E8 and H-E10 off
+    postgraduate_first_week: int = 1  # 0 turns H-E10 off
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
@@ -186,7 +212,11 @@ class ExamProblem:
     def category(self, paper: Paper) -> str:
         if paper.kind:
             return paper.kind
-        return COMMON if self.is_common(paper) else REGULAR
+        return COMMON if self.is_common(paper) or paper.students > COMMON_STUDENTS else REGULAR
+
+    def common_by_numbers(self, paper: Paper) -> bool:
+        """Common only because of its numbers: its first or last session is a preference (S-E9)."""
+        return not paper.kind and paper.students > COMMON_STUDENTS and not self.is_common(paper)
 
     @property
     def rules_on(self) -> bool:
@@ -194,7 +224,7 @@ class ExamProblem:
 
     def edges_only(self, paper: Paper) -> bool:
         """It may sit only in the first or last session of a day (H-E8)."""
-        return self.rules_on and self.category(paper) != REGULAR
+        return self.rules_on and self.category(paper) != REGULAR and not self.common_by_numbers(paper)
 
     def is_edge(self, slot: int) -> bool:
         return self.session_of(slot) in (0, self.sessions - 1)
@@ -202,17 +232,23 @@ class ExamProblem:
     def edge_slots(self) -> list[int]:
         return [t for t in range(self.slots) if self.is_edge(t)]
 
-    @property
-    def health_seats(self) -> int:
-        return sum(r.seats for r in self.rooms if r.health)
+    def first_week_only(self, paper: Paper) -> bool:
+        """A postgraduate paper may sit only in the first week (H-E10)."""
+        if not self.rules_on or not self.weights.postgraduate_first_week:
+            return False
+        return self.category(paper) == POSTGRADUATE
 
-    @property
-    def general_seats(self) -> int:
-        """The seats open to papers other than health ones."""
-        return self.total_seats - self.health_seats if self.rules_on else self.total_seats
+    def in_first_week(self, slot: int) -> bool:
+        """From the first exam day to the Friday of that week; a weekend start runs to the next Friday."""
+        start = self.days[0]
+        return (self.days[self.day_of(slot)] - start).days <= (FRIDAY - start.weekday()) % 7
 
-    def is_health(self, paper: Paper) -> bool:
-        return self.rules_on and self.category(paper) == HEALTH
+    def allowed_slots(self, paper: Paper) -> list[int]:
+        """The slots a paper's category lets it sit in (H-E8 and H-E10)."""
+        slots = self.edge_slots() if self.edges_only(paper) else list(range(self.slots))
+        return [t for t in slots if self.in_first_week(t)] if self.first_week_only(paper) else slots
+
+
 
     def invigilators(self) -> dict[str, list[Paper]]:
         """Each main invigilator's papers, for those named before generating."""
