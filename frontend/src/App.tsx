@@ -176,7 +176,8 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const submit = (e: FormEvent) => { e.preventDefault(); login.mutate({ identifier, password }) }
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+    <main className="relative flex min-h-screen items-center justify-center bg-surface px-4">
+      <ThemeToggle className="absolute right-4 top-4 grid size-10 place-items-center rounded-full text-muted hover:bg-card hover:text-ink" />
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-xl border border-line bg-card p-8 shadow-sm">
         <div>
           <h1 className="text-xl font-semibold text-ink">Timetable Generator</h1>

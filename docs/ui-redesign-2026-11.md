@@ -53,3 +53,10 @@ units, generating, timetables and exams.
 Files: `frontend/src/App.tsx`, `pages/TermPage.tsx`, `pages/TermEntry.tsx`,
 `components/DepartmentSubmissions.tsx`, `components/ExamsTab.tsx`, `components/ExamSwitch.tsx`,
 `components/DirectorPapers.tsx`, `components/Dialog.tsx`.
+
+
+## Theme button everywhere (12 Nov 2026)
+
+The light / dark / system theme button was only in the signed-in headers (and, in
+the SMARTTT app, only on the Profile screens). It is now on every screen people land on:
+the sign-in page (top right; `components/ThemeToggle` takes a className for light backgrounds), as well as the top bar as before.
