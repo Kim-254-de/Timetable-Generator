@@ -160,7 +160,12 @@ def _spread_common(mm: _Model, problem: ExamProblem) -> None:
         return
     share = -(-len(common) // days)
     for d in range(days):
-        terms = [x[p.id, t] for p in common for t in range(d * problem.sessions, (d + 1) * problem.sessions) if (p.id, t) in x]
+        terms = [
+            x[p.id, t]
+            for p in common
+            for t in range(d * problem.sessions, (d + 1) * problem.sessions)
+            if (p.id, t) in x
+        ]
         if len(terms) > share:
             over = m.new_int_var(0, len(common), f"commonday[{d}]")
             m.add(sum(terms) - share <= over)
@@ -192,16 +197,16 @@ def _guesses(mm: _Model, problem: ExamProblem) -> None:
     week = [p for p in unknown if problem.first_week_only(p)]
     edge = [p for p in unknown if problem.edges_only(p) and not problem.first_week_only(p)]
     week_slots = len([t for t in problem.edge_slots() if problem.in_first_week(t)])
-    for name, group, count in (
+    for name, members, count in (
         ("any", [p for p in unknown if not problem.edges_only(p)], problem.slots),
         ("edge", edge, len(problem.edge_slots())),
         ("week", week, week_slots),
     ):
-        if len(group) < 2 or not count or not w.spread:
+        if len(members) < 2 or not count or not w.spread:
             continue
-        share = -(-len(group) // count)  # an even share of the sessions, rounded up
+        share = -(-len(members) // count)  # an even share of the sessions, rounded up
         for t in slots:
-            terms = [x[p.id, t] for p in group if (p.id, t) in x]
+            terms = [x[p.id, t] for p in members if (p.id, t) in x]
             if len(terms) > share:
                 over = m.new_int_var(0, len(terms), f"spread[{name},{t}]")
                 m.add(sum(terms) - share <= over)

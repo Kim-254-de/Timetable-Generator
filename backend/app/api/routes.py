@@ -21,13 +21,13 @@ from app.api.schemas import (
     ExamResolveBody,
     ExamRunBody,
     ExamSwitchBody,
+    ExamVenueBody,
     GroupBody,
     LoginBody,
     MoveBody,
     OfferingBody,
     OfferingPatch,
     OpenTermBody,
-    ExamVenueBody,
     PaperCategoryBody,
     PaperInvigilatorsBody,
     PaperRowsBody,
@@ -51,8 +51,8 @@ from app.services import (
     allocator_import,
     departments,
     drafts,
-    exam_drafts,
     exam_director_papers,
+    exam_drafts,
     exam_export,
     exam_runs,
     exam_setup,
@@ -545,7 +545,9 @@ def exam_paper_rows(term_id: str, paper_id: str, body: PaperRowsBody, identity: 
 
 
 @router.put("/terms/{term_id}/director-papers/{paper_id}/invigilators")
-def director_paper_invigilators(term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db) -> dict[str, Any]:
+def director_paper_invigilators(
+    term_id: str, paper_id: str, body: PaperInvigilatorsBody, identity: Me, db: Db
+) -> dict[str, Any]:
     named = {room: v.model_dump() for room, v in body.invigilators.items()}
     return ok(exam_director_papers.set_invigilators(db, identity, setup.get_term(db, term_id), paper_id, named))
 

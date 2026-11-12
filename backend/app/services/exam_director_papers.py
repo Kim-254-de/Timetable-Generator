@@ -53,7 +53,11 @@ def set_rows(db: Session, identity: Identity, term: Term, paper_id: str, rows: l
             raise ApiError(422, "VALIDATION_ERROR", "Every class needs its programme code.")
         key = _course_id(programme, r["year"], r["semester"], r["stream"])
         if key in classes:
-            raise ApiError(422, "VALIDATION_ERROR", f"{row_label(programme, r['year'], r['semester'], r['stream'])} is listed twice.")
+            raise ApiError(
+                422,
+                "VALIDATION_ERROR",
+                f"{row_label(programme, r['year'], r['semester'], r['stream'])} is listed twice.",
+            )
         classes[key] = {**r, "programme": programme}
     department = db.get(Department, paper.department_id)
     assert department is not None
@@ -69,7 +73,9 @@ def set_rows(db: Session, identity: Identity, term: Term, paper_id: str, rows: l
         }
         for key, c in classes.items()
     ]
-    found = upsert_class_rows(db, identity, term, courses, {department.code: department}, {"added": [], "changed": [], "removed": []})
+    found = upsert_class_rows(
+        db, identity, term, courses, {department.code: department}, {"added": [], "changed": [], "removed": []}
+    )
     before = {r.class_row_id: r for r in paper.rows}
     wanted = {found[key].id: c for key, c in classes.items()}
     out = []
@@ -100,8 +106,13 @@ def remove(db: Session, identity: Identity, term: Term, paper_id: str) -> None:
     db.commit()
 
 
-def set_invigilators(db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """Who invigilates: "" is the main invigilator, a room code that extra room's. SMARTTT checks the staff numbers on publishing."""
+def set_invigilators(
+    db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]
+) -> dict[str, Any]:
+    """Who invigilates: "" is the main invigilator, a room code that extra room's.
+
+    SMARTTT checks the staff numbers on publishing.
+    """
     paper = _director_paper(db, term, paper_id)
     paper.director_invigilators = {
         room: {"staff_number": v["staff_number"].strip().upper(), "name": v.get("name", "").strip()}

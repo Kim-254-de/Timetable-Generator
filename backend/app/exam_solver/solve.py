@@ -57,7 +57,9 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] |
         "postgraduate_extra_rooms": sum(len(rooms_) - 1 for rooms_ in graduate_rooms.values()),
         # S-E9: papers common by their numbers that had to sit outside the first and last sessions.
         "common_by_numbers_midday": sum(
-            1 for p in problem.papers if p.id in slots and problem.common_by_numbers(p) and not problem.is_edge(slots[p.id])
+            1
+            for p in problem.papers
+            if p.id in slots and problem.common_by_numbers(p) and not problem.is_edge(slots[p.id])
         ),
     }
 

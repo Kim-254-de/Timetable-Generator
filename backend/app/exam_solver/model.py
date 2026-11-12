@@ -248,8 +248,6 @@ class ExamProblem:
         slots = self.edge_slots() if self.edges_only(paper) else list(range(self.slots))
         return [t for t in slots if self.in_first_week(t)] if self.first_week_only(paper) else slots
 
-
-
     def invigilators(self) -> dict[str, list[Paper]]:
         """Each main invigilator's papers, for those named before generating."""
         out: dict[str, list[Paper]] = {}

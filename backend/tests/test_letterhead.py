@@ -10,10 +10,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pypdfium2 as pdfium
-from PIL import Image
 import pytest
 from docx import Document
 from docx.oxml.ns import qn
+from PIL import Image
 
 from app.services import exam_export, export, letterhead
 from tests.conftest import sign_in
@@ -144,7 +144,11 @@ def test_the_exam_timetable_pdf_runs_on_from_the_letterhead_like_the_word_downlo
     assert all(text.count(f"COSC {100 + i} ") == 1 for i in range(260)), "and only once"
     # Every page but the last is full: its last line of a paper sits near the footer.
     for page in list(pdf)[:-1]:
-        lowest = min(o.get_bounds()[1] for o in page.get_objects() if o.type == pdfium.raw.FPDF_PAGEOBJ_TEXT and o.get_bounds()[1] > letterhead.FOOTER_HEIGHT)
+        lowest = min(
+            o.get_bounds()[1]
+            for o in page.get_objects()
+            if o.type == pdfium.raw.FPDF_PAGEOBJ_TEXT and o.get_bounds()[1] > letterhead.FOOTER_HEIGHT
+        )
         assert lowest < letterhead.FOOTER_HEIGHT + 30
 
 
@@ -167,4 +171,3 @@ def test_the_exam_word_downloads_are_a4_and_the_timetable_keeps_its_headings_on_
     assert round(grid.columns[0].width.mm) == 28
     room = section.page_width - section.left_margin - section.right_margin
     assert abs(sum(c.width for c in grid.columns) - room) < 12700  # within a point
-
