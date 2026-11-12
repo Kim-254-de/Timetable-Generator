@@ -50,15 +50,12 @@ export function TermDetails({ termId }: { termId: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <TermDetailsForm term={term.data} key={term.data.id} />
-      <section className="space-y-3 rounded-lg border border-line bg-card p-4 text-sm">
-        <h2 className="font-semibold">What the Generator needs</h2>
-        <ol className="list-decimal space-y-1 pl-5">
-          <li><Link to="/rooms" className="text-brand-ink">Lecture halls</Link>: {rooms.data?.length ?? 0} entered (shared by every term)</li>
-          <li><Link to="/departments" className="text-brand-ink">Departments</Link>: {departments.data?.length ?? 0} entered (shared by every term)</li>
-          <li><Link to={`/terms/${termId}?tab=rows`} className="text-brand-ink">Class rows</Link>: the cohorts printed on the timetable, with student numbers</li>
-          <li><Link to={`/terms/${termId}?tab=units`} className="text-brand-ink">Units and groups</Link>: each unit, the class rows that take it, and how it is split into groups</li>
-          <li><Link to={`/terms/${termId}?tab=runs`} className="text-brand-ink">Generate</Link>, review, approve and download</li>
-        </ol>
+      <section className="space-y-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
+        <h2 className="font-semibold">Shared lists</h2>
+        <p className="text-muted">
+          <Link to="/rooms" className="font-medium text-brand-ink">{rooms.data?.length ?? 0} lecture halls</Link> and{' '}
+          <Link to="/departments" className="font-medium text-brand-ink">{departments.data?.length ?? 0} departments</Link>, used by every term.
+        </p>
         <CopyFromTerm termId={termId} />
       </section>
     </div>
@@ -89,7 +86,7 @@ function TermDetailsForm({ term }: { term: Term }) {
     })
   }
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-lg border border-line bg-card p-4">
+    <form onSubmit={submit} className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
       <h2 className="font-semibold">Term details <span className="font-normal text-muted">· {termText(term)}</span></h2>
       <p className="text-sm text-muted">Printed on the downloaded timetable.</p>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -106,7 +103,7 @@ function TermDetailsForm({ term }: { term: Term }) {
       </div>
       {patch.isError && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error)}</p>}
       {patch.isSuccess && <p className="text-sm text-success">Saved.</p>}
-      <button type="submit" disabled={patch.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save details</button>
+      <button type="submit" disabled={patch.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save details</button>
     </form>
   )
 }
@@ -122,12 +119,12 @@ function CopyFromTerm({ termId }: { termId: string }) {
       <p className="font-medium">Start from a previous term</p>
       <p className="text-muted">Copies its class rows, units and groups. Anything already here is kept.</p>
       <div className="mt-2 flex gap-2">
-        <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-md border border-line px-2 py-1">
+        <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-xl border border-line px-3 py-2">
           <option value="">Choose a term…</option>
           {others.map((t) => <option key={t.id} value={t.id}>{t.name || termText(t)}</option>)}
         </select>
         <button disabled={!source || copy.isPending} onClick={() => copy.mutate(source)}
-          className="rounded-md border border-line px-3 py-1 disabled:opacity-50">Copy</button>
+          className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Copy</button>
       </div>
       {copy.isSuccess && <p className="mt-1 text-success">Copied {copy.data.class_rows_copied} class rows and {copy.data.units_copied} units.</p>}
       {copy.isError && <p role="alert" className="mt-1 text-danger">{errorMessage(copy.error)}</p>}
@@ -200,8 +197,8 @@ export function ClassRowForm({ termId, row, onClose }: { termId: string; row: Cl
         </div>
         {failure && <p role="alert" className="text-sm text-danger">{errorMessage(failure)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={create.isPending || edit.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
+          <button type="submit" disabled={create.isPending || edit.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save</button>
         </div>
       </form>
     </Dialog>
@@ -276,9 +273,9 @@ export function OfferingForm({
           <div className="flex flex-wrap items-end justify-between gap-2">
             <p className="text-sm font-medium text-ink">Class rows taking this unit · {chosen.size} chosen, {students} students</p>
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search class rows"
-              className="w-60 rounded-md border border-line px-2 py-1 text-sm" />
+              className="w-60 rounded-xl border border-line px-3 py-2 text-sm" />
           </div>
-          <div className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-md border border-line p-2 text-sm sm:grid-cols-2">
+          <div className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-xl border border-line p-2 text-sm sm:grid-cols-2">
             {shown.map((r) => (
               <label key={r.id} className="flex items-center gap-2">
                 <input type="checkbox" checked={chosen.has(r.id)} onChange={() => toggle(r.id)} />
@@ -292,8 +289,8 @@ export function OfferingForm({
         </div>
         {failure && <p role="alert" className="text-sm text-danger">{errorMessage(failure)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={create.isPending || edit.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
+          <button type="submit" disabled={create.isPending || edit.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save</button>
         </div>
       </form>
     </Dialog>

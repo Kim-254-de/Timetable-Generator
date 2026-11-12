@@ -62,7 +62,7 @@ function Layout() {
           <nav className="flex gap-1 text-sm">
             {NAV.map(([to, label]) => (
               <NavLink key={to} to={to} end
-                className={({ isActive }) => clsx('rounded-md px-2 py-1', isActive || (to === '/' && onTerm) ? 'bg-white/15 text-white' : 'text-brand-100 hover:text-white')}>
+                className={({ isActive }) => clsx('rounded-md px-2 py-1', isActive || (to === '/terms' && onTerm) ? 'bg-white/15 text-white' : 'text-brand-100 hover:text-white')}>
                 {label}
               </NavLink>
             ))}

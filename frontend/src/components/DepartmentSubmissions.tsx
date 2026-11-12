@@ -23,17 +23,16 @@ export function DepartmentSubmissions({ termId }: { termId: string }) {
 
   return (
     <div className="space-y-4">
-      <section className="space-y-3 rounded-lg border border-line bg-card p-4">
+      <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-semibold">Departments' teaching</h2>
             <p className="text-sm text-muted">
-              Each department enters its courses, units, groups and lecturers on its Teaching page in Smart Attendance and publishes them.
-              Import them here; you add the lecture halls, generate and publish.
+              What departments published from their Teaching page in Smart Attendance.
             </p>
           </div>
           <button onClick={() => run.mutate()} disabled={run.isPending || !status.data?.published}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">
             {run.isPending ? 'Importing…' : `Import published departments${status.data?.needs_import ? ` (${status.data.needs_import} new)` : ''}`}
           </button>
         </div>
@@ -47,7 +46,7 @@ export function DepartmentSubmissions({ termId }: { termId: string }) {
               {status.data.published} of {status.data.departments.length} departments have published.
               {status.data.not_published > 0 && ' You can generate without the others and add them when they publish.'}
             </p>
-            <div className="overflow-x-auto rounded-md border border-line">
+            <div className="overflow-x-auto rounded-xl border border-line">
               <table className="w-full text-left text-sm">
                 <thead className="bg-surface text-xs uppercase text-muted">
                   <tr>
@@ -85,17 +84,17 @@ export function DepartmentSubmissions({ termId }: { termId: string }) {
           </>
         )}
       </section>
-      <p className="text-xs text-muted">
-        After publishing, a department imported late: open the published draft, copy it to a new draft, tick
-        “Keep the published classes” and re-solve. Its classes are added without moving the published ones.
-      </p>
+      <details className="text-xs text-muted">
+        <summary className="cursor-pointer">ⓘ A department published after you did?</summary>
+        <p className="mt-1">Copy the published draft, tick “Keep the published classes” and re-solve: its classes are added and none of the published ones move.</p>
+      </details>
     </div>
   )
 }
 
 function ImportSummary({ result }: { result: ImportResult }) {
   return (
-    <div role="status" className="rounded-md bg-success-soft px-3 py-2 text-sm text-success">
+    <div role="status" className="rounded-xl bg-success-soft px-3 py-2 text-sm text-success">
       <p>Imported {result.departments.join(', ')}. Class rows: {changeText(result.class_rows)}.</p>
       {Object.entries(result.units).map(([code, c]) => <p key={code}>{code} units: {changeText(c)}.</p>)}
       {result.not_published.length > 0 && (

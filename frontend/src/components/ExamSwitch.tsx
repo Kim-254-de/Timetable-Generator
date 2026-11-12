@@ -27,7 +27,7 @@ export function ExamSwitch({ termId }: { termId: string }) {
   }
 
   return (
-    <section className="space-y-3 rounded-lg border border-line bg-card p-4 text-sm">
+    <section className="space-y-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="font-semibold">Switch SMARTTT to exams</h2>
@@ -50,14 +50,14 @@ export function ExamSwitch({ termId }: { termId: string }) {
             <div className="space-y-2">
               <label className="block">Switch on (campus time)
                 <input type="datetime-local" value={switchAt || local(s.switch_at ?? s.defaults.switch_at)} onChange={(e) => setSwitchAt(e.target.value)}
-                  className="mt-1 block rounded-md border border-line px-2 py-1" />
+                  className="mt-1 block rounded-xl border border-line px-3 py-2" />
               </label>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => run('schedule_switch', withZone(switchAt || local(s.switch_at ?? s.defaults.switch_at)))} disabled={act.isPending}
-                  className="rounded-md bg-brand px-3 py-2 text-white disabled:opacity-50">{s.switch_at ? 'Move the switch' : 'Schedule the switch'}</button>
-                {s.switch_at && <button onClick={() => run('cancel_switch')} disabled={act.isPending} className="rounded-md border border-line px-3 py-2">Cancel it</button>}
+                  className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">{s.switch_at ? 'Move the switch' : 'Schedule the switch'}</button>
+                {s.switch_at && <button onClick={() => run('cancel_switch')} disabled={act.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel it</button>}
                 <button onClick={() => run('switch_now', undefined, 'Switch SMARTTT to exams now, for everyone?')} disabled={act.isPending}
-                  className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-warning">Switch now</button>
+                  className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-warning-soft text-warning">Switch now</button>
               </div>
             </div>
           )}
@@ -65,14 +65,14 @@ export function ExamSwitch({ termId }: { termId: string }) {
             <div className="space-y-2">
               <label className="block">Close the exam period on (campus time)
                 <input type="datetime-local" value={closeAt || local(s.close_at ?? s.defaults.close_at)} onChange={(e) => setCloseAt(e.target.value)}
-                  className="mt-1 block rounded-md border border-line px-2 py-1" />
+                  className="mt-1 block rounded-xl border border-line px-3 py-2" />
               </label>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => run('schedule_close', withZone(closeAt || local(s.close_at ?? s.defaults.close_at)))} disabled={act.isPending}
-                  className="rounded-md border border-line px-3 py-2">{s.close_at ? 'Move the close' : 'Schedule the close'}</button>
-                {s.close_at && <button onClick={() => run('cancel_close')} disabled={act.isPending} className="rounded-md border border-line px-3 py-2">Cancel it</button>}
+                  className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">{s.close_at ? 'Move the close' : 'Schedule the close'}</button>
+                {s.close_at && <button onClick={() => run('cancel_close')} disabled={act.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel it</button>}
                 <button onClick={() => run('close_now', undefined, 'Close the exam period now? SMARTTT goes back to the teaching timetable.')} disabled={act.isPending}
-                  className="rounded-md border border-line px-3 py-2">Close now</button>
+                  className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Close now</button>
               </div>
               <p className="text-xs text-muted">The exam period also closes on its own when the next term's teaching timetable is published.</p>
             </div>

@@ -45,6 +45,12 @@ const TABS = [
   ['exams', 'Exams'],
 ] as const
 type Tab = (typeof TABS)[number][0]
+const LABEL = Object.fromEntries(TABS) as Record<Tab, string>
+/** The two jobs on a term, each in the order the work is done (as on Attendance's Teaching page). */
+const SECTIONS: { label: string; tabs: Tab[] }[] = [
+  { label: 'Teaching timetable', tabs: ['setup', 'departments', 'rows', 'units', 'runs', 'drafts'] },
+  { label: 'Exams', tabs: ['exams'] },
+]
 
 export function TermPage() {
   const { termId = '' } = useParams()
@@ -63,16 +69,29 @@ export function TermPage() {
         <Link to="/terms" className="text-sm text-brand-ink">Switch term</Link>
         <h1 className="text-xl font-semibold">{term.data.name || termText(term.data)}</h1>
       </div>
-      <div className="flex flex-wrap gap-1 border-b border-line">
-        {TABS.map(([t, label]) => (
-          <button key={t} onClick={() => setSearch({ tab: t })}
-            className={clsx('-mb-px border-b-2 px-3 py-2 text-sm font-medium', tab === t ? 'border-brand-ink text-brand-ink' : 'border-transparent text-muted')}>
-            {label}
-          </button>
+      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+        {SECTIONS.map((section) => (
+          <div key={section.label} className="space-y-2 rounded-2xl bg-card p-3 shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
+            <p className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">{section.label}</p>
+            <div role="tablist" aria-label={section.label} className="flex flex-wrap gap-2">
+              {section.tabs.map((t, i) => (
+                <button key={t} role="tab" aria-selected={tab === t} onClick={() => setSearch({ tab: t })}
+                  className={clsx('inline-flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold transition',
+                    tab === t ? 'bg-brand text-white' : 'bg-surface text-ink ring-1 ring-line hover:bg-brand-soft')}>
+                  {section.tabs.length > 1 && (
+                    <span aria-hidden className={clsx('grid size-5 place-items-center rounded-full text-xs',
+                      tab === t ? 'bg-white/20 text-white' : 'bg-card text-muted ring-1 ring-line')}>{i + 1}</span>
+                  )}
+                  {LABEL[t]}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
       {tab === 'setup' && (
         <div className="space-y-4">
+          <Readiness termId={termId} />
           <TermDetails termId={termId} />
           <SetupTab termId={termId} fromSmarttt={Boolean(term.data.smarttt_term_id)} />
         </div>
@@ -98,7 +117,7 @@ function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolea
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {fromSmarttt && (<>
-      <section className="space-y-3 rounded-lg border border-line bg-card p-4">
+      <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <h2 className="font-semibold">Optional: import from SMARTTT</h2>
         <p className="text-sm text-muted">Copies rooms, programmes, units, curricula, class sizes, lecturer counts and the current published timetable.</p>
         {snap ? (
@@ -106,7 +125,7 @@ function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolea
             {snap.counts.programs} programmes; published version {snap.published_version ?? 'none'}.</p>
         ) : <p className="text-sm text-warning">No snapshot yet.</p>}
         <button onClick={() => snapshot.mutate(undefined)} disabled={snapshot.isPending}
-          className="rounded-md bg-brand px-3 py-2 text-sm text-white disabled:opacity-50">
+          className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">
           {snapshot.isPending ? 'Reading SMARTTT…' : 'Take a new snapshot'}
         </button>
         {snapshot.isError && <p role="alert" className="text-sm text-danger">{errorMessage(snapshot.error)}</p>}
@@ -120,14 +139,14 @@ function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolea
         )}
       </section>
 
-      <section className="space-y-3 rounded-lg border border-line bg-card p-4">
+      <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <h2 className="font-semibold">Add class rows, units, halls and departments from the snapshot</h2>
         <p className="text-sm text-muted">Adds what is missing. Anything entered here is never overwritten.</p>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => importSetup.mutate(undefined)} disabled={importSetup.isPending || !snap}
-            className="rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">Import from the snapshot</button>
+            className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Import from the snapshot</button>
           <button onClick={() => propose.mutate(false)} disabled={propose.isPending || !snap}
-            className="rounded-md border border-line px-3 py-2 text-sm disabled:opacity-50">Propose groups for new units</button>
+            className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Propose groups for new units</button>
         </div>
         {importSetup.isSuccess && (
           <p className="text-sm text-success">Added {importSetup.data.class_rows_created} class rows and {importSetup.data.offerings_created} units.
@@ -141,20 +160,25 @@ function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolea
       </section>
       </>)}
 
-      <section className="space-y-2 rounded-lg border border-line bg-card p-4 lg:col-span-2">
-        <h2 className="font-semibold">Ready to generate?</h2>
-        {readiness?.ready
-          ? <p className="text-sm text-success">Everything is set. Generate the timetable on the Generate tab.</p>
-          : (
-            <>
-              <p className="text-sm text-warning">{readiness?.problem_count ?? readiness?.problems.length} things to fix first:</p>
-              <ul className="max-h-64 list-disc overflow-y-auto pl-5 text-sm text-ink">
-                {readiness?.problems.map((p, i) => <li key={`${p.code}${i}`}>{p.message}</li>)}
-              </ul>
-            </>
-          )}
-      </section>
     </div>
+  )
+}
+
+/** Whether the term can be generated, at the top of Term details. */
+function Readiness({ termId }: { termId: string }) {
+  const readiness = useTerm(termId).data?.readiness
+  if (!readiness) return null
+  if (readiness.ready) {
+    return <p role="status" className="rounded-xl bg-success-soft px-4 py-3 text-sm text-success">Ready to generate. Go to step 5, Generate.</p>
+  }
+  const count = readiness.problem_count ?? readiness.problems.length
+  return (
+    <details className="rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning" open={count <= 5}>
+      <summary className="cursor-pointer font-semibold">Not ready to generate: {count} {count === 1 ? 'thing' : 'things'} to fix first</summary>
+      <ul className="mt-1 max-h-64 list-disc overflow-y-auto pl-5">
+        {readiness.problems.map((p, i) => <li key={`${p.code}${i}`}>{p.message}</li>)}
+      </ul>
+    </details>
   )
 }
 
@@ -193,15 +217,15 @@ function RowsTab({ termId }: { termId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter class rows"
-          className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
+          className="w-72 rounded-xl border border-line px-3 py-2 text-sm" />
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setForm('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a class row</button>
+          <button onClick={() => setPasting(true)} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Paste from Excel</button>
+          <button onClick={() => setForm('new')} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">+ Add a class row</button>
         </div>
       </div>
       {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
       {deleted && <p role="status" className="text-sm text-success">{deleted}</p>}
-      <div className="overflow-x-auto rounded-lg border border-line bg-card">
+      <div className="overflow-x-auto rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Class row</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Students</th><th className="px-3 py-2">Unavailable hours</th><th /></tr>
@@ -220,7 +244,7 @@ function RowsTab({ termId }: { termId: string }) {
                       const v = e.target.value === '' ? null : Number(e.target.value)
                       if (v !== null && v !== r.student_count) patch.mutate({ id: r.id, body: { student_count: v } })
                     }}
-                    className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />}
+                    className={clsx('w-24 rounded-lg border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2 text-muted">{r.unavailable.length ? `${r.unavailable.length} hours` : '—'}</td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
@@ -270,8 +294,8 @@ function UnavailableEditor({ row, onClose, onSave }: { row: ClassRow; onClose: (
           </tbody>
         </table>
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
-          <button onClick={() => onSave([...slots].sort((a, b) => a - b))} className="rounded-md bg-brand px-4 py-2 text-sm text-white">Save</button>
+          <button onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
+          <button onClick={() => onSave([...slots].sort((a, b) => a - b))} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save</button>
         </div>
       </div>
     </div>
@@ -300,14 +324,14 @@ function UnitsTab({ termId }: { termId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter units"
-          className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
+          className="w-72 rounded-xl border border-line px-3 py-2 text-sm" />
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste from Excel</button>
-          <button onClick={() => setForm('new')} className="rounded-md bg-brand px-3 py-2 text-white">+ Add a unit</button>
+          <button onClick={() => setPasting(true)} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Paste from Excel</button>
+          <button onClick={() => setForm('new')} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">+ Add a unit</button>
         </div>
       </div>
       {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
-      <div className="overflow-x-auto rounded-lg border border-line bg-card">
+      <div className="overflow-x-auto rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Class rows</th><th className="px-3 py-2">Hours / week</th>
@@ -325,17 +349,17 @@ function UnitsTab({ termId }: { termId: string }) {
                 <td className="px-3 py-2">
                   {o.from_allocator ? o.weekly_hours : <input type="number" min={1} max={20} defaultValue={o.weekly_hours ?? ''} aria-label={`Weekly hours of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.weekly_hours && patch.mutate({ id: o.id, body: { weekly_hours: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-md border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />}
+                    className={clsx('w-16 rounded-lg border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2">
                   {o.from_allocator ? o.session_length : <input type="number" min={1} max={6} defaultValue={o.session_length ?? ''} aria-label={`Session length of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.session_length && patch.mutate({ id: o.id, body: { session_length: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-md border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />}
+                    className={clsx('w-16 rounded-lg border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2">
                   {o.from_allocator ? ROOM_TYPE_NAMES[o.room_type] : <select value={o.room_type} aria-label={`Room type of ${o.unit_code}`}
                     onChange={(e) => patch.mutate({ id: o.id, body: { room_type: e.target.value as RoomType } })}
-                    className="rounded-md border border-line px-2 py-1">
+                    className="rounded-xl border border-line px-3 py-2">
                     <option value="lecture_hall">Lecture hall</option><option value="lab">Lab</option><option value="seminar">Seminar</option>
                   </select>}
                 </td>
@@ -386,7 +410,7 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
         </p>
         <ul className="mt-3 space-y-2">
           {offering.groups.map((g) => (
-            <li key={g.id} className="flex items-start justify-between rounded-md border border-line p-2 text-sm">
+            <li key={g.id} className="flex items-start justify-between rounded-xl border border-line p-2 text-sm">
               <span><b>{g.label || 'Whole class'}</b> · {g.student_count} students
                 <span className="block text-muted">{g.members.map((m) => `${m.label} (${m.students})`).join(', ')}</span>
                 {g.lecturer_name && <span className="block">{g.lecturer_name}{g.lecturer_staff_number ? ` · ${g.lecturer_staff_number}` : ''}</span>}</span>
@@ -402,10 +426,10 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
         {!offering.from_allocator && <button onClick={() => setDraft(blank())} className="mt-2 text-sm text-brand-ink">+ Add a group</button>}
 
         {draft && (
-          <div className="mt-4 space-y-2 rounded-md border border-line p-3 text-sm">
+          <div className="mt-4 space-y-2 rounded-xl border border-line p-3 text-sm">
             <label className="block">Label (blank for the whole class)
               <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="GR A"
-                className="mt-1 w-40 rounded-md border border-line px-2 py-1" />
+                className="mt-1 w-40 rounded-xl border border-line px-3 py-2" />
             </label>
             {eligible.map((r) => {
               const member = draft.members.find((m) => m.class_row_id === r.id)
@@ -420,22 +444,22 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
                   <span className="flex-1">{r.label}</span>
                   {member && <input type="number" min={1} value={member.students} aria-label={`Students from ${r.label}`}
                     onChange={(e) => setDraft({ ...draft, members: draft.members.map((m) => m.class_row_id === r.id ? { ...m, students: Number(e.target.value) } : m) })}
-                    className="w-20 rounded-md border border-line px-2 py-1" />}
+                    className="w-20 rounded-xl border border-line px-3 py-2" />}
                 </label>
               )
             })}
             {failure && <p role="alert" className="text-danger">{failure.message}</p>}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setDraft(null)} className="rounded-md border border-line px-3 py-1">Cancel</button>
+              <button onClick={() => setDraft(null)} className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
               <button disabled={!draft.members.length || save.isPending}
                 onClick={() => save.mutate({ offeringId: offering.id, groupId: draft.id || undefined,
                   body: { label: draft.label, members: draft.members.map((m) => ({ class_row_id: m.class_row_id, students: m.students })) } },
                 { onSuccess: () => setDraft(null) })}
-                className="rounded-md bg-brand px-3 py-1 text-white disabled:opacity-50">Save group</button>
+                className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save group</button>
             </div>
           </div>
         )}
-        <div className="mt-4 flex justify-end"><button onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Done</button></div>
+        <div className="mt-4 flex justify-end"><button onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Done</button></div>
       </div>
     </div>
   )
@@ -451,25 +475,25 @@ function RunsTab({ termId }: { termId: string }) {
 
   return (
     <div className="space-y-4">
-      <section className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-card p-4 text-sm">
+      <section className="flex flex-wrap items-end gap-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <label>Run
-          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} className="mt-1 block rounded-md border border-line px-2 py-1">
+          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} className="mt-1 block rounded-xl border border-line px-3 py-2">
             <option value="full">Full solve</option>
             <option value="repair">Repair the published timetable (mid-term change)</option>
           </select>
         </label>
         <label>Time limit (minutes)
           <input type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}
-            className="mt-1 block w-24 rounded-md border border-line px-2 py-1" />
+            className="mt-1 block w-24 rounded-xl border border-line px-3 py-2" />
         </label>
         <button onClick={() => start.mutate({ mode, time_limit_s: minutes * 60 })} disabled={start.isPending}
-          className="rounded-md bg-brand px-4 py-2 font-medium text-white disabled:opacity-50">Start</button>
+          className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Start</button>
         {failure && <p role="alert" className="w-full text-danger">{failure.message}
           {problems && <span className="block">{problems.slice(0, 5).map((p) => p.message).join('; ')}</span>}</p>}
       </section>
       <ul className="space-y-2">
         {(runs.data ?? []).map((r) => (
-          <li key={r.id} className="rounded-lg border border-line bg-card p-3 text-sm">
+          <li key={r.id} className="p-3 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span><b className="capitalize">{r.mode}</b> run · started {dateTime(r.created_at)} by {r.created_by}</span>
               <span className={clsx('rounded px-2 py-0.5 text-xs font-medium',
@@ -500,7 +524,7 @@ function DraftsTab({ termId }: { termId: string }) {
   const send = useSendPublication(termId)
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <section className="rounded-lg border border-line bg-card p-4">
+      <section className="p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <h2 className="mb-2 font-semibold">Drafts</h2>
         <ul className="space-y-1 text-sm">
           {term.data?.drafts.map((d) => (
@@ -512,7 +536,7 @@ function DraftsTab({ termId }: { termId: string }) {
           {term.data?.drafts.length === 0 && <li className="text-muted">None yet.</li>}
         </ul>
       </section>
-      <section className="rounded-lg border border-line bg-card p-4">
+      <section className="p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <h2 className="mb-2 font-semibold">Published versions</h2>
         <ul className="space-y-1 text-sm">
           {term.data?.publications.map((p) => (
@@ -522,7 +546,7 @@ function DraftsTab({ termId }: { termId: string }) {
               {!p.sent_to_smarttt && <span className="block text-warning">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
               {p.can_send && (
                 <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
-                  className="rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-warning disabled:opacity-50">
+                  className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-warning-soft text-warning">
                   {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
                 </button>
               )}

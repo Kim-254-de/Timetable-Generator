@@ -35,3 +35,21 @@ The Director's list of rooms the solver may use, shared by every term.
 spacing uses that when generating, as before. The page only displays the number.
 
 Files: `frontend/src/pages/RoomsPage.tsx`, `frontend/src/components/ui/Button.tsx`, `frontend/src/components/ui/Card.tsx`.
+
+## Term page (`/terms/:id`, 12 Nov 2026)
+
+The Director's workspace for one term: details, departments' imports, class rows,
+units, generating, timetables and exams.
+
+| Before | After |
+|---|---|
+| Top bar highlighted **Home** on every term page | Highlights **Terms** (layout review §6) |
+| Seven plain underline tabs, teaching and exams mixed | Two labelled sections, as on Attendance's Teaching page: **Teaching timetable** with numbered steps (1 Term details, 2 Departments, 3 Class rows, 4 Units and groups, 5 Generate, 6 Timetables and downloads) and **Exams** |
+| "What the Generator needs" list repeating the tabs | Removed; a small **Shared lists** card links the lecture halls and departments counts, and keeps *Start from a previous term* |
+| "Ready to generate?" at the bottom of Term details; "1 things to fix first" | A status strip at the **top** of Term details: green "Ready to generate" or amber "Not ready to generate: 1 thing to fix first" with the list |
+| Departments tab: two-sentence explanation and a footnote line about late imports | One line: "What departments published from their Teaching page in Smart Attendance."; the late-import advice is a collapsible **ⓘ A department published after you did?** tip |
+| Square buttons, bordered panels, small inputs on every tab | Attendance look on every tab: rounded 44 px buttons (36 px inside tables), soft-shadow cards, rounded inputs. `components/Dialog.tsx` `inputClass` updated, so every form in the Generator gets the rounded inputs |
+
+Files: `frontend/src/App.tsx`, `pages/TermPage.tsx`, `pages/TermEntry.tsx`,
+`components/DepartmentSubmissions.tsx`, `components/ExamsTab.tsx`, `components/ExamSwitch.tsx`,
+`components/DirectorPapers.tsx`, `components/Dialog.tsx`.

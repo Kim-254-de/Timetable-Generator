@@ -47,7 +47,7 @@ export function ExamsTab({ termId }: { termId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <button type="button" disabled={setCurrent.isPending} className="rounded-md border border-line px-3 py-1.5 disabled:opacity-50"
+        <button type="button" disabled={setCurrent.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface"
           onClick={() => { if (window.confirm('Make this the current term in SMARTTT? Students and lecturers will see this term from now on.')) setCurrent.mutate() }}>
           Set as current term in SMARTTT
         </button>
@@ -56,14 +56,14 @@ export function ExamsTab({ termId }: { termId: string }) {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <PeriodForm termId={termId} period={data.period} />
-        <section className="space-y-3 rounded-lg border border-line bg-card p-4">
+        <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h2 className="font-semibold">Exam papers</h2>
               <p className="text-sm text-muted">Departments list their papers on their Teaching page in Smart Attendance and publish them.</p>
             </div>
             <button onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending}
-              className="rounded-md bg-brand px-3 py-2 text-sm text-white disabled:opacity-50">
+              className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">
               {importExams.isPending ? 'Importing…' : 'Import exam papers'}
             </button>
           </div>
@@ -96,7 +96,7 @@ export function ExamsTab({ termId }: { termId: string }) {
                     <div className="flex items-center justify-between gap-2">
                     <span><b>{p.codes}</b> {p.title} <span className="text-muted">· {p.department}</span></span>
                     <span className="flex shrink-0 items-center gap-2">
-                      <select aria-label={`Category of ${p.codes}`} value={p.category_override ?? ''} className="rounded-md border border-line px-1 py-0.5 text-xs"
+                      <select aria-label={`Category of ${p.codes}`} value={p.category_override ?? ''} className="rounded-xl border border-line px-1 py-0.5 text-xs"
                         onChange={(e) => category.mutate({ paperId: p.id, category: (e.target.value || null) as ExamCategory | null })}>
                         <option value="">{`Auto: ${CATEGORY_NAMES[p.category]}`}</option>
                         {(Object.keys(CATEGORY_NAMES) as ExamCategory[]).map((c) => <option key={c} value={c}>{CATEGORY_NAMES[c]}</option>)}
@@ -116,7 +116,7 @@ export function ExamsTab({ termId }: { termId: string }) {
 
       <DirectorPapers termId={termId} papers={data.papers} />
 
-      <section className="space-y-3 rounded-lg border border-line bg-card p-4">
+      <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
         <h2 className="font-semibold">Generate</h2>
         {data.readiness.length > 0 ? (
           <ul className="list-disc pl-5 text-sm text-warning">{data.readiness.map((r) => <li key={r.code}>{r.message}</li>)}</ul>
@@ -124,10 +124,10 @@ export function ExamsTab({ termId }: { termId: string }) {
           <div className="flex flex-wrap items-end gap-3 text-sm">
             <label>Time limit (minutes)
               <input type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}
-                className="mt-1 block w-24 rounded-md border border-line px-2 py-1" />
+                className="mt-1 block w-24 rounded-xl border border-line px-3 py-2" />
             </label>
             <button onClick={() => start.mutate(minutes * 60)} disabled={start.isPending}
-              className="rounded-md bg-brand px-4 py-2 font-medium text-white disabled:opacity-50">
+              className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">
               {start.isPending ? 'Generating…' : 'Generate the exam timetable'}
             </button>
           </div>
@@ -135,7 +135,7 @@ export function ExamsTab({ termId }: { termId: string }) {
         {failure && <p role="alert" className="text-sm text-danger">{failure.message}</p>}
         <ul className="space-y-2">
           {examRuns.slice(0, 5).map((r) => (
-            <li key={r.id} className="rounded-md border border-line p-2 text-sm">
+            <li key={r.id} className="rounded-xl border border-line p-2 text-sm">
               <div className="flex flex-wrap justify-between gap-2">
                 <span>Started {dateTime(r.created_at)} by {r.created_by}</span>
                 <span className={clsx('rounded px-2 py-0.5 text-xs font-medium',
@@ -159,7 +159,7 @@ export function ExamsTab({ termId }: { termId: string }) {
       {data.publications.length > 0 && <ExamSwitch termId={termId} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-lg border border-line bg-card p-4">
+        <section className="p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
           <h2 className="mb-2 font-semibold">Exam drafts</h2>
           <ul className="space-y-1 text-sm">
             {data.drafts.map((d) => (
@@ -171,7 +171,7 @@ export function ExamsTab({ termId }: { termId: string }) {
             {data.drafts.length === 0 && <li className="text-muted">None yet.</li>}
           </ul>
         </section>
-        <section className="rounded-lg border border-line bg-card p-4">
+        <section className="p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
           <h2 className="mb-2 font-semibold">Published exam versions</h2>
           <ul className="space-y-1 text-sm">
             {data.publications.map((p) => (
@@ -181,7 +181,7 @@ export function ExamsTab({ termId }: { termId: string }) {
                 {!p.sent_to_smarttt && <span className="block text-warning">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
                 {p.can_send && (
                   <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
-                    className="mt-1 rounded-md border border-warning/40 bg-warning-soft px-2 py-1 text-warning disabled:opacity-50">
+                    className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-warning-soft text-warning mt-1">
                     {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
                   </button>
                 )}
@@ -202,9 +202,9 @@ function PaperNumbers({ termId, paper, onClose }: { termId: string; paper: ExamP
   const save = useSetPaperRows(termId)
   const [rows, setRows] = useState<PaperRowInput[]>(paper.rows.map(({ programme, year, semester, stream, students }) => ({ programme, year, semester, stream, students })))
   const set = (i: number, patch: Partial<PaperRowInput>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  const input = 'rounded-md border border-line px-2 py-1'
+  const input = 'rounded-lg border border-line px-2 py-1'
   return (
-    <div className="mt-2 space-y-2 rounded-md border border-line p-3">
+    <div className="mt-2 space-y-2 rounded-xl border border-line p-3">
       <h3 className="font-semibold">Students sitting {paper.codes}</h3>
       <p className="text-xs text-muted">For classes with no number. These stay when you import again, until the department sends a number for that class. Seats change on the next draft.</p>
       {rows.map((r, i) => (
@@ -220,10 +220,10 @@ function PaperNumbers({ termId, paper, onClose }: { termId: string; paper: ExamP
       {rows.length === 0 && <p className="text-muted">No class yet. Add the classes that sit it.</p>}
       {save.isError && <p role="alert" className="text-danger">{errorMessage(save.error)}</p>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="rounded-md border border-line px-3 py-1" onClick={() => setRows([...rows, { programme: '', year: 1, semester: 1, stream: '', students: 0 }])}>Add a class</button>
-        <button type="button" disabled={save.isPending} className="rounded-md bg-brand px-3 py-1 text-white disabled:opacity-50"
+        <button type="button" className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface" onClick={() => setRows([...rows, { programme: '', year: 1, semester: 1, stream: '', students: 0 }])}>Add a class</button>
+        <button type="button" disabled={save.isPending} className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong"
           onClick={() => save.mutate({ paperId: paper.id, rows: rows.filter((r) => r.programme.trim()) }, { onSuccess: onClose })}>Save</button>
-        <button type="button" className="rounded-md border border-line px-3 py-1" onClick={onClose}>Cancel</button>
+        <button type="button" className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface" onClick={onClose}>Cancel</button>
       </div>
     </div>
   )
@@ -255,11 +255,11 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-lg border border-line bg-card p-4 text-sm">
+    <form onSubmit={submit} className="space-y-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
       <h2 className="font-semibold">Exam period</h2>
       <div className="grid grid-cols-2 gap-3">
-        <label>First day<input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1" /></label>
-        <label>Last day<input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1" /></label>
+        <label>First day<input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 block w-full rounded-xl border border-line px-3 py-2" /></label>
+        <label>Last day<input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1 block w-full rounded-xl border border-line px-3 py-2" /></label>
       </div>
       <fieldset className="flex flex-wrap gap-3">
         <legend className="mb-1">Weekdays used</legend>
@@ -271,17 +271,17 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
         ))}
       </fieldset>
       <label className="block">Days off (public holidays), as 2026-12-12, separated by commas
-        <input value={daysOff} onChange={(e) => setDaysOff(e.target.value)} className="mt-1 block w-full rounded-md border border-line px-2 py-1" />
+        <input value={daysOff} onChange={(e) => setDaysOff(e.target.value)} className="mt-1 block w-full rounded-xl border border-line px-3 py-2" />
       </label>
       <fieldset>
         <legend className="mb-1">Sessions each day</legend>
         {sessions.map((s, i) => (
           <div key={i} className="mb-1 flex items-center gap-2">
             <input type="time" value={s.start} aria-label={`Session ${i + 1} start`}
-              onChange={(e) => setSessions(sessions.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))} className="rounded-md border border-line px-2 py-1" />
+              onChange={(e) => setSessions(sessions.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))} className="rounded-xl border border-line px-3 py-2" />
             to
             <input type="time" value={s.end} aria-label={`Session ${i + 1} end`}
-              onChange={(e) => setSessions(sessions.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))} className="rounded-md border border-line px-2 py-1" />
+              onChange={(e) => setSessions(sessions.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))} className="rounded-xl border border-line px-3 py-2" />
             {sessions.length > 1 && <button type="button" onClick={() => setSessions(sessions.filter((_, j) => j !== i))} className="text-danger">Remove</button>}
           </div>
         ))}
@@ -291,11 +291,11 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       </fieldset>
       <label className="block">Exam seats, as a share of each room's capacity (spacing)
         <input type="number" min={0.3} max={1} step={0.05} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))}
-          className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
+          className="mt-1 block w-28 rounded-xl border border-line px-3 py-2" />
       </label>
       <label className="block">Postgraduate room
         <input value={graduateRoom} onChange={(e) => setGraduateRoom(e.target.value)} placeholder="TC 1"
-          className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
+          className="mt-1 block w-28 rounded-xl border border-line px-3 py-2" />
         <span className="mt-1 block text-xs text-muted">
           A session's postgraduate papers sit here first. When it is full they take other rooms in its building, and undergraduates fill the seats left in those rooms; undergraduates keep out of this room only while postgraduates sit. Leave empty for no postgraduate room. You can still give any paper another venue on the draft.
           {period.exam_postgraduate_room && (period.postgraduate_room
@@ -312,7 +312,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
         A room's own exam seats are set on the Rooms page.
       </p>
       {save.isError && <p role="alert" className="text-danger">{errorMessage(save.error)}</p>}
-      <button type="submit" disabled={save.isPending} className="rounded-md bg-brand px-4 py-2 text-white disabled:opacity-50">Save the period</button>
+      <button type="submit" disabled={save.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save the period</button>
     </form>
   )
 }
