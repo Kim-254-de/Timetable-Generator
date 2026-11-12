@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import time
 from collections import defaultdict
+from dataclasses import replace
 
 from app.exam_solver import precheck, rooms, sessions
 from app.exam_solver.model import COMMON, POSTGRADUATE, ExamProblem, ExamSolution, Paper, Seat
@@ -48,18 +49,31 @@ def soft_scores(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] |
     for s in seats or []:
         if kinds.get(s.paper_id) == POSTGRADUATE and s.paper_id in slots:
             graduate_rooms[slots[s.paper_id]].add(s.room_id)
+    # Postgraduate papers with students outside the postgraduate room's building (it was full, or the Director chose).
+    room_blocks = {r.id: r.block for r in problem.rooms}
+    home = room_blocks.get(problem.postgraduate_room or "")
+    outside = {
+        s.paper_id
+        for s in seats or []
+        if home and kinds.get(s.paper_id) == POSTGRADUATE and room_blocks.get(s.room_id) != home
+    }
+    # H-E3's limit: sessions over it, from a run that couldn't keep to it or a paper moved by hand.
+    load: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        if p.id in slots:
+            load[slots[p.id]] += p.students
     return {
+        "over_session_limit": sum(1 for n in load.values() if n > problem.session_limit()),
         "back_to_back": back_to_back,
         "same_day": same_day,
         "student_days": late,
         "guessed_clashes": guessed,
         "common_busiest_day": max(per_day.values(), default=0),
         "postgraduate_extra_rooms": sum(len(rooms_) - 1 for rooms_ in graduate_rooms.values()),
-        # S-E9: papers common by their numbers that had to sit outside the first and last sessions.
-        "common_by_numbers_midday": sum(
-            1
-            for p in problem.papers
-            if p.id in slots and problem.common_by_numbers(p) and not problem.is_edge(slots[p.id])
+        "postgraduate_outside_building": len(outside),
+        # S-E9: common papers that had to sit outside the first and last sessions.
+        "common_midday": sum(
+            1 for p in problem.papers if p.id in slots and problem.category(p) == COMMON and not problem.is_edge(slots[p.id])
         ),
     }
 
@@ -71,7 +85,7 @@ def seat_all(problem: ExamProblem, slots: dict[str, int]) -> list[Seat]:
             by_slot[slots[p.id]].append(p)
     out: list[Seat] = []
     for t in sorted(by_slot):
-        out.extend(rooms.seat_session(by_slot[t], problem.rooms))
+        out.extend(rooms.seat_session(by_slot[t], problem.rooms, problem.postgraduate_room))
     return out
 
 
@@ -87,6 +101,11 @@ def solve(problem: ExamProblem, time_limit_s: float = 300, workers: int = 8) -> 
             failure={"stage": "precheck", "reasons": findings[:50], "count": len(findings)},
         )
     status, slots, _objective = sessions.solve(problem, time_limit_s * 0.9, workers)
+    if status == "INFEASIBLE" and problem.session_limit() < problem.total_seats:
+        # The session limit is what's wanted, not what must hold: better a tighter timetable than none.
+        problem = replace(problem, weights=replace(problem.weights, session_fill=100))
+        left = time_limit_s * 0.9 - (time.monotonic() - started)
+        status, slots, _objective = sessions.solve(problem, left, workers)
     if not slots:
         reasons = (
             sessions.explain(problem, min(60.0, time_limit_s / 2))

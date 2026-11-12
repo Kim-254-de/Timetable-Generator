@@ -29,6 +29,7 @@ from app.api.schemas import (
     OfferingPatch,
     OpenTermBody,
     PaperCategoryBody,
+    PaperIdsBody,
     PaperInvigilatorsBody,
     PaperRowsBody,
     ProposeBody,
@@ -552,6 +553,11 @@ def director_paper_invigilators(
     return ok(exam_director_papers.set_invigilators(db, identity, setup.get_term(db, term_id), paper_id, named))
 
 
+@router.post("/terms/{term_id}/director-papers/remove")
+def remove_director_papers(term_id: str, body: PaperIdsBody, identity: Me, db: Db) -> dict[str, Any]:
+    return ok({"deleted": exam_director_papers.remove_many(db, identity, setup.get_term(db, term_id), body.paper_ids)})
+
+
 @router.delete("/terms/{term_id}/director-papers/{paper_id}")
 def delete_director_paper(term_id: str, paper_id: str, identity: Me, db: Db) -> dict[str, Any]:
     exam_director_papers.remove(db, identity, setup.get_term(db, term_id), paper_id)
@@ -619,7 +625,7 @@ def move_exam_paper(draft_id: str, paper_id: str, body: ExamMoveBody, identity: 
 def change_exam_venue(draft_id: str, paper_id: str, body: ExamVenueBody, identity: Me, db: Db) -> dict[str, Any]:
     """Moves a paper's students from one room to another, checked; the paper is pinned and keeps the venue."""
     draft = exam_drafts.get_draft(db, draft_id)
-    return ok(exam_drafts.change_venue(db, identity, draft, paper_id, body.from_room, body.to_room))
+    return ok(exam_drafts.change_venue(db, identity, draft, paper_id, body.from_room, body.to_room, body.make_room))
 
 
 @router.post("/exam-drafts/{draft_id}/resolve")

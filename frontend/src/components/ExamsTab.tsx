@@ -62,7 +62,7 @@ export function ExamsTab({ termId }: { termId: string }) {
               <h2 className="font-semibold">Exam papers</h2>
               <p className="text-sm text-muted">Departments list their papers on their Teaching page in Smart Attendance and publish them.</p>
             </div>
-            <button onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending || !departments.data?.published.length}
+            <button onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending}
               className="rounded-md bg-brand px-3 py-2 text-sm text-white disabled:opacity-50">
               {importExams.isPending ? 'Importing…' : 'Import exam papers'}
             </button>
@@ -70,7 +70,7 @@ export function ExamsTab({ termId }: { termId: string }) {
           {departments.isError && <p role="alert" className="text-sm text-danger">{errorMessage(departments.error)}</p>}
           {departments.data && (
             <p className="text-sm">
-              Published: {departments.data.published.map((d) => `${d.code} (${d.papers})`).join(', ') || 'none yet'}.
+              Published: {departments.data.published.map((d) => `${d.code} (${d.papers})`).join(', ') || 'none yet, so there is nothing to import until a department publishes'}.
               {departments.data.not_published.length > 0 && (
                 <span className="text-muted"> Not yet: {departments.data.not_published.map((d) => d.code).join(', ')}.</span>
               )}
@@ -239,6 +239,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
   const [daysOff, setDaysOff] = useState(period.exam_days_off.join(', '))
   const [sessions, setSessions] = useState<ExamSessionTime[]>(period.exam_sessions)
   const [spacing, setSpacing] = useState(period.exam_spacing)
+  const [graduateRoom, setGraduateRoom] = useState(period.exam_postgraduate_room ?? '')
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -249,6 +250,7 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
       exam_days_off: daysOff.split(/[,\s]+/).filter(Boolean),
       exam_sessions: sessions,
       exam_spacing: spacing,
+      exam_postgraduate_room: graduateRoom.trim(),
     })
   }
 
@@ -291,8 +293,18 @@ function PeriodForm({ termId, period }: { termId: string; period: ExamPeriod }) 
         <input type="number" min={0.3} max={1} step={0.05} value={spacing} onChange={(e) => setSpacing(Number(e.target.value))}
           className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
       </label>
+      <label className="block">Postgraduate room
+        <input value={graduateRoom} onChange={(e) => setGraduateRoom(e.target.value)} placeholder="TC 1"
+          className="mt-1 block w-28 rounded-md border border-line px-2 py-1" />
+        <span className="mt-1 block text-xs text-muted">
+          A session's postgraduate papers sit here first. When it is full they take other rooms in its building, and undergraduates fill the seats left in those rooms; undergraduates keep out of this room only while postgraduates sit. Leave empty for no postgraduate room. You can still give any paper another venue on the draft.
+          {period.exam_postgraduate_room && (period.postgraduate_room
+            ? ` Now: ${period.postgraduate_room.code}, ${period.postgraduate_room.seats} exam seats, building ${period.postgraduate_room.building}.`
+            : ` No room ${period.exam_postgraduate_room} is open for exams, so postgraduate papers sit in any room.`)}
+        </span>
+      </label>
       <p className="text-xs text-muted">
-        Common and postgraduate (7xx to 9xx) papers sit only in the first or last session of a day. A paper of over 3000 students counts as common, and sits first or last whenever it can.
+        Postgraduate (7xx to 9xx) papers sit only in the first or last session of a day. Common papers sit first or last when they can, and take a middle session when the timetable needs it. A paper of over 3000 students counts as common.
         Postgraduate papers also sit only in the first week: from the first exam day to that week's Friday.
       </p>
       <p className="text-muted">

@@ -8,13 +8,17 @@ one day: slot = day index x sessions per day + session.
 Hard rules:
   H-E1 no class row sits two papers in one slot;
   H-E2 at most two papers per class row per day;
-  H-E3 a slot's students fit the exam seats of all rooms;
+  H-E3 a slot's students fit the exam seats of all rooms, and when generating
+       no more than session_fill percent of them, so that papers needn't be cut
+       up to fit the last gaps. A session may pass that only for a paper bigger
+       than the limit or for pinned papers; if no timetable holds to it, the run
+       uses all the seats (session_limit());
   H-E4 papers only in the period's slots, pinned papers stay;
   H-E6 every class row (or part of one) sits in one room, rooms within their
        exam seats, a paper's ODEL students apart from its other students;
   H-E7 a main invigilator named before generating is in one room per slot: their
        papers go in different sessions, except postgraduate ones, which share a room;
-  H-E8 common and postgraduate papers only in the first or last session
+  H-E8 postgraduate papers only in the first or last session
        of a day;
   H-E10 postgraduate papers only in the first week of the period.
 Soft rules (weighted): S-E1 back-to-back sessions for a class row, S-E2 two
@@ -28,13 +32,12 @@ guessed class to one paper a session and two a day, and S-E5 spreads these
 papers evenly over the period instead of stacking them in one session. Both
 are soft (heavily weighted): a guess must never make a timetable impossible.
 
-Papers of two kinds sit only in the first or last session of a day, on any
-exam day (H-E8): common units (sat by more than one programme, or with nobody
-known to sit them, codes from more than one programme: "BITE 131/COSC 130")
-and postgraduate papers (a code numbered 7xx to 9xx).
-Some shared units have no programmes on record, so a paper of more than
-COMMON_STUDENTS students also counts as common. Those are kept to the first or
-last session softly (S-E9): a number is only a sign that a unit is shared.
+Postgraduate papers (a code numbered 7xx to 9xx) sit only in the first or last
+session of a day, on any exam day (H-E8). Common units (sat by more than one
+programme, or with nobody known to sit them, codes from more than one programme:
+"BITE 131/COSC 130") prefer those sessions, and take a middle one when the
+timetable needs it (S-E9). Some shared units have no programmes on record, so a
+paper of more than COMMON_STUDENTS students also counts as common.
 Postgraduate papers also sit only in the first week: from the first exam day to
 the Friday of that week, so Tuesday to Friday when exams start on a Tuesday (a
 Saturday or Sunday start runs to the next Friday) (H-E10).
@@ -155,21 +158,24 @@ class ExamWeights:
     guessed_day: int = 200  # S-E4 per paper of a guessed class over two on a day
     spread: int = 20  # S-E5 per paper with no students known over an even share of a session
     common_spread: int = 30  # S-E7 per common paper over an even share of a day
-    common_by_numbers: int = 1000  # S-E9 per paper common by its numbers outside the first and last sessions
+    common_midday: int = 1000  # S-E9 per common paper outside the first and last sessions
     category_rules: int = 1  # 0 turns H-E8 and H-E10 off
     postgraduate_first_week: int = 1  # 0 turns H-E10 off
+    session_fill: int = 85  # H-E3 when generating: the percent of the exam seats a session may fill; 100 is all
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> ExamWeights:
         if not data:
             return cls()
-        data = {k: v for k, v in data.items() if k != "common_day"}  # retired with the common-units day
+        data = {k: v for k, v in data.items() if k not in ("common_day", "common_by_numbers")}  # retired rules
         known = set(cls.__dataclass_fields__)
         unknown = set(data) - known
         if unknown:
             raise ValueError(f"Unknown weights: {', '.join(sorted(unknown))}")
         if any(not isinstance(v, int) or v < 0 for v in data.values()):
             raise ValueError("Weights must be whole numbers from 0.")
+        if not 1 <= data.get("session_fill", 100) <= 100:
+            raise ValueError("session_fill must be a percent from 1 to 100.")
         return cls(**data)
 
     def as_dict(self) -> dict[str, int]:
@@ -185,6 +191,7 @@ class ExamProblem:
     weights: ExamWeights = field(default_factory=ExamWeights)
     row_labels: dict[str, str] = field(default_factory=dict)  # for messages
     row_programmes: dict[str, str] = field(default_factory=dict)  # class row -> programme code, for common units
+    postgraduate_room: str | None = None  # the room id postgraduate papers sit in first ("TC 1"); see rooms.py
 
     def row_label(self, row_id: str) -> str:
         return self.row_labels.get(row_id, row_id)
@@ -203,6 +210,12 @@ class ExamProblem:
     def total_seats(self) -> int:
         return sum(r.seats for r in self.rooms)
 
+    def session_limit(self) -> int:
+        """The students a generated session may hold: at least the biggest paper, at most the seats."""
+        seats = self.total_seats
+        wanted = seats * self.weights.session_fill // 100
+        return min(seats, max(wanted, max((p.students for p in self.papers), default=0)))
+
     def is_common(self, paper: Paper) -> bool:
         """Sat by more than one programme; with no class rows, codes from more than one programme."""
         if paper.row_ids:
@@ -214,17 +227,13 @@ class ExamProblem:
             return paper.kind
         return COMMON if self.is_common(paper) or paper.students > COMMON_STUDENTS else REGULAR
 
-    def common_by_numbers(self, paper: Paper) -> bool:
-        """Common only because of its numbers: its first or last session is a preference (S-E9)."""
-        return not paper.kind and paper.students > COMMON_STUDENTS and not self.is_common(paper)
-
     @property
     def rules_on(self) -> bool:
         return bool(self.weights.category_rules)
 
     def edges_only(self, paper: Paper) -> bool:
         """It may sit only in the first or last session of a day (H-E8)."""
-        return self.rules_on and self.category(paper) != REGULAR and not self.common_by_numbers(paper)
+        return self.rules_on and self.category(paper) == POSTGRADUATE
 
     def is_edge(self, slot: int) -> bool:
         return self.session_of(slot) in (0, self.sessions - 1)

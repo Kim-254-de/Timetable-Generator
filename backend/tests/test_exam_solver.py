@@ -234,14 +234,16 @@ def test_a_class_can_sit_morning_and_evening_on_one_day_when_it_must():
     assert result.soft_scores["back_to_back"] == 0
 
 
-def test_moving_or_pinning_a_common_paper_to_midday_breaks_the_rule():
-    papers = [_paper("COMS 101", ("BIT1", 50), ("BSC1", 50)), _paper("BIT 110", ("BIT1", 50))]
-    problem = _common_problem(papers)
-    assert check(problem, {"COMS 101": 3, "BIT 110": 4}) == []  # a regular paper can sit midday
-    broken = check(problem, {"COMS 101": 1, "BIT 110": 4})
+def test_moving_or_pinning_a_postgraduate_paper_to_midday_breaks_the_rule_and_a_common_one_may_go_there():
+    graduate = replace(_paper("MBAD 845", ("M1", 10)), kind=POSTGRADUATE)
+    common = _paper("COMS 101", ("BIT1", 10), ("BSC1", 10))
+    problem = _common_problem([graduate, common])
+    assert check(problem, {"COMS 101": 1, "MBAD 845": 0}) == []  # a common paper can sit midday, as a last resort
+    assert soft_scores(problem, {"COMS 101": 1, "MBAD 845": 0}, [])["common_midday"] == 1
+    broken = check(problem, {"COMS 101": 0, "MBAD 845": 1})
     assert [v.rule for v in broken] == ["H-E8"] and "first or last session" in broken[0].message
-    pinned = _common_problem([_paper("COMS 101", ("BIT1", 50), ("BSC1", 50), pinned=4)])
-    result = solve(pinned, time_limit_s=10, workers=2)
+    pinned = _common_problem([replace(graduate, pinned=1)])
+    result = solve(pinned, time_limit_s=20, workers=2)
     assert result.failure and result.failure["reasons"][0]["rule"] == "H-E8"
 
 
@@ -606,7 +608,7 @@ def test_others_may_use_a_levels_room_when_nothing_else_is_left():
 
 
 def test_a_diploma_paper_keeps_its_session_rules_and_stays_common():
-    # Sat by two programmes: still a common paper, so first or last session. One programme: any session.
+    # Sat by two programmes: still a common paper, preferring first or last. One programme: no preference.
     problem = _common_problem([_level_paper("DIBM 0112", 10)], days=1)
     alone = problem.papers[0]
     assert problem.category(alone) == REGULAR and problem.allowed_slots(alone) == [0, 1, 2]
@@ -614,7 +616,7 @@ def test_a_diploma_paper_keeps_its_session_rules_and_stays_common():
     assert paper_kind(["DIBM 0112"], []) == ""
     joint = replace(_level_paper("DIBM 0113", 10), rows=(Sitting("D1", 5), Sitting("D2", 5)), codes=("DIBM 0113",))
     both = replace(problem, papers=[joint], row_programmes={"D1": "DIBM", "D2": "DHRM"})
-    assert both.category(joint) == COMMON and both.allowed_slots(joint) == [0, 2]
+    assert both.category(joint) == COMMON and both.allowed_slots(joint) == [0, 1, 2]
 
 
 def _big(pid: str, students: int) -> Paper:
@@ -626,37 +628,193 @@ def test_a_paper_of_more_than_3000_students_counts_as_common():
     problem = _common_problem([], rooms=[_room("A", 5000)])
     at_limit, over = _big("AT", 3000), _big("OVER", 3001)
     assert problem.category(at_limit) == REGULAR
-    assert problem.category(over) == COMMON and problem.common_by_numbers(over)
+    assert problem.category(over) == COMMON
     # The Director's choice, or its own category, comes first.
     assert problem.category(replace(over, kind=REGULAR)) == REGULAR
     assert problem.category(replace(over, kind=POSTGRADUATE)) == POSTGRADUATE
-    assert not problem.common_by_numbers(replace(over, kind=COMMON))
 
 
-def test_the_first_or_last_session_is_a_preference_for_a_paper_common_by_its_numbers():
+def test_the_first_or_last_session_is_a_preference_for_a_common_paper():
     big = _big("BIG", 3500)
-    problem = _common_problem([big], days=1, rooms=[_room("A", 5000)])
-    assert problem.allowed_slots(big) == [0, 1, 2]  # no session is closed to it
-    assert not problem.edges_only(big)
-    assert check(problem, {"BIG": 1}, [Seat("BIG", "BIG-1", "A", 3500)]) == []  # midday breaks no hard rule
-    assert soft_scores(problem, {"BIG": 1}, [Seat("BIG", "BIG-1", "A", 3500)])["common_by_numbers_midday"] == 1
-    assert soft_scores(problem, {"BIG": 0}, [Seat("BIG", "BIG-1", "A", 3500)])["common_by_numbers_midday"] == 0
+    shared = _paper("SHARED", ("BIT1", 10), ("BSC1", 10))
+    problem = _common_problem([big, shared], days=1, rooms=[_room("A", 5000)])
+    for p in (big, shared):
+        assert problem.allowed_slots(p) == [0, 1, 2] and not problem.edges_only(p)
+    seat = [Seat("BIG", "BIG-1", "A", 3500)]
+    assert check(problem, {"BIG": 1, "SHARED": 0}, seat + [Seat("SHARED", "BIT1", "A", 10), Seat("SHARED", "BSC1", "A", 10)]) == []
+    assert soft_scores(problem, {"BIG": 1, "SHARED": 0}, seat)["common_midday"] == 1
+    assert soft_scores(problem, {"BIG": 0, "SHARED": 2}, seat)["common_midday"] == 0
 
 
-def test_the_solver_seats_papers_common_by_numbers_first_or_last_when_it_can():
-    # Day two's midday is otherwise the cheapest place for nobody; these two should still take the edges.
-    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10))]
+def test_the_solver_seats_common_papers_first_or_last_when_it_can():
+    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10)), _paper("S", ("BIT1", 5), ("BSC1", 5))]
     problem = _common_problem(papers, days=2, rooms=[_room("A", 5000)])
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
-    assert problem.is_edge(result.slots["BIG1"]) and problem.is_edge(result.slots["BIG2"])
-    assert result.soft_scores["common_by_numbers_midday"] == 0
+    for pid in ("BIG1", "BIG2", "S"):
+        assert problem.is_edge(result.slots[pid])
+    assert result.soft_scores["common_midday"] == 0
 
 
-def test_a_paper_common_by_its_numbers_goes_midday_when_it_must():
+def test_a_common_paper_goes_midday_when_it_must():
     # Three big papers and one exam day: both edges fill up, and that must not make it impossible.
     papers = [_big(f"BIG{i}", 3100) for i in range(3)]
     problem = _common_problem(papers, days=1, rooms=[_room("A", 3200)])
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
-    assert result.soft_scores["common_by_numbers_midday"] == 1
+    assert result.soft_scores["common_midday"] == 1
+
+
+def test_a_stored_run_with_the_retired_weight_still_reads():
+    assert ExamWeights.from_dict({"common_by_numbers": 1000, "same_day": 5}).same_day == 5
+
+
+def _too_tight() -> ExamProblem:
+    # Five postgraduate papers, each pair sharing a class: the two days' four first and last sessions can't hold them.
+    import itertools
+
+    pairs = list(itertools.combinations(range(5), 2))
+    papers = [
+        replace(_paper(f"C{i}", *[(f"{a}-{b}", 1) for a, b in pairs if i in (a, b)]), kind=POSTGRADUATE) for i in range(5)
+    ]
+    return _common_problem(papers, days=2)
+
+
+def test_when_the_classes_cant_be_named_in_time_the_rule_at_fault_is(monkeypatch):
+    problem = _too_tight()
+    monkeypatch.setattr(sessions, "_named", lambda *_: [])  # what running out of time looks like
+    reasons = sessions.explain(problem, 20)
+    assert precheck.run(problem) == []
+    assert reasons[0]["rule"] == "H-E8"
+    messages = " ".join(r["message"] for r in reasons)
+    assert "first or last session" in messages and "4 such sessions" in messages
+    assert "it fits with 1 more exam day." in messages
+
+
+def test_the_rule_at_fault_can_be_seats_or_an_invigilator_not_the_session_rule():
+    seats = [_paper(f"P{i}", (f"R{i}", 90)) for i in range(3)]
+    tight = ExamProblem(papers=seats, days=DAYS[:1], sessions=1, rooms=[_room("A", 100)])
+    assert [r["rule"] for r in sessions.diagnose(tight, 20)][:1] == ["H-E3"]
+    named = [replace(_paper(f"P{i}", (f"R{i}", 5)), invigilator="STF/1") for i in range(3)]
+    busy = ExamProblem(papers=named, days=DAYS[:1], sessions=2, rooms=[_room("A", 100)])
+    assert "H-E7" in [r["rule"] for r in sessions.diagnose(busy, 20)]
+
+
+def test_a_paper_that_fits_a_room_is_not_split_over_gaps():
+    # The big paper leaves 10 seats in A, and B is empty: both classes of the small paper belong in B.
+    rooms = [_room("A", 100), _room("B", 40)]
+    papers = [_paper("BIG", ("R0", 90)), _paper("SMALL", ("R1", 10), ("R2", 15))]
+    placed = seating.seat_session(papers, rooms)
+    assert {s.room_id for s in placed if s.paper_id == "SMALL"} == {"B"}
+
+
+def test_odel_students_stay_apart_when_a_paper_fits_one_room():
+    placed = seating.seat_session([_paper("P", ("R1", 10), ("R2", 10, True))], [_room("A", 100), _room("B", 100)])
+    assert len({s.room_id for s in placed}) == 2
+
+
+def test_a_paper_no_room_holds_takes_the_fewest_rooms():
+    rooms = [_room("SMALL 1", 30), _room("SMALL 2", 30), _room("SMALL 3", 30), _room("BIG 1", 100), _room("BIG 2", 100)]
+    placed = seating.seat_session([_paper("P", ("R1", 60), ("R2", 60))], rooms)
+    assert {s.room_id for s in placed} == {"BIG 1", "BIG 2"}
+
+
+def _limited(*papers: Paper, seats: int = 100, days: int = 2, fill: int = 85) -> ExamProblem:
+    return ExamProblem(
+        papers=list(papers),
+        days=DAYS[:days],
+        sessions=1,
+        rooms=[_room("A", seats)],
+        weights=ExamWeights(session_fill=fill),
+    )
+
+
+def test_a_generated_session_keeps_to_the_limit_even_though_big_papers_go_early():
+    # All three fit the first day's 100 seats, and the early-date rule wants them there; only 85 may sit.
+    problem = _limited(_paper("P1", ("R1", 40)), _paper("P2", ("R2", 40)), _paper("P3", ("R3", 20)))
+    result = solve(problem, time_limit_s=10, workers=2)
+    load: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        load[result.slots[p.id]] += p.students
+    assert max(load.values()) <= 85
+    assert result.soft_scores["over_session_limit"] == 0
+
+
+def test_a_paper_bigger_than_the_limit_still_gets_a_session():
+    problem = _limited(_paper("HUGE", ("R1", 95)), _paper("P", ("R2", 10)))
+    assert problem.session_limit() == 95
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.failure is None and result.slots["HUGE"] != result.slots["P"]
+
+
+def test_pinned_papers_stay_over_the_limit():
+    problem = _limited(_paper("P1", ("R1", 50), pinned=0), _paper("P2", ("R2", 45), pinned=0), _paper("P3", ("R3", 5)))
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.failure is None and result.slots["P1"] == result.slots["P2"] == 0
+
+
+def test_when_no_timetable_keeps_to_the_limit_the_run_uses_all_the_seats_and_says_so():
+    # 180 students over two sessions of 85 are too many, and the 100 seats can hold them.
+    sizes = {"P1": 50, "P2": 50, "P3": 40, "P4": 40}
+    problem = _limited(*(_paper(p, (f"R-{p}", n)) for p, n in sizes.items()))
+    result = solve(problem, time_limit_s=10, workers=2)
+    assert result.failure is None and len(result.slots) == 4
+    assert soft_scores(problem, result.slots, result.seats)["over_session_limit"] >= 1
+
+
+def test_session_fill_must_be_a_percent():
+    assert ExamWeights.from_dict({"session_fill": 70}).session_fill == 70
+    for bad in (0, 101):
+        try:
+            ExamWeights.from_dict({"session_fill": bad})
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+
+
+def _tc_rooms() -> list[ExamRoom]:
+    return [
+        _room("TC 1", 90, "TC"),
+        _room("TC 4", 90, "TC"),
+        _room("TC 5", 90, "TC"),
+        _room("UTC 3", 405, "UTC"),
+        _room("UTC 6", 226, "UTC"),
+    ]
+
+
+def test_postgraduate_papers_sit_in_their_room_not_the_smallest_that_fits():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 20)), kind=POSTGRADUATE) for i in range(4)]
+    seats = seating.seat_session([*graduates, _paper("BCOM 101", ("BCOM1", 300))], _tc_rooms(), "TC 1")
+    assert {s.room_id for s in seats if s.paper_id.startswith("M")} == {"TC 1"}
+    assert "TC 1" not in {s.room_id for s in seats if s.paper_id == "BCOM 101"}
+
+
+def test_postgraduates_overflow_into_their_building_and_undergraduates_share_those_rooms():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 30)), kind=POSTGRADUATE) for i in range(4)]  # 120 > TC 1's 90
+    small = _paper("BCOM 101", ("BCOM1", 50))
+    seats = seating.seat_session([*graduates, small], _tc_rooms(), "TC 1")
+    graduate_rooms = {s.room_id for s in seats if s.paper_id.startswith("M")}
+    assert "TC 1" in graduate_rooms and graduate_rooms <= {"TC 1", "TC 4", "TC 5"}
+    overflow = next(iter(graduate_rooms - {"TC 1"}))
+    # BCOM 101 joins the half-full overflow room, never TC 1.
+    assert {s.room_id for s in seats if s.paper_id == "BCOM 101"} == {overflow}
+    used: dict[str, int] = defaultdict(int)
+    for s in seats:
+        used[s.room_id] += s.students
+    assert all(used[r.id] <= r.seats for r in _tc_rooms())
+
+
+def test_postgraduates_leave_their_building_only_when_it_is_full_and_the_score_says_so():
+    graduates = [replace(_paper(f"M{i}", (f"M{i}", 60)), kind=POSTGRADUATE) for i in range(5)]  # 300 > TC's 270
+    rooms = _tc_rooms()
+    seats = seating.seat_session(graduates, rooms, "TC 1")
+    # Four fill TC (the fourth split over the seats left); the fifth goes whole to the next building.
+    assert sum(s.students for s in seats if s.room_id.startswith("TC ")) == 240
+    assert {s.room_id for s in seats if s.paper_id == "M4"} <= {"UTC 3", "UTC 6"}
+    problem = ExamProblem(papers=graduates, days=DAYS[:1], sessions=3, rooms=rooms, postgraduate_room="TC 1")
+    assert soft_scores(problem, {p.id: 0 for p in graduates}, seats)["postgraduate_outside_building"] >= 1
+
+
+def test_the_postgraduate_room_is_open_to_all_in_a_session_without_postgraduates():
+    seats = seating.seat_session([_paper("BCOM 101", ("BCOM1", 85))], _tc_rooms(), "TC 1")
+    assert {s.room_id for s in seats} == {"TC 1"}  # the tightest fit

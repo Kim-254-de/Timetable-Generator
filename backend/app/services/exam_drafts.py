@@ -122,11 +122,20 @@ def _built(db: Session, draft: ExamDraft) -> _Built:
 
 
 def change_venue(
-    db: Session, identity: Identity, draft: ExamDraft, paper_id: str, from_room: str, to_room: str
+    db: Session,
+    identity: Identity,
+    draft: ExamDraft,
+    paper_id: str,
+    from_room: str,
+    to_room: str,
+    make_room: bool = False,
 ) -> dict[str, Any]:
     """
     Moves a paper's students from one room to another, checked: the room must be
     open for exams and have the seats that session. The paper is pinned and keeps this venue.
+    When the room is full, make_room moves other papers' students out of it to free
+    seats elsewhere in the session: as few papers as will do, biggest there first,
+    never a paper whose venue the Director chose. The summary's "made_room" says who moved.
     """
     _require_editable(draft)
     built = _built(db, draft)
@@ -144,15 +153,112 @@ def change_venue(
     if target.id == moving[0].room_id:
         return draft_summary(db, draft, built)
     ids = {s.id for s in moving}
+    students = sum(s.students for s in moving)
+    slot = built.slots.get(paper_id, -1)
+    together = [pl for pl in draft.placements if built.slots.get(str(pl.paper_id), -1) == slot and slot >= 0]
+    labels = {p.id: p.label for p in problem.papers}
+    # Who else is in the room that session, and how many seats are short.
+    there: dict[str, int] = defaultdict(int)
+    for pl in together:
+        for s in pl.seats:
+            if s.room_id == target.id and s.id not in ids:
+                there[str(pl.paper_id)] += s.students
+    own = there.pop(paper_id, 0)  # the paper's other students already there stay
+    if students + own > target.seats:
+        raise ApiError(
+            409,
+            "ROOM_TOO_SMALL",
+            f"{target.code} has {target.seats} exam seats; this paper would have {students + own} there.",
+        )
+    short = sum(there.values()) + own + students - target.seats
+    displaced: list[str] = []
+    if short > 0:
+        if not make_room:
+            who = ", ".join(labels.get(pid, pid) for pid in there)
+            raise ApiError(
+                409,
+                "ROOM_FULL",
+                f"{target.code} has {target.seats - sum(there.values()) - own} free seats that session; "
+                f"{students} would move. "
+                f"Make room to move {who} out of it.",
+                {"in_room": [{"paper": labels.get(pid, pid), "students": n} for pid, n in there.items()]},
+            )
+        locked = {str(pl.paper_id) for pl in together if pl.rooms_locked}
+        freed = 0
+        for pid, n in sorted(there.items(), key=lambda kv: (-kv[1], labels.get(kv[0], ""))):
+            if freed >= short:
+                break
+            if pid in locked:
+                continue
+            displaced.append(pid)
+            freed += n
+        if freed < short:
+            chosen = ", ".join(labels.get(pid, pid) for pid in there if pid in locked)
+            raise ApiError(
+                409,
+                "ROOM_FULL",
+                f"{target.code} can't be cleared: you chose it as the venue of {chosen}. "
+                "Change that paper's venue first.",
+            )
+    # The moved paper and everyone not moved out keep their seats; the moved-out papers are seated around them.
+    current = {
+        str(pl.paper_id): tuple(
+            Seat(
+                str(pl.paper_id),
+                str(s.class_row_id),
+                target.id if s.id in ids else s.room_id,
+                s.students,
+                s.part,
+                s.parts,
+            )
+            for s in pl.seats
+        )
+        for pl in together
+    }
+    by_paper = {p.id: p for p in problem.papers}
+    new_seats: dict[str, list[Seat]] = {}
+    if displaced:
+        in_slot = [
+            replace(by_paper[pid], fixed_seats=() if pid in displaced else current[pid])
+            for pid in current
+            if pid in by_paper
+        ]
+        try:
+            for s in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
+                new_seats.setdefault(s.paper_id, []).append(s)
+        except seating.SeatingError as exc:
+            raise ApiError(
+                409,
+                "NO_ROOM",
+                f"The session has no free seats elsewhere for the students in {target.code} ({exc}). "
+                "Move a paper to another session first.",
+            ) from exc
     after: list[Seat] = []
     for pl in draft.placements:
-        for s in pl.seats:
-            room = target.id if s.id in ids else s.room_id
-            after.append(Seat(str(pl.paper_id), str(s.class_row_id), room, s.students, s.part, s.parts))
+        pid = str(pl.paper_id)
+        if pid in displaced:
+            after.extend(new_seats.get(pid, []))
+        elif pid in current:
+            after.extend(current[pid])
+        else:
+            after.extend(Seat(pid, str(s.class_row_id), s.room_id, s.students, s.part, s.parts) for s in pl.seats)
     before = {v.message for v in check(problem, built.slots, built.seats)}
     broken = [v for v in check(problem, built.slots, after) if v.message not in before]
     if broken:
         raise ApiError(409, "BREAKS_RULE", broken[0].message, {"violations": [v.__dict__ for v in broken]})
+    made_room = []
+    for pl in together:
+        pid = str(pl.paper_id)
+        if pid not in displaced:
+            continue
+        went = sorted({names.get(s.room_id, s.room_id) for s in new_seats.get(pid, [])})
+        made_room.append({"paper": labels.get(pid, pid), "from": target.code, "to": went})
+        pl.seats = [
+            ExamSeat(
+                room_id=s.room_id, class_row_id=uuid.UUID(s.row_id), part=s.part, parts=s.parts, students=s.students
+            )
+            for s in new_seats.get(pid, [])
+        ]
     for s in moving:
         s.room_id = target.id
     placement.pinned = True
@@ -165,10 +271,10 @@ def change_venue(
         "exam_draft",
         str(draft.id),
         {"paper": paper_id, "room": from_room},
-        {"room": target.code},
+        {"room": target.code, "made_room": made_room},
     )
     db.commit()
-    return draft_summary(db, draft)
+    return {**draft_summary(db, draft), "made_room": made_room}
 
 
 def draft_summary(db: Session, draft: ExamDraft, built: _Built | None = None) -> dict[str, Any]:
@@ -347,14 +453,8 @@ def move_paper(
     old = built.slots.get(paper_id, -1)
     new = days.index(day) * problem.sessions + session
     slots = {**built.slots, paper_id: new}
-    unpinned = ExamProblem(
-        papers=[p if p.id != paper_id else replace(p, pinned=None, fixed_seats=()) for p in problem.papers],
-        days=problem.days,
-        sessions=problem.sessions,
-        rooms=problem.rooms,
-        weights=problem.weights,
-        row_labels=problem.row_labels,
-        row_programmes=problem.row_programmes,
+    unpinned = replace(
+        problem, papers=[p if p.id != paper_id else replace(p, pinned=None, fixed_seats=()) for p in problem.papers]
     )
     broken = [
         v
@@ -369,7 +469,7 @@ def move_paper(
     for slot in {old, new} - {-1}:
         in_slot = [papers[pid] for pid, t in slots.items() if t == slot and pid in papers]
         try:
-            new_seats = seating.seat_session(in_slot, problem.rooms)
+            new_seats = seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room)
         except seating.SeatingError as exc:
             raise ApiError(409, "NO_ROOM", str(exc)) from exc
         for pid in {p.id for p in in_slot}:

@@ -5,7 +5,7 @@ import { Download } from 'lucide-react'
 import { errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
 import { examExportUrl, useChangeExamVenue, useExamDraft, useExamDraftAction, useMoveExamPaper, useSetDirectorInvigilators } from '@/lib/queries'
-import type { ExamGrid, ExamGridPaper } from '@/lib/types'
+import type { ExamDraftSummary, ExamGrid, ExamGridPaper } from '@/lib/types'
 
 const roomsOf = (p: ExamGridPaper) => [...new Set(p.seating.map((s) => s.room))].sort()
 
@@ -43,7 +43,9 @@ export function ExamDraftPage() {
             {draft.shared_at && ` · shared with departments ${dateTime(draft.shared_at)}`}
             {' '}· back-to-back {draft.soft_scores.back_to_back ?? 0} · two a day {draft.soft_scores.same_day ?? 0}
             {draft.soft_scores.postgraduate_extra_rooms ? ` · Postgraduate papers in ${draft.soft_scores.postgraduate_extra_rooms} extra rooms` : ''}
-            {draft.soft_scores.common_by_numbers_midday ? ` · ${draft.soft_scores.common_by_numbers_midday} papers of over 3000 students in a middle session` : ''}
+            {draft.soft_scores.postgraduate_outside_building ? ` · ${draft.soft_scores.postgraduate_outside_building} postgraduate papers outside the postgraduate room's building` : ''}
+            {draft.soft_scores.common_midday ? ` · ${draft.soft_scores.common_midday} common papers in a middle session` : ''}
+            {draft.soft_scores.over_session_limit ? ` · ${draft.soft_scores.over_session_limit} sessions fuller than the limit, so more papers are split across rooms` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -200,30 +202,60 @@ function freeSeats(data: ExamGrid, paper: ExamGridPaper): Map<string, number> {
   return new Map(data.exam_rooms.map((r) => [r.code, r.seats - (used.get(r.code) ?? 0)]))
 }
 
-/** One of the paper's rooms and where its students could go instead. */
+/** The other papers of the session in a room, with their students there. */
+function papersIn(data: ExamGrid, paper: ExamGridPaper, room: string): { codes: string; students: number }[] {
+  return data.papers
+    .filter((p) => p.id !== paper.id && p.day === paper.day && p.session === paper.session)
+    .map((p) => ({ codes: p.codes, students: p.seating.filter((s) => s.room === room).reduce((n, s) => n + s.students, 0) }))
+    .filter((p) => p.students > 0)
+}
+
+/** One of the paper's rooms and where its students could go instead; a full room can be cleared for them. */
 function VenueRow({ termId, draftId, data, paper, room }: { termId: string; draftId: string; data: ExamGrid; paper: ExamGridPaper; room: string }) {
   const change = useChangeExamVenue(termId, draftId)
   const [to, setTo] = useState('')
+  const [made, setMade] = useState<NonNullable<ExamDraftSummary['made_room']>>([])
   const free = freeSeats(data, paper)
   const students = paper.seating.filter((s) => s.room === room).reduce((n, s) => n + s.students, 0)
   const options = data.exam_rooms
     .filter((r) => r.code !== room)
     .sort((a, b) => a.code.localeCompare(b.code))
+  const chosen = data.exam_rooms.find((r) => r.code === to)
+  const mine = paper.seating.filter((s) => s.room === to).reduce((n, s) => n + s.students, 0)
+  const tooSmall = !!chosen && students + mine > chosen.seats
+  const full = !!chosen && !tooSmall && (free.get(to) ?? 0) < students
+  const submit = () =>
+    change.mutate({ paperId: paper.id, from_room: room, to_room: to, make_room: full }, {
+      onSuccess: (summary) => { setMade(summary.made_room ?? []); setTo('') },
+    })
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="w-28 font-medium">{room} <span className="font-normal text-muted">({students})</span></span>
         <span aria-hidden>→</span>
-        <select aria-label={`New venue instead of ${room}`} value={to} onChange={(e) => setTo(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line px-2 py-1">
+        <select aria-label={`New venue instead of ${room}`} value={to} onChange={(e) => { setTo(e.target.value); setMade([]) }} className="min-w-0 flex-1 rounded-md border border-line px-2 py-1">
           <option value="">Choose a venue</option>
           {options.map((r) => {
             const left = free.get(r.code) ?? r.seats
-            return <option key={r.code} value={r.code} disabled={left < students}>{r.code} · {left} of {r.seats} seats free</option>
+            const own = paper.seating.filter((s) => s.room === r.code).reduce((n, s) => n + s.students, 0)
+            const label = students + own > r.seats ? 'too small' : left < students ? 'full: make room' : `${left} of ${r.seats} seats free`
+            return <option key={r.code} value={r.code} disabled={students + own > r.seats}>{r.code} · {label}</option>
           })}
         </select>
-        <button type="button" disabled={!to || change.isPending} onClick={() => change.mutate({ paperId: paper.id, from_room: room, to_room: to }, { onSuccess: () => setTo('') })}
-          className="rounded-md border border-line px-3 py-1 disabled:opacity-50">Change</button>
+        <button type="button" disabled={!to || tooSmall || change.isPending} onClick={submit}
+          className="rounded-md border border-line px-3 py-1 disabled:opacity-50">{full ? 'Make room' : 'Change'}</button>
       </div>
+      {full && (
+        <p className="mt-1 text-xs text-muted">
+          {to} has {Math.max(free.get(to) ?? 0, 0)} free seats this session. Making room moves {papersIn(data, paper, to).map((p) => `${p.codes} (${p.students})`).join(', ') || 'other papers'} out
+          to free seats elsewhere in the session, as few papers as will do. Papers whose venue you chose stay. Check their invigilators afterwards.
+        </p>
+      )}
+      {made.length > 0 && (
+        <p role="status" className="mt-1 text-xs">
+          Made room: {made.map((m) => `${m.paper} moved from ${m.from} to ${m.to.join(', ')}`).join('; ')}.
+        </p>
+      )}
       {change.isError && <p role="alert" className="mt-1 text-danger">{errorMessage(change.error)}</p>}
     </div>
   )
@@ -274,7 +306,7 @@ function MoveDialog({ termId, draftId, data, paper: picked, onClose }: {
           {rooms.length === 0
             ? <p className="text-muted">No students known yet, so no room. Enter its numbers and generate again.</p>
             : rooms.map((room) => <VenueRow key={room} termId={termId} draftId={draftId} data={data} paper={paper} room={room} />)}
-          {rooms.length > 0 && <p className="text-xs text-muted">Checked for seats. The paper is pinned and keeps this venue when its session is re-seated.</p>}
+          {rooms.length > 0 && <p className="text-xs text-muted">Checked for seats. A full room can be cleared: its other papers move to free seats elsewhere in the session. The paper is pinned and keeps this venue when its session is re-seated.</p>}
         </section>
 
         <section className="space-y-2 border-t border-line pt-3">

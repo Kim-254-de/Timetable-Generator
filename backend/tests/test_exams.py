@@ -458,3 +458,56 @@ def test_a_postgraduate_paper_stays_in_the_first_week_and_older_drafts_are_left_
     run.weights = {k: v for k, v in run.weights.items() if k != "postgraduate_first_week"}
     db.commit()
     ok(client.patch(f"/api/exam-drafts/{draft_id}/papers/{paper_id}", json={"day": "2026-11-30", "session": 0}))
+
+
+def test_the_placeholder_room_is_never_an_exam_room(client, teaching):
+    sign_in(client)
+    term_id = setup_exams(client, teaching)
+    before = ok(client.get(f"/api/terms/{term_id}/exams"))["period"]["exam_seats"]
+    placeholder = {"code": "TBA", "building": "", "capacity": "50", "room_type": "Lecture hall"}
+    ok(client.post("/api/rooms/bulk", json={"rows": [placeholder]}))
+    rooms = {r["code"]: r for r in ok(client.get("/api/rooms"))}
+    assert rooms["TBA"]["for_exams"] is False
+    # The Director's own choice can't open it either.
+    ok(client.patch(f"/api/rooms/{rooms['TBA']['id']}", json={"for_exams": True}))
+    assert ok(client.get(f"/api/terms/{term_id}/exams"))["period"]["exam_seats"] == before
+
+
+def test_the_director_makes_room_in_a_full_venue(client, teaching, smarttt):
+    sign_in(client)
+    term_id = setup_exams(client, teaching, smarttt_term_id=TERM["id"])
+    # Seats: ADM 1 84, STB 1 and STB 2 151, UTC 1 226: EPSC 121's 300 fill the STB rooms.
+    period = ok(client.patch(f"/api/terms/{term_id}/exam-period", json={"exam_spacing": 0.84}))
+    assert period["exam_postgraduate_room"] == "TC 1" and period["postgraduate_room"] is None  # no TC 1 here
+    ok(client.post(f"/api/terms/{term_id}/exams/import"))
+    draft_id = _generate(client, term_id)
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/exam-drafts/{draft_id}"))["papers"]}
+    epsc = papers["EPSC 121"]
+    ok(
+        client.patch(
+            f"/api/exam-drafts/{draft_id}/papers/{papers['COSC 301']['id']}",
+            json={"day": epsc["day"], "session": epsc["session"]},
+        )
+    )
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/exam-drafts/{draft_id}"))["papers"]}
+    assert {s["room"] for s in papers["EPSC 121"]["seating"]} == {"STB 1", "STB 2"}
+    cosc = papers["COSC 301"]
+    start = cosc["seating"][0]["room"]
+    assert start not in ("STB 1", "STB 2")
+    url = f"/api/exam-drafts/{draft_id}/papers/{cosc['id']}/venue"
+    full = client.patch(url, json={"from_room": start, "to_room": "STB 1"})
+    assert full.json()["error"]["code"] == "ROOM_FULL"
+    assert [r["paper"] for r in full.json()["error"]["details"]["in_room"]] == ["EPSC 121"]
+    made = ok(client.patch(url, json={"from_room": start, "to_room": "STB 1", "make_room": True}))
+    assert made["violations"] == []
+    assert [m["paper"] for m in made["made_room"]] == ["EPSC 121"] and made["made_room"][0]["from"] == "STB 1"
+    papers = {p["codes"]: p for p in ok(client.get(f"/api/exam-drafts/{draft_id}"))["papers"]}
+    assert {s["room"] for s in papers["COSC 301"]["seating"]} == {"STB 1"}
+    assert sum(s["students"] for s in papers["EPSC 121"]["seating"]) == 300
+    # COSC 301's venue is now the Director's: it can't be cleared for another paper.
+    epsc_room = next(s["room"] for s in papers["EPSC 121"]["seating"] if s["room"] != "STB 1")
+    locked = client.patch(
+        f"/api/exam-drafts/{draft_id}/papers/{papers['EPSC 121']['id']}/venue",
+        json={"from_room": epsc_room, "to_room": "STB 1", "make_room": True},
+    )
+    assert locked.json()["error"]["code"] in ("ROOM_FULL", "ROOM_TOO_SMALL")

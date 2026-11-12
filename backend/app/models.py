@@ -105,6 +105,9 @@ class Term(Base):
         ],
     )
     exam_spacing: Mapped[float] = mapped_column(Float, default=0.9)
+    # The room a session's postgraduate papers sit in first; when it is full they take other rooms in
+    # its building, which undergraduates share. Undergraduates keep out of this room only. "" = no such room.
+    exam_postgraduate_room: Mapped[str] = mapped_column(String(30), default="TC 1", server_default="TC 1")
     # No longer used: health and nursing papers are ordinary papers now.
     exam_health_prefixes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Switching SMARTTT from teaching to exams, as SMARTTT last confirmed it:
@@ -146,6 +149,10 @@ class Department(Base):
     attendance_lecturer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+# SMARTTT's stand-in for a class with no venue yet: not a place anyone can sit an exam.
+PLACEHOLDER_ROOM = "TBA"
+
+
 class Room(Base):
     """A lecture hall, lab or seminar room. The id is SMARTTT's room id when imported, else a random one."""
 
@@ -171,6 +178,8 @@ class Room(Base):
 
     @property
     def used_for_exams(self) -> bool:
+        if self.code.strip().upper() == PLACEHOLDER_ROOM:
+            return False
         return self.for_exams if self.exam_override is None else self.exam_override
 
     @property

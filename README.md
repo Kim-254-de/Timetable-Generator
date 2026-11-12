@@ -107,7 +107,7 @@ On the term's **Exams** tab:
 3. **Generate**: phase 1 places each paper in a session (CP-SAT). Hard: no
    class row sits two papers in one session, at most 2 papers per class row
    per day, each session's students fit the exam seats, pinned papers stay,
-   common and postgraduate papers sit only in the first or last session
+   postgraduate papers sit only in the first or last session
    of a day (H-E8), and
    postgraduate papers sit only in the first week, from the first exam day to the
    Friday of that week (H-E10; a Saturday or Sunday start runs to the next Friday). Soft: back-to-back sessions (heavily weighted), two papers on
@@ -115,7 +115,8 @@ On the term's **Exams** tab:
    A common unit is a paper sat by class rows of more than one programme (with
    no class rows yet: codes of more than one programme, "BITE 131/COSC 130").
    Some shared units have no programmes on record, so a paper of more than 3000
-   students also counts as common; it sits first or last whenever it can (soft, S-E9).
+   students also counts as common. Common papers sit first or last when they can,
+   and take a middle session when the timetable needs it (soft, S-E9).
    A postgraduate paper has a code numbered 7xx to 9xx. Health and nursing papers
    are ordinary papers, uploaded and published by their departments like any other.
    The Director can set any paper's category on the Exams tab. Phase 2 seats
@@ -149,6 +150,11 @@ On the term's **Exams** tab:
    one person can cover several papers in one room. A paper nobody is known to sit (no class
    rows: nobody synced it, e.g. part-time students) still gets a date and
    session, with no room ("room to be announced") and no invigilator needed.
+   When generating, no session fills more than 85% of the exam seats (the
+   `session_fill` weight), so papers needn't be cut up to fit the last gaps; if no
+   timetable can keep to that, the run uses all the seats and the draft says so.
+   A paper goes in one room whenever a room has the seats for it. SMARTTT's
+   placeholder room `TBA` is never an exam room.
 6. **Approve and publish**: refused while any paper, or any extra room of a
    paper, has no invigilator. The
    version is frozen and sent to SMARTTT (`generator/exam-publish/`: papers

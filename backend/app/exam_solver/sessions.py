@@ -3,15 +3,15 @@ Phase 1: each paper to one slot (a session of a day), with CP-SAT.
 
 x[p, t] says paper p is in slot t (exactly one per paper; a pinned paper has
 only its slot). Hard: H-E1 per class row and slot at most one paper; H-E2 per
-class row and day at most two; H-E3 per slot the students fit all exam seats;
-H-E8 common and postgraduate papers only in the first or last session
+class row and day at most two; H-E3 per slot the students fit the session limit (ExamProblem.session_limit);
+H-E8 postgraduate papers only in the first or last session
 of a day (they get no other slot);
 H-E10 postgraduate papers only in the first week (they get no other slot).
 Soft: S-E1 back-to-back sessions, S-E2 two papers on a day, S-E3 big papers late,
 S-E4 a guessed class (papers with no students known) one paper a session and
 two a day, S-E5 papers with no students known spread over the period, S-E7
-common papers spread over the days, S-E9 papers common by their numbers in the
-first or last session of a day.
+common papers spread over the days, S-E9 common papers in the first or last
+session of a day when they can.
 
 When it is infeasible, it is solved again with one assumption per class row
 and per slot's seats, to name the ones that cannot all hold.
@@ -20,6 +20,8 @@ and per slot's seats, to name the ones that cannot all hold.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
 from ortools.sat.python import cp_model
@@ -118,16 +120,21 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
             for g in graduate if terms else []:
                 mm.limit([*terms, g], 1, f"H-E7|{staff}")
 
-    seats = problem.total_seats
+    seats = problem.session_limit()
+    pinned: dict[int, int] = defaultdict(int)
+    for p in problem.papers:
+        if p.pinned is not None:
+            pinned[p.pinned] += p.students
     if sum(p.students for p in problem.papers) > seats:
         for t in slots:
             load = [p.students * x[p.id, t] for p in problem.papers if (p.id, t) in x]
             if load:
-                mm.limit(load, seats, f"H-E3|{t}")
+                # The Director's pinned papers stay even over the limit; the seats themselves still hold.
+                mm.limit(load, min(problem.total_seats, max(seats, pinned[t])), f"H-E3|{t}")
     if not families:
         _guesses(mm, problem)
         _spread_common(mm, problem)
-        _common_by_numbers(mm, problem)
+        _common_midday(mm, problem)
     if not families and w.big_late:
         for p in problem.papers:
             hundreds = (p.students + 99) // 100
@@ -139,16 +146,16 @@ def _build(problem: ExamProblem, families: bool) -> _Model:
     return mm
 
 
-def _common_by_numbers(mm: _Model, problem: ExamProblem) -> None:
-    """S-E9: a paper common only by its numbers prefers the first or last session of a day."""
+def _common_midday(mm: _Model, problem: ExamProblem) -> None:
+    """S-E9: a common paper prefers the first or last session of a day."""
     w = problem.weights
-    if not problem.rules_on or not w.common_by_numbers:
+    if not problem.rules_on or not w.common_midday:
         return
     for p in problem.papers:
-        if problem.common_by_numbers(p):
+        if problem.category(p) == COMMON:
             for t in range(problem.slots):
                 if (p.id, t) in mm.x and not problem.is_edge(t):
-                    mm.penalties.append(w.common_by_numbers * mm.x[p.id, t])
+                    mm.penalties.append(w.common_midday * mm.x[p.id, t])
 
 
 def _spread_common(mm: _Model, problem: ExamProblem) -> None:
@@ -225,8 +232,70 @@ def solve(problem: ExamProblem, time_limit_s: float, workers: int) -> tuple[str,
     return STATUS[status], placed, solver.objective_value
 
 
+def _fits(problem: ExamProblem, skip: tuple[str, ...], time_limit_s: float, workers: int) -> bool | None:
+    """Can the hard rules hold, leaving out the families named? None when the time ran out."""
+    mm = _build(problem, families=True)
+    for name, literal in mm.literals.items():
+        if name.split("|", 1)[0] not in skip:
+            mm.m.add(literal == 1)
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = max(1.0, time_limit_s)
+    solver.parameters.num_workers = workers
+    solver.parameters.stop_after_first_solution = True
+    status = solver.solve(mm.m)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return True
+    return False if status == cp_model.INFEASIBLE else None
+
+
+def diagnose(problem: ExamProblem, time_limit_s: float, workers: int = 8) -> list[dict[str, str]]:
+    """
+    When the conflict is too tangled to name its classes: which rule, taken away,
+    lets the timetable fit, and how many more exam days would do it with every rule on.
+    """
+    w = problem.weights
+    tests: list[tuple[str, str, ExamProblem, tuple[str, ...]]] = []
+    if problem.rules_on:
+        tests.append((
+            "H-E8",
+            "Postgraduate papers sit only in the first or last session of a day, and "
+            f"the period's {len(problem.edge_slots())} such sessions are too few for them. Add exam days.",
+            replace(problem, weights=replace(w, category_rules=0)),
+            (),
+        ))
+        if w.postgraduate_first_week:
+            tests.append((
+                "H-E10",
+                "Postgraduate papers sit only in the first week, and it is too short for them.",
+                replace(problem, weights=replace(w, postgraduate_first_week=0)),
+                (),
+            ))
+    tests += [
+        ("H-E7", "A named main invigilator's papers can't each have their own session. Check who is named on several papers.", problem, ("H-E7",)),
+        ("H-E3", "Some sessions need more than the exam seats. Open more rooms, or add exam days.", problem, ("H-E3",)),
+        ("H-E2", "Classes have too many papers for at most 2 a day. Add exam days.", problem, ("H-E2",)),
+    ]
+    each = max(2.0, time_limit_s / (len(tests) + 5))
+    out: list[dict[str, str]] = []
+    for rule, message, relaxed, skip in tests:
+        if _fits(relaxed, skip, each, workers):
+            out.append({"rule": rule, "entity": "period", "message": message})
+    for extra in (1, 2, 3, 4, 6):
+        last = problem.days[-1]
+        more = [last + timedelta(days=i + 1) for i in range(extra)]
+        if _fits(replace(problem, days=[*problem.days, *more]), (), each, workers):
+            out.append({"rule": "H-E2", "entity": "period", "message": f"With every rule on, it fits with {extra} more exam day{'s' if extra > 1 else ''}."})
+            break
+    return out
+
+
 def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
-    """The class rows and sessions whose rules can't all hold together."""
+    """The class rows and sessions whose rules can't all hold together; the rule at fault when they can't be named in time."""
+    reasons = _named(problem, time_limit_s)
+    return reasons if reasons else diagnose(problem, time_limit_s)
+
+
+def _named(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
     mm = _build(problem, families=True)
     if not mm.literals:
         return []

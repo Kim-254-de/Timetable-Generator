@@ -65,9 +65,18 @@ def exam_rooms(db: Session, term: Term) -> list[ExamRoom]:
     ]
 
 
+def postgraduate_room(rooms: list[ExamRoom], term: Term) -> ExamRoom | None:
+    """The term's postgraduate room ("TC 1", however it is written), when it is open for exams."""
+    from app.services.master import room_key
+
+    key = room_key(term.exam_postgraduate_room or "")
+    return next((r for r in rooms if key and room_key(r.code) == key), None)
+
+
 def period_dict(db: Session, term: Term) -> dict[str, Any]:
     days = exam_days(term)
     rooms = exam_rooms(db, term)
+    graduate = postgraduate_room(rooms, term)
     return {
         "exam_start": term.exam_start.isoformat() if term.exam_start else None,
         "exam_end": term.exam_end.isoformat() if term.exam_end else None,
@@ -75,6 +84,11 @@ def period_dict(db: Session, term: Term) -> dict[str, Any]:
         "exam_days_off": term.exam_days_off,
         "exam_sessions": term.exam_sessions,
         "exam_spacing": term.exam_spacing,
+        "exam_postgraduate_room": term.exam_postgraduate_room,
+        # The room as the rooms list has it, and its building; None when it isn't open for exams.
+        "postgraduate_room": (
+            {"code": graduate.code, "building": graduate.block, "seats": graduate.seats} if graduate else None
+        ),
         "days": [d.isoformat() for d in days],
         "slots": len(days) * len(term.exam_sessions or []),
         "rooms": len(rooms),
@@ -101,7 +115,7 @@ def update_period(db: Session, identity: Identity, term: Term, fields: dict[str,
                 raise ApiError(422, "VALIDATION_ERROR", "Sessions must be in order and not overlap.")
             previous = s["end"]
     before = period_dict(db, term)
-    for key in ("exam_start", "exam_end", "exam_weekdays", "exam_sessions", "exam_spacing"):
+    for key in ("exam_start", "exam_end", "exam_weekdays", "exam_sessions", "exam_spacing", "exam_postgraduate_room"):
         if key in fields:
             setattr(term, key, fields[key])
     if "exam_days_off" in fields:

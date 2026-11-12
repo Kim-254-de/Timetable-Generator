@@ -54,7 +54,6 @@ export const keys = {
 const post = <T>(url: string, body?: unknown) => api.post<T>(url, body ?? {}).then((r) => r.data)
 const patch = <T>(url: string, body: unknown) => api.patch<T>(url, body).then((r) => r.data)
 const put = <T>(url: string, body: unknown) => api.put<T>(url, body).then((r) => r.data)
-const del = <T>(url: string) => api.delete<T>(url).then((r) => r.data)
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => get<Me>('/auth/me'), retry: false })
 export const useSmartttTerms = () => useQuery({ queryKey: keys.smartttTerms, queryFn: () => get<SmartttTerm[]>('/smarttt/terms') })
@@ -357,7 +356,7 @@ function useExamMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Prom
 }
 
 export const usePatchExamPeriod = (termId: string) =>
-  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing'>>) =>
+  useExamMutation(termId, (body: Partial<Pick<ExamPeriod, 'exam_start' | 'exam_end' | 'exam_weekdays' | 'exam_days_off' | 'exam_sessions' | 'exam_spacing' | 'exam_postgraduate_room'>>) =>
     patch<ExamPeriod>(`/terms/${termId}/exam-period`, body))
 
 export interface PaperRowInput { programme: string; year: number; semester: number; stream: string; students: number }
@@ -366,16 +365,16 @@ export const useSetPaperRows = (termId: string) =>
   useExamMutation(termId, ({ paperId, rows }: { paperId: string; rows: PaperRowInput[] }) =>
     put(`/terms/${termId}/exam-papers/${paperId}/rows`, { rows }))
 
-export const useDeleteDirectorPaper = (termId: string) =>
-  useExamMutation(termId, (paperId: string) => del(`/terms/${termId}/director-papers/${paperId}`))
+export const useRemoveDirectorPapers = (termId: string) =>
+  useExamMutation(termId, (paperIds: string[]) => post<{ deleted: number }>(`/terms/${termId}/director-papers/remove`, { paper_ids: paperIds }))
 
 export const useSetDirectorInvigilators = (termId: string) =>
   useExamMutation(termId, ({ paperId, invigilators }: { paperId: string; invigilators: Record<string, { staff_number: string; name: string }> }) =>
     put(`/terms/${termId}/director-papers/${paperId}/invigilators`, { invigilators }))
 
 export const useChangeExamVenue = (termId: string, draftId: string) =>
-  useExamMutation(termId, ({ paperId, from_room, to_room }: { paperId: string; from_room: string; to_room: string }) =>
-    patch<ExamDraftSummary>(`/exam-drafts/${draftId}/papers/${paperId}/venue`, { from_room, to_room }))
+  useExamMutation(termId, ({ paperId, from_room, to_room, make_room = false }: { paperId: string; from_room: string; to_room: string; make_room?: boolean }) =>
+    patch<ExamDraftSummary>(`/exam-drafts/${draftId}/papers/${paperId}/venue`, { from_room, to_room, make_room }))
 
 
 export const useSetPaperCategory = (termId: string) =>
