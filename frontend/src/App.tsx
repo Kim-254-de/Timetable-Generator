@@ -335,7 +335,9 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const submit = (e: FormEvent) => { e.preventDefault(); login.mutate({ identifier, password }) }
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+    <main className="relative flex min-h-screen items-center justify-center bg-surface px-4">
+      {/* The theme switch on the sign-in page too, as in the top bar. */}
+      <div className="absolute right-4 top-4"><ThemeToggle /></div>
       <form onSubmit={submit} className="w-full max-w-md overflow-hidden rounded-xl border border-line bg-card shadow-sm">
         <div className="flex items-center gap-3 border-b-[3px] border-gold-500 bg-brand-800 px-8 py-6 text-white">
           <span className="grid size-11 place-items-center rounded-xl bg-gold-500 text-on-gold"><CalendarRange className="size-6" aria-hidden /></span>
