@@ -12,6 +12,7 @@ Allocator that used to serve it, in the same shape).
 
 from __future__ import annotations
 
+import base64
 import logging
 import threading
 from typing import Any
@@ -66,6 +67,55 @@ class TeachingClient:
             raise ApiError(503, "ATTENDANCE_UNAVAILABLE", "Smart Attendance could not answer. Try again.")
         body = response.json()
         return body.get("data") if isinstance(body, dict) and "success" in body else body
+
+    def _post(self, path: str, body: dict[str, Any]) -> Any:
+        """Like _get, but Attendance's own refusal (a bad file, an unknown department) is passed on as it said it."""
+        if not self._configured:
+            raise ApiError(503, "ATTENDANCE_MISCONFIGURED", "The Generator is not set up to reach Smart Attendance.")
+        try:
+            # Reading a letter asks SMARTTT for every unit on it: allow longer than a plain read.
+            response = self._http.post(PREFIX + path, json=body, timeout=max(60.0, float(self._http.timeout.read or 0)))
+        except httpx.HTTPError as exc:
+            logger.warning("Attendance POST %s failed: %s", path, exc)
+            raise ApiError(
+                503, "ATTENDANCE_UNAVAILABLE", "Smart Attendance could not be reached. Try again shortly."
+            ) from exc
+        if response.status_code in (401, 403):
+            logger.error("Attendance refused the Generator's key (%s -> %s)", path, response.status_code)
+            raise ApiError(
+                503,
+                "ATTENDANCE_MISCONFIGURED",
+                "The Generator is not connected to Smart Attendance correctly. Contact the administrator.",
+            )
+        try:
+            payload: Any = response.json()
+        except ValueError:
+            payload = {}
+        if 400 <= response.status_code < 500:
+            error = payload.get("error") if isinstance(payload, dict) else None
+            error = error if isinstance(error, dict) else {}
+            message = str(error.get("message") or "Smart Attendance refused it.")
+            details = error.get("details")
+            if isinstance(details, list) and details and isinstance(details[0], dict) and details[0].get("message"):
+                message = f"{message} {details[0]['message']}"
+            status = 404 if response.status_code == 404 else 409 if response.status_code == 409 else 422
+            raise ApiError(status, str(error.get("code") or "ATTENDANCE_REFUSED"), message)
+        if response.status_code >= 400:
+            logger.warning("Attendance POST %s answered %s", path, response.status_code)
+            raise ApiError(503, "ATTENDANCE_UNAVAILABLE", "Smart Attendance could not answer. Try again.")
+        return payload.get("data") if isinstance(payload, dict) and "success" in payload else payload
+
+    def read_exam_list(self, term_id: str, account_id: str, department_code: str, docx: bytes) -> dict[str, Any]:
+        """A department's moderation letter read and reviewed as on its own Exams tab; nothing is stored."""
+        body = {"account_id": account_id, "department_code": department_code, "file": base64.b64encode(docx).decode()}
+        return dict(self._post(f"/terms/{term_id}/exam-list/read", body) or {})
+
+    def save_exam_list(
+        self, term_id: str, account_id: str, department_code: str, papers: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """The reviewed papers saved into the department's list, which is then published in the Director's name."""
+        body = {"account_id": account_id, "department_code": department_code, "papers": papers}
+        return dict(self._post(f"/terms/{term_id}/exam-list", body) or {})
 
     def submissions(self, term_id: str) -> dict[str, Any]:
         """Published departments (courses, units, groups with lecturers) and the ones not published yet."""

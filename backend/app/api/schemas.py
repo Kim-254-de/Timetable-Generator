@@ -277,3 +277,29 @@ class ExamSwitchBody(_Strict):
 
     action: Literal["schedule_switch", "cancel_switch", "switch_now", "schedule_close", "cancel_close", "close_now"]
     at: datetime | None = None
+
+
+class LetterClassBody(_Strict):
+    programme: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    year: Annotated[int, Field(ge=1, le=10)]
+    semester: Annotated[int, Field(ge=1, le=3)]
+    students: Annotated[int, Field(ge=1, le=5000)]
+
+
+class LetterPaperBody(BaseModel):
+    """One reviewed line of a moderation letter, in Smart Attendance's names (it checks them again)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    codes: Annotated[
+        list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=30)]],
+        Field(min_length=1, max_length=6),
+    ]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    sitting: Literal["regular", "odel"]
+    classes: Annotated[list[LetterClassBody], Field(max_length=50)] | None = None
+    replaces_paper_id: Annotated[str | None, Field(alias="replacesPaperId")] = None
+
+
+class ExamLetterBody(_Strict):
+    department_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
+    papers: Annotated[list[LetterPaperBody], Field(min_length=1, max_length=1500)]
