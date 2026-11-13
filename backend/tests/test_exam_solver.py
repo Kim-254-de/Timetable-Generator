@@ -641,13 +641,23 @@ def test_the_first_or_last_session_is_a_preference_for_a_common_paper():
     for p in (big, shared):
         assert problem.allowed_slots(p) == [0, 1, 2] and not problem.edges_only(p)
     seat = [Seat("BIG", "BIG-1", "A", 3500)]
-    assert check(problem, {"BIG": 1, "SHARED": 0}, seat + [Seat("SHARED", "BIT1", "A", 10), Seat("SHARED", "BSC1", "A", 10)]) == []
+    assert (
+        check(
+            problem, {"BIG": 1, "SHARED": 0}, [*seat, Seat("SHARED", "BIT1", "A", 10), Seat("SHARED", "BSC1", "A", 10)]
+        )
+        == []
+    )
     assert soft_scores(problem, {"BIG": 1, "SHARED": 0}, seat)["common_midday"] == 1
     assert soft_scores(problem, {"BIG": 0, "SHARED": 2}, seat)["common_midday"] == 0
 
 
 def test_the_solver_seats_common_papers_first_or_last_when_it_can():
-    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10)), _paper("S", ("BIT1", 5), ("BSC1", 5))]
+    papers = [
+        _big("BIG1", 3500),
+        _big("BIG2", 3400),
+        _paper("R", ("BIG1-1", 10)),
+        _paper("S", ("BIT1", 5), ("BSC1", 5)),
+    ]
     problem = _common_problem(papers, days=2, rooms=[_room("A", 5000)])
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
@@ -675,7 +685,8 @@ def _too_tight() -> ExamProblem:
 
     pairs = list(itertools.combinations(range(5), 2))
     papers = [
-        replace(_paper(f"C{i}", *[(f"{a}-{b}", 1) for a, b in pairs if i in (a, b)]), kind=POSTGRADUATE) for i in range(5)
+        replace(_paper(f"C{i}", *[(f"{a}-{b}", 1) for a, b in pairs if i in (a, b)]), kind=POSTGRADUATE)
+        for i in range(5)
     ]
     return _common_problem(papers, days=2)
 

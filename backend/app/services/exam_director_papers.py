@@ -112,13 +112,26 @@ def remove_many(db: Session, identity: Identity, term: Term, paper_ids: list[str
     for paper in papers:
         db.execute(delete(ExamPlacement).where(ExamPlacement.paper_id == paper.id))
         db.delete(paper)
-    audit(db, identity, "exam_director_paper.delete_many", "exam_paper", str(term.id), {"codes": [p.codes for p in papers]}, None)
+    audit(
+        db,
+        identity,
+        "exam_director_paper.delete_many",
+        "exam_paper",
+        str(term.id),
+        {"codes": [p.codes for p in papers]},
+        None,
+    )
     db.commit()
     return len(papers)
 
 
-def set_invigilators(db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """Who invigilates: "" is the main invigilator, a room code that extra room's. SMARTTT checks the staff numbers on publishing."""
+def set_invigilators(
+    db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]
+) -> dict[str, Any]:
+    """Who invigilates: "" is the main invigilator, a room code that extra room's.
+
+    SMARTTT checks the staff numbers on publishing.
+    """
     paper = _director_paper(db, term, paper_id)
     paper.director_invigilators = {
         room: {"staff_number": v["staff_number"].strip().upper(), "name": v.get("name", "").strip()}

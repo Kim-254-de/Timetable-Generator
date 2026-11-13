@@ -210,12 +210,13 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom], postgraduate_room: 
                 if can:
                     room = min(
                         can,
-                        key=lambda r, lot_size=students: (
+                        # min() ranks the rooms now, inside this loop pass, so `students` is current.
+                        key=lambda r: (
                             bool(group) and r.id not in own,
                             r.id in others,
                             r.id not in paper_rooms[paper.id],
                             left[r.id] == r.seats,  # unused rooms last: small papers share
-                            left[r.id] - lot_size,
+                            left[r.id] - students,
                             r.code,
                         ),
                     )

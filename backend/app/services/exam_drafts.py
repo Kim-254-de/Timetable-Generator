@@ -224,8 +224,8 @@ def change_venue(
             if pid in by_paper
         ]
         try:
-            for s in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
-                new_seats.setdefault(s.paper_id, []).append(s)
+            for new_seat in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
+                new_seats.setdefault(new_seat.paper_id, []).append(new_seat)
         except seating.SeatingError as exc:
             raise ApiError(
                 409,
