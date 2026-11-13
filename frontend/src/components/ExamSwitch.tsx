@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { btn } from '@/components/ui'
 import clsx from 'clsx'
 import { errorMessage } from '@/lib/api'
 import { useExamSwitch, useExamSwitchAction } from '@/lib/queries'
@@ -54,10 +55,10 @@ export function ExamSwitch({ termId }: { termId: string }) {
               </label>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => run('schedule_switch', withZone(switchAt || local(s.switch_at ?? s.defaults.switch_at)))} disabled={act.isPending}
-                  className="rounded-md bg-brand px-3 py-2 text-white disabled:opacity-50">{s.switch_at ? 'Move the switch' : 'Schedule the switch'}</button>
-                {s.switch_at && <button onClick={() => run('cancel_switch')} disabled={act.isPending} className="rounded-md border border-line px-3 py-2">Cancel it</button>}
+                  className={btn.primary}>{s.switch_at ? 'Move the switch' : 'Schedule the switch'}</button>
+                {s.switch_at && <button onClick={() => run('cancel_switch')} disabled={act.isPending} className={btn.secondary}>Cancel it</button>}
                 <button onClick={() => run('switch_now', undefined, 'Switch SMARTTT to exams now, for everyone?')} disabled={act.isPending}
-                  className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-warning">Switch now</button>
+                  className={clsx(btn.secondary, 'border-warning/40 bg-warning-soft text-warning')}>Switch now</button>
               </div>
             </div>
           )}
@@ -69,10 +70,10 @@ export function ExamSwitch({ termId }: { termId: string }) {
               </label>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => run('schedule_close', withZone(closeAt || local(s.close_at ?? s.defaults.close_at)))} disabled={act.isPending}
-                  className="rounded-md border border-line px-3 py-2">{s.close_at ? 'Move the close' : 'Schedule the close'}</button>
-                {s.close_at && <button onClick={() => run('cancel_close')} disabled={act.isPending} className="rounded-md border border-line px-3 py-2">Cancel it</button>}
+                  className={btn.secondary}>{s.close_at ? 'Move the close' : 'Schedule the close'}</button>
+                {s.close_at && <button onClick={() => run('cancel_close')} disabled={act.isPending} className={btn.secondary}>Cancel it</button>}
                 <button onClick={() => run('close_now', undefined, 'Close the exam period now? SMARTTT goes back to the teaching timetable.')} disabled={act.isPending}
-                  className="rounded-md border border-line px-3 py-2">Close now</button>
+                  className={btn.secondary}>Close now</button>
               </div>
               <p className="text-xs text-muted">The exam period also closes on its own when the next term's teaching timetable is published.</p>
             </div>

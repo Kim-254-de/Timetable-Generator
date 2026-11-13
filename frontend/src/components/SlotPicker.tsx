@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { btn } from '@/components/ui'
 import clsx from 'clsx'
 import { DAYS, FIRST_HOUR, HOURS } from '@/lib/format'
 import { Dialog } from './Dialog'
@@ -53,9 +54,9 @@ export function SlotPicker({
       </table>
       {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
+        <button type="button" onClick={onClose} className={btn.secondary}>Cancel</button>
         <button type="button" disabled={busy} onClick={() => onSave([...slots].sort((a, b) => a - b))}
-          className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          className={btn.primary}>Save</button>
       </div>
     </Dialog>
   )

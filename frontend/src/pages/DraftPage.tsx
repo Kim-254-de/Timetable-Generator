@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { Download, X } from 'lucide-react'
+import { X } from 'lucide-react'
+import { DownloadMenu } from '@/components/DownloadMenu'
 import { TimetableGrid } from '@/components/TimetableGrid'
+import { PageTitle, btn } from '@/components/ui'
 import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, DAY_NAMES, FIRST_HOUR, HOURS, RULES, SCORE_LABELS, hh, slotDay, slotHour } from '@/lib/format'
 import { exportUrl, useCopyDraft, useGrid, useMoveSession, usePublish, useResolve, useRooms, useTerm } from '@/lib/queries'
@@ -47,20 +49,18 @@ export function DraftPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link to={`/terms/${termId}`} className="text-sm text-brand-ink">← Back to the term</Link>
-          <h1 className="text-xl font-semibold">{draft.name}</h1>
+          <Link to={`/terms/${termId}?step=5`} className={btn.quiet}>← Back to the term</Link>
+          <PageTitle title={draft.name} crumb="Teaching timetable" />
           <p className="text-sm text-muted">
             {draft.session_count} sessions · {draft.pinned} pinned · <span className="capitalize">{draft.status}</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted">Download:</span>
-          {([['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']] as const).map(([format, label]) => (
-            <a key={format} href={exportUrl(draftId, view, format)}
-              className="inline-flex items-center gap-1 rounded-md border border-line bg-card px-3 py-2">
-              <Download size={16} /> {label}
-            </a>
-          ))}
+          <DownloadMenu note={`As shown: by ${VIEWS.find(([v]) => v === view)?.[1].toLowerCase()}`} items={[
+            { label: 'PDF', href: exportUrl(draftId, view, 'pdf') },
+            { label: 'Word', href: exportUrl(draftId, view, 'docx') },
+            { label: 'Excel', href: exportUrl(draftId, view, 'xlsx') },
+          ]} />
           {editable ? (
             <>
               {(term.data?.publications.length ?? 0) > 0 && (
@@ -69,8 +69,8 @@ export function DraftPage() {
                   Keep the published classes
                 </label>
               )}
-              <button onClick={() => resolve.mutate({ time_limit_s: 600, keep_published: keepPublished }, { onSuccess: () => navigate(`/terms/${termId}?tab=runs`) })}
-                disabled={resolve.isPending} className="rounded-md border border-line bg-card px-3 py-2">
+              <button onClick={() => resolve.mutate({ time_limit_s: 600, keep_published: keepPublished }, { onSuccess: () => navigate(`/terms/${termId}?step=4`) })}
+                disabled={resolve.isPending} className={btn.secondary}>
                 {keepPublished ? 'Re-solve around the published classes' : 'Re-solve around pins'}
               </button>
               {needsReplace && (
@@ -80,14 +80,14 @@ export function DraftPage() {
                 </label>
               )}
               <button onClick={() => publish.mutate(replaceUploaded)} disabled={!draft.publishable || publish.isPending}
-                className="rounded-md bg-brand px-4 py-2 font-medium text-white disabled:opacity-50"
+                className={btn.primary}
                 title={draft.publishable ? 'Approve this timetable and publish it (sent to SMARTTT when connected)' : 'Fix the hard-rule problems first'}>
                 {publish.isPending ? 'Publishing…' : 'Approve and publish'}
               </button>
             </>
           ) : (
             <button onClick={() => copy.mutate(undefined, { onSuccess: (d) => navigate(`/terms/${termId}/drafts/${d.id}`) })}
-              className="rounded-md border border-line bg-card px-3 py-2">Copy to a new draft</button>
+              className={btn.secondary}>Copy to a new draft</button>
           )}
         </div>
       </div>
@@ -195,11 +195,11 @@ function CellPanel({ cell, termId, editable, saving, onClose, onSave }: CellPane
             </select>
           </label>
           <div className="flex justify-between gap-2">
-            <button onClick={() => onSave({ pinned: !cell.pinned })} disabled={saving} className="rounded-md border border-line px-3 py-2 text-sm">
+            <button onClick={() => onSave({ pinned: !cell.pinned })} disabled={saving} className={btn.secondary}>
               {cell.pinned ? 'Unpin' : 'Pin here'}
             </button>
             <button onClick={() => onSave({ day, start_time: hh(hour), room_id: room })} disabled={saving}
-              className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+              className={btn.primary}>
               {saving ? 'Checking…' : 'Move'}
             </button>
           </div>

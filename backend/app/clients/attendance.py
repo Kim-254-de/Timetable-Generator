@@ -60,6 +60,15 @@ SIGN_IN_WRONG_ADDRESS = (
 )
 SIGN_IN_UNREACHABLE = "Smart Attendance could not be reached (it may be starting up). Try again in a minute."
 SIGN_IN_FAILED = "Smart Attendance could not check your sign-in just now. Try again in a minute."
+PROFILE_NOT_SUPPORTED = (
+    "Smart Attendance can't change your name or password from here yet: it needs updating. Contact the "
+    "system administrator."
+)
+NAME_REFUSED = "Smart Attendance did not accept that name. Use letters, spaces, apostrophes, hyphens and full stops."
+NEW_LOGIN_REFUSED = (
+    "Smart Attendance did not accept that password. Use at least 6 characters with a lowercase letter, an "
+    "uppercase letter and a digit."
+)
 
 
 def _base_url(url: str) -> str:
@@ -172,6 +181,45 @@ class AttendanceClient:
             logger.warning("Sign-in: Attendance /identity answered %s", response.status_code)
             raise AttendanceSignInError(SIGN_IN_FAILED)
         return dict(self._data(response) or {})
+
+    # -- the Director's own account: name and password live in Attendance ------------------
+
+    def _gone_or_too_old(self, account_id: str) -> None:
+        """A 404: the account is gone (None from identity), or Attendance predates these calls."""
+        if self.identity(account_id) is not None:
+            logger.error("Profile: Attendance has no profile calls; it needs updating")
+            raise AttendanceSignInError(PROFILE_NOT_SUPPORTED)
+
+    def rename(self, account_id: str, full_name: str) -> dict[str, Any] | None:
+        """The account's {account, timetabling_office} under its new name; None once it is gone."""
+        response = self._auth_request("PATCH", "/identity", json={"account_id": account_id, "full_name": full_name})
+        if response.status_code == 404:
+            self._gone_or_too_old(account_id)
+            return None
+        if response.status_code == 400:
+            raise AttendanceSignInError(NAME_REFUSED)
+        if response.status_code >= 400:
+            logger.warning("Profile: Attendance PATCH /identity answered %s", response.status_code)
+            raise AttendanceSignInError(SIGN_IN_FAILED)
+        return dict(self._data(response) or {})
+
+    def change_password(self, account_id: str, current_password: str, new_password: str) -> str | None:
+        """ "changed", "wrong_password" or "same_password"; None once the account is gone."""
+        response = self._auth_request(
+            "POST",
+            "/password",
+            json={"account_id": account_id, "current_password": current_password, "new_password": new_password},
+        )
+        if response.status_code == 404:
+            self._gone_or_too_old(account_id)
+            return None
+        if response.status_code == 400:
+            raise AttendanceSignInError(NEW_LOGIN_REFUSED)
+        if response.status_code >= 400:
+            logger.warning("Profile: Attendance POST /password answered %s", response.status_code)
+            raise AttendanceSignInError(SIGN_IN_FAILED)
+        data = dict(self._data(response) or {})
+        return "changed" if data.get("changed") else str(data.get("reason") or "wrong_password")
 
 
 _client: AttendanceClient | None = None
