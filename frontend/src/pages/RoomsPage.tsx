@@ -25,6 +25,7 @@ const COLUMNS: BulkColumn[] = [
 export function RoomsPage() {
   const rooms = useRoomList()
   const remove = useDeleteRoom()
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const bulk = useBulkRooms()
   const sync = useSyncRooms()
   const [query, setQuery] = useState('')
@@ -109,16 +110,27 @@ export function RoomsPage() {
                     <td className="px-3 py-2.5"><Pill>{ROOM_TYPE_NAMES[r.room_type]}</Pill></td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{r.capacity}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
-                      {r.for_exams ? (r.exam_seats ?? <span className="text-muted">× spacing</span>) : <span className="text-muted">Not for exams</span>}
+                      {r.for_exams
+                        ? (r.exam_seats ?? <span title="Capacity x the term's spacing (0.9 unless the term changes it)">{Math.floor(r.capacity * 0.9)} <span className="text-xs text-muted">auto</span></span>)
+                        : <span className="text-muted">Not for exams</span>}
                     </td>
                     <td className="px-3 py-2.5">
                       <button type="button" onClick={() => setHours(r)} className={btn.quiet}>{r.unavailable.length ? `${r.unavailable.length} hours` : 'None'}</button>
                     </td>
                     <td className="whitespace-nowrap px-5 py-2 text-right">
                       <button type="button" onClick={() => setEditing(r)} className={btn.quiet}>Edit</button>
-                      <button type="button" onClick={() => { if (window.confirm(`Delete ${r.code}?`)) remove.mutate(r.id) }}
-                        className={clsx(btn.quiet, 'text-danger hover:bg-danger-soft')}
-                        title={r.in_use ? `Used by ${r.in_use} classes in saved timetables` : undefined}>Delete</button>
+                      {confirmDelete === r.id ? (
+                        <span role="alertdialog" aria-label={`Delete ${r.code}?`} className="ml-1 inline-flex items-center gap-1 rounded-lg bg-danger-soft px-2 py-1 text-sm text-danger">
+                          Delete {r.code}?{r.in_use ? ` Used by ${r.in_use} classes.` : ''}
+                          <button type="button" onClick={() => remove.mutate(r.id, { onSettled: () => setConfirmDelete(null) })}
+                            className={clsx(btn.quiet, 'font-semibold text-danger hover:bg-card')}>Delete</button>
+                          <button type="button" onClick={() => setConfirmDelete(null)} className={btn.quiet}>Keep</button>
+                        </span>
+                      ) : (
+                        <button type="button" onClick={() => setConfirmDelete(r.id)}
+                          className={clsx(btn.quiet, 'text-danger hover:bg-danger-soft')}
+                          title={r.in_use ? `Used by ${r.in_use} classes in saved timetables` : undefined}>Delete</button>
+                      )}
                     </td>
                   </tr>
                 ))}
