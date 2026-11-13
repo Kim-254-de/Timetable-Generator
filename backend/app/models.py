@@ -474,7 +474,8 @@ class ExamPaper(Base):
     invigilator_staff_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # The Director's choice of category; empty: worked out from the codes and class rows.
     category_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # A paper the Director uploaded (allocator_ref "director:..."): the invigilators they named, by room ("" is the main one).
+    # A paper the Director uploaded (allocator_ref "director:..."): the invigilators they named,
+    # by room ("" is the main one).
     director_invigilators: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
 
     @property

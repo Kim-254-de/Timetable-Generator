@@ -1,4 +1,7 @@
-"""Venues changed on the draft, and the papers the Director uploaded before departments did it for health and nursing."""
+"""
+Venues changed on the draft, and the papers the Director uploaded before departments did it for
+health and nursing.
+"""
 
 from __future__ import annotations
 
@@ -18,8 +21,15 @@ def _earlier_upload(db: Session, term_id: str, codes: list[str]) -> str:
     department = db.scalars(select(Department)).first()
     assert department is not None
     paper = ExamPaper(
-        term_id=uuid.UUID(term_id), allocator_ref=f"{DIRECTOR_REF}{uuid.uuid4().hex}", department_id=department.id,
-        codes=codes, title="Uploaded earlier", sitting="regular", examiner_name="", notes="", director_invigilators={},
+        term_id=uuid.UUID(term_id),
+        allocator_ref=f"{DIRECTOR_REF}{uuid.uuid4().hex}",
+        department_id=department.id,
+        codes=codes,
+        title="Uploaded earlier",
+        sitting="regular",
+        examiner_name="",
+        notes="",
+        director_invigilators={},
     )
     db.add(paper)
     db.commit()
@@ -46,7 +56,12 @@ def test_a_health_room_is_like_any_other_and_the_old_upload_is_gone(client, teac
     assert "NUR 1" in {r["code"] for r in grid["exam_rooms"]}
     paper = next(p for p in grid["papers"] if p["codes"] == "COSC 301")
     if {s["room"] for s in paper["seating"]} != {"NUR 1"}:
-        ok(client.patch(f"/api/exam-drafts/{draft}/papers/{paper['id']}/venue", json={"from_room": paper["seating"][0]["room"], "to_room": "NUR 1"}))
+        ok(
+            client.patch(
+                f"/api/exam-drafts/{draft}/papers/{paper['id']}/venue",
+                json={"from_room": paper["seating"][0]["room"], "to_room": "NUR 1"},
+            )
+        )
     assert client.post(f"/api/terms/{term_id}/health-papers", json={"papers": []}).status_code in (404, 405)
     assert client.post(f"/api/terms/{term_id}/health-papers/read", json={"file": "x"}).status_code in (404, 405)
 
@@ -70,7 +85,12 @@ def test_the_director_changes_a_venue_on_the_draft_checked_and_kept(client, teac
     assert grid["draft"]["violations"] == []
     # Moving another paper into that session re-seats it around the chosen venue.
     mover = next(p for p in grid["papers"] if p["seating"] and p["codes"] == "EPSC 121")
-    ok(client.patch(f"/api/exam-drafts/{draft}/papers/{mover['id']}", json={"day": moved["day"], "session": moved["session"], "pinned": True}))
+    ok(
+        client.patch(
+            f"/api/exam-drafts/{draft}/papers/{mover['id']}",
+            json={"day": moved["day"], "session": moved["session"], "pinned": True},
+        )
+    )
     grid = ok(client.get(f"/api/exam-drafts/{draft}"))
     assert {s["room"] for s in next(p for p in grid["papers"] if p["id"] == paper["id"])["seating"]} == {other}
     assert grid["draft"]["violations"] == []
@@ -84,11 +104,16 @@ def test_a_venue_with_no_seats_left_is_refused(client, teaching, smarttt):
     draft = _generate(client, term_id)
     grid = ok(client.get(f"/api/exam-drafts/{draft}"))
     paper = next(p for p in grid["papers"] if p["seating"])
-    refused = client.patch(f"/api/exam-drafts/{draft}/papers/{paper['id']}/venue", json={"from_room": paper["seating"][0]["room"], "to_room": "TINY"})
+    refused = client.patch(
+        f"/api/exam-drafts/{draft}/papers/{paper['id']}/venue",
+        json={"from_room": paper["seating"][0]["room"], "to_room": "TINY"},
+    )
     assert refused.status_code == 409 and "TINY" in refused.text
 
 
-def test_a_paper_uploaded_earlier_stays_until_a_department_lists_its_unit_or_the_director_removes_it(client, teaching, smarttt, db: Session):
+def test_a_paper_uploaded_earlier_stays_until_a_department_lists_its_unit_or_the_director_removes_it(
+    client, teaching, smarttt, db: Session
+):
     sign_in(client)
     term_id = setup_exams(client, teaching)
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
@@ -119,10 +144,17 @@ def test_the_director_names_invigilators_of_a_paper_uploaded_earlier(client, tea
     grid = ok(client.get(f"/api/exam-drafts/{draft}"))
     nurs = next(p for p in grid["papers"] if p["codes"] == "NURS 101")
     assert nurs["invigilators"][""]["name"] == "Dr. X" and nurs["director_paper"] is True
-    assert client.put(f"/api/terms/{term_id}/director-papers/{department_paper}/invigilators", json={"invigilators": {}}).status_code == 404
+    assert (
+        client.put(
+            f"/api/terms/{term_id}/director-papers/{department_paper}/invigilators", json={"invigilators": {}}
+        ).status_code
+        == 404
+    )
 
 
-def test_the_director_enters_numbers_on_any_paper_and_import_keeps_them_until_the_department_sends_one(client, teaching, smarttt):
+def test_the_director_enters_numbers_on_any_paper_and_import_keeps_them_until_the_department_sends_one(
+    client, teaching, smarttt
+):
     sign_in(client)
     term_id = setup_exams(client, teaching)
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
@@ -137,7 +169,17 @@ def test_the_director_enters_numbers_on_any_paper_and_import_keeps_them_until_th
     first = paper["rows"][0]
     typed = {k: first[k] for k in ("programme", "year", "semester", "stream")}
     assert client.put(url, json={"rows": [{**typed, "students": 40}, {**typed, "students": 41}]}).status_code == 422
-    ok(client.put(url, json={"rows": [{**typed, "students": 40}, {"programme": "bsc.added", "year": 2, "semester": 1, "stream": "", "students": 6}]}))
+    ok(
+        client.put(
+            url,
+            json={
+                "rows": [
+                    {**typed, "students": 40},
+                    {"programme": "bsc.added", "year": 2, "semester": 1, "stream": "", "students": 6},
+                ]
+            },
+        )
+    )
     assert _papers(client, term_id)["COSC 301"]["students"] == 46
 
     ok(client.post(f"/api/terms/{term_id}/exams/import"))

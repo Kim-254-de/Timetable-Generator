@@ -249,10 +249,7 @@ def _with_directors_numbers(
         return sitting
     entered = {r.class_row_id: r for r in paper.rows if r.edited and r.students > 0}
     sent = {i for i, _, _, _ in sitting}
-    out = [
-        (i, entered[i].students, o, g) if n == 0 and i in entered else (i, n, o, g)
-        for i, n, o, g in sitting
-    ]
+    out = [(i, entered[i].students, o, g) if n == 0 and i in entered else (i, n, o, g) for i, n, o, g in sitting]
     out += [(i, r.students, r.odel, r.guessed) for i, r in entered.items() if i not in sent]
     return sorted(out)
 
@@ -303,7 +300,9 @@ def set_category(db: Session, identity: Identity, term: Term, paper_id: str, cat
     """The Director's choice of a paper's category; None goes back to working it out."""
     if category is not None and category not in CATEGORIES:
         raise ApiError(422, "VALIDATION_ERROR", f"A paper is {', '.join(CATEGORIES)}.")
-    paper = next((p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)) if str(p.id) == paper_id), None)
+    paper = next(
+        (p for p in db.scalars(select(ExamPaper).where(ExamPaper.term_id == term.id)) if str(p.id) == paper_id), None
+    )
     if paper is None:
         raise ApiError(404, "NOT_FOUND", "No such paper in this term.")
     before = paper.category_override

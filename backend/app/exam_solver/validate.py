@@ -30,7 +30,14 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
             message = f"{p.label} is a {problem.category(p)} paper: it sits in the first or last session of a day."
             out.append(ExamViolation("H-E8", message, (p.id,)))
         if problem.first_week_only(p) and 0 <= t < problem.slots and not problem.in_first_week(t):
-            out.append(ExamViolation("H-E10", f"{p.label} is a postgraduate paper: it sits in the first week of the exam period, by that week's Friday.", (p.id,)))
+            out.append(
+                ExamViolation(
+                    "H-E10",
+                    f"{p.label} is a postgraduate paper: it sits in the first week of the exam period, "
+                    "by that week's Friday.",
+                    (p.id,),
+                )
+            )
 
     by_row_slot: dict[tuple[str, int], list[str]] = defaultdict(list)
     by_row_day: dict[tuple[str, int], list[str]] = defaultdict(list)
@@ -55,8 +62,8 @@ def check(problem: ExamProblem, slots: dict[str, int], seats: list[Seat] | None 
         totals: dict[tuple[str, str], int] = defaultdict(int)
         for s in seats:
             totals[(s.paper_id, s.room_id)] += s.students
-        for (pid, room), n in sorted(totals.items(), key=lambda kv: (kv[1], kv[0][1])):
-            biggest_room[pid] = room
+        for (pid, room_id), _n in sorted(totals.items(), key=lambda kv: (kv[1], kv[0][1])):
+            biggest_room[pid] = room_id
     for (staff, t), ids in by_staff_slot.items():
         if seats is not None:
             places = {biggest_room[i] for i in ids if i in biggest_room}

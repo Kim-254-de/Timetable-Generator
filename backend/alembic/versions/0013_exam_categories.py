@@ -23,7 +23,11 @@ def upgrade() -> None:
     with op.batch_alter_table("rooms") as batch:
         batch.add_column(sa.Column("exam_override", sa.Boolean(), nullable=True))
         batch.add_column(sa.Column("health_unit", sa.Boolean(), nullable=False, server_default=sa.false()))
-    op.execute(sa.text("UPDATE rooms SET exam_override = :no, for_exams = :yes WHERE for_exams = :no").bindparams(no=False, yes=True))
+    op.execute(
+        sa.text("UPDATE rooms SET exam_override = :no, for_exams = :yes WHERE for_exams = :no").bindparams(
+            no=False, yes=True
+        )
+    )
     with op.batch_alter_table("terms") as batch:
         batch.add_column(sa.Column("exam_health_prefixes", sa.JSON(), nullable=False, server_default="[]"))
     with op.batch_alter_table("exam_papers") as batch:

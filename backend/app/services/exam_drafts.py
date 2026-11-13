@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -224,8 +224,8 @@ def change_venue(
             if pid in by_paper
         ]
         try:
-            for s in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
-                new_seats.setdefault(s.paper_id, []).append(s)
+            for seat in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
+                new_seats.setdefault(seat.paper_id, []).append(seat)
         except seating.SeatingError as exc:
             raise ApiError(
                 409,
@@ -350,15 +350,17 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                 ),
                 # A paper the Director uploaded has no department: the Director names its invigilators.
                 "invigilators": (
-                    dict(p.director_invigilators or {}) if p.is_director_paper else (invigilators or {}).get(p.allocator_ref, {})
+                    dict(p.director_invigilators or {})
+                    if p.is_director_paper
+                    else (invigilators or {}).get(p.allocator_ref, {})
                 ),
                 "category": built.problem.category(problems[str(p.id)]),
                 "director_paper": p.is_director_paper,
             }
         )
-        seating = out[-1]["seating"]
-        out[-1]["main_room"] = main_room(seating)
-        out[-1]["extra_rooms"] = sorted({s["room"] for s in seating} - {out[-1]["main_room"]})
+        seats_of_paper = cast("list[dict[str, Any]]", out[-1]["seating"])
+        out[-1]["main_room"] = main_room(seats_of_paper)
+        out[-1]["extra_rooms"] = sorted({s["room"] for s in seats_of_paper} - {out[-1]["main_room"]})
     return {
         "days": [{"date": d.isoformat(), "label": d.strftime("%a %d/%m/%Y").upper()} for d in built.problem.days],
         "sessions": list(term.exam_sessions or []),
@@ -426,9 +428,7 @@ def grid(db: Session, draft: ExamDraft, teaching: TeachingClient | None = None) 
         "version": publication.version if publication else None,
         **rec,
         "rooms": room_sheets(rec),
-        "exam_rooms": [
-            {"code": r.code, "seats": r.seats, "block": r.block} for r in _built(db, draft).problem.rooms
-        ],
+        "exam_rooms": [{"code": r.code, "seats": r.seats, "block": r.block} for r in _built(db, draft).problem.rooms],
     }
 
 

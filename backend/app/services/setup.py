@@ -175,7 +175,12 @@ def set_current(db: Session, smarttt: SmartttClient, identity: Identity, term: T
     if linked and term.smarttt_term_id != linked:
         taken = db.scalar(select(Term).where(Term.smarttt_term_id == linked, Term.id != term.id))
         if taken is not None:
-            raise ApiError(409, "TERM_TAKEN", f"Another term here is already linked to SMARTTT's {response.get('academic_year')} semester {response.get('semester')}.")
+            raise ApiError(
+                409,
+                "TERM_TAKEN",
+                f"Another term here is already linked to SMARTTT's {response.get('academic_year')} "
+                f"semester {response.get('semester')}.",
+            )
         term.smarttt_term_id = linked
     audit(db, identity, "term.set_current", "term", str(term.id), None, {"smarttt_term_id": linked})
     db.commit()

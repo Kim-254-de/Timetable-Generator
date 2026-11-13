@@ -404,9 +404,7 @@ def test_a_class_with_no_number_yet_keeps_its_papers_apart_and_waits_for_a_room(
     # A department's number for a class row doesn't get wiped by a later read with none.
     row = db.scalar(select(ClassRow).where(ClassRow.allocator_ref == "c-cs1"))
     assert row is not None and row.student_count == 120
-    teaching.exam_courses = [
-        {**c, "students": 0} if c["id"] == "c-cs1" else c for c in teaching.exam_courses
-    ]
+    teaching.exam_courses = [{**c, "students": 0} if c["id"] == "c-cs1" else c for c in teaching.exam_courses]
     ok(client.post(f"/api/terms/{term_id}/exams/import"))
     db.expire_all()
     assert row.student_count == 120

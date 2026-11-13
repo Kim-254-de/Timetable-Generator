@@ -104,11 +104,13 @@ def _merge_twins(db: Session, identity: Identity, keep_codes: dict[str, str]) ->
         others = [r for r in rooms if r is not keep]
         before = room_dict(keep)
         choices = [r.exam_override for r in rooms if r.exam_override is not None]
-        keep.exam_override = (False if False in choices else True) if choices else None
+        keep.exam_override = (False not in choices) if choices else None
         keep.exam_seats = keep.exam_seats or next((r.exam_seats for r in others if r.exam_seats), None)
         keep.unavailable = sorted({slot for r in rooms for slot in (r.unavailable or [])})
         for old in others:
-            db.execute(update(DraftSession).where(DraftSession.smarttt_room_id == old.id).values(smarttt_room_id=keep.id))
+            db.execute(
+                update(DraftSession).where(DraftSession.smarttt_room_id == old.id).values(smarttt_room_id=keep.id)
+            )
             db.execute(update(ExamSeat).where(ExamSeat.room_id == old.id).values(room_id=keep.id))
             merged.append(f"{old.code} into {keep.code}")
             audit(db, identity, "room.merge", "room", keep.id, before, {"merged": old.code})
@@ -149,7 +151,9 @@ def create_room(db: Session, identity: Identity, fields: dict[str, Any], commit:
         id=uuid.uuid4().hex, code="", building="", capacity=1, room_type="lecture_hall", unavailable=[], for_exams=True
     )
     _apply_room(db, room, fields)
-    room.exam_override = False if room.exam_override is False else None  # a new room follows the administrator unless kept out
+    room.exam_override = (
+        False if room.exam_override is False else None
+    )  # a new room follows the administrator unless kept out
     db.add(room)
     db.flush()
     audit(db, identity, "room.create", "room", room.id, None, room_dict(room))

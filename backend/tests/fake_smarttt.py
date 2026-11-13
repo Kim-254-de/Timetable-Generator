@@ -192,13 +192,24 @@ class FakeSmarttt:
             return httpx.Response(200, json={"programs": self.programs})
         if route == "/unit-enrolment/":
             units = {c: self.enrolment[c] for c in body["codes"] if c in self.enrolment}
-            return httpx.Response(200, json={"term": None, "units": units, "unknown": [c for c in body["codes"] if c not in self.enrolment]})
+            return httpx.Response(
+                200,
+                json={"term": None, "units": units, "unknown": [c for c in body["codes"] if c not in self.enrolment]},
+            )
         if request.url.path.endswith("/set-current/"):
             if self.down:
                 return httpx.Response(503, json={"detail": "down"})
             body = json.loads(request.content)
             self.set_current_calls.append(body)
-            return httpx.Response(200, json={"id": body.get("term_id") or "smarttt-term-new", "academic_year": body["academic_year"], "semester": body["semester"], "is_current": True})
+            return httpx.Response(
+                200,
+                json={
+                    "id": body.get("term_id") or "smarttt-term-new",
+                    "academic_year": body["academic_year"],
+                    "semester": body["semester"],
+                    "is_current": True,
+                },
+            )
         if route == "/terms/":
             return httpx.Response(200, json={"terms": [TERM]})
         if route == "/snapshot/":

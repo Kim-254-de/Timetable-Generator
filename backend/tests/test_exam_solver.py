@@ -214,7 +214,7 @@ def test_health_and_nursing_papers_are_ordinary_papers():
 def test_common_and_postgraduate_papers_sit_first_or_last_on_any_day():
     papers = [_paper(f"C{i}", ("BIT1", 50), ("BSC1", 50)) for i in range(4)]
     papers += [replace(_paper(f"M{i}", (f"M{i}", 10)), kind=POSTGRADUATE) for i in range(3)]
-    papers += [_paper(f"R{i}", (f"BED1", 30)) for i in range(2)]
+    papers += [_paper(f"R{i}", ("BED1", 30)) for i in range(2)]
     problem = _common_problem(papers)
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
@@ -270,7 +270,7 @@ def test_a_venue_the_director_chose_stays_when_the_session_is_re_seated():
 def test_a_sessions_postgraduate_papers_share_one_room_undergraduates_elsewhere():
     rooms = [_room("SMALL", 30), _room("MID", 60), _room("BIG", 300)]
     graduates = [replace(_paper(f"M{i}", (f"M{i}", 15)), kind=POSTGRADUATE) for i in range(3)]
-    seats = seating.seat_session([_paper("BIT 110", ("BIT1", 20))] + graduates, rooms)
+    seats = seating.seat_session([_paper("BIT 110", ("BIT1", 20)), *graduates], rooms)
     assert {s.room_id for s in seats if s.paper_id.startswith("M")} == {"MID"}  # the smallest that holds all 45
     assert {s.room_id for s in seats if s.paper_id == "BIT 110"} != {"MID"}
 
@@ -282,6 +282,8 @@ def test_postgraduate_papers_too_big_for_one_room_take_few_and_the_score_says_so
     seats = seating.seat_session(graduates, rooms)
     assert len({s.room_id for s in seats}) == 2 and {s.room_id for s in seats} == {"A", "B"}
     assert soft_scores(problem, {"M0": 0, "M1": 0}, seats)["postgraduate_extra_rooms"] == 1
+
+
 def _guessed(pid: str, code: str, row: str = "COSC Y1S1", students: int = 10) -> Paper:
     return Paper(id=pid, label=pid, rows=(Sitting(row, students, guessed=True),), codes=(code,))
 
@@ -389,7 +391,11 @@ def test_one_invigilator_can_cover_a_sessions_postgraduate_papers_in_their_room(
 
 
 def test_their_other_papers_still_go_in_another_session_or_room():
-    papers = [_named("M0", "STF/1", "M0", POSTGRADUATE), _named("M1", "STF/1", "M1", POSTGRADUATE), _named("R", "STF/1", "R")]
+    papers = [
+        _named("M0", "STF/1", "M0", POSTGRADUATE),
+        _named("M1", "STF/1", "M1", POSTGRADUATE),
+        _named("R", "STF/1", "R"),
+    ]
     problem = ExamProblem(papers=papers, days=DAYS[:1], sessions=3, rooms=[_room("A", 100), _room("B", 100)])
     result = solve(problem, time_limit_s=10, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
@@ -635,13 +641,23 @@ def test_the_first_or_last_session_is_a_preference_for_a_common_paper():
     for p in (big, shared):
         assert problem.allowed_slots(p) == [0, 1, 2] and not problem.edges_only(p)
     seat = [Seat("BIG", "BIG-1", "A", 3500)]
-    assert check(problem, {"BIG": 1, "SHARED": 0}, seat + [Seat("SHARED", "BIT1", "A", 10), Seat("SHARED", "BSC1", "A", 10)]) == []
+    assert (
+        check(
+            problem, {"BIG": 1, "SHARED": 0}, [*seat, Seat("SHARED", "BIT1", "A", 10), Seat("SHARED", "BSC1", "A", 10)]
+        )
+        == []
+    )
     assert soft_scores(problem, {"BIG": 1, "SHARED": 0}, seat)["common_midday"] == 1
     assert soft_scores(problem, {"BIG": 0, "SHARED": 2}, seat)["common_midday"] == 0
 
 
 def test_the_solver_seats_common_papers_first_or_last_when_it_can():
-    papers = [_big("BIG1", 3500), _big("BIG2", 3400), _paper("R", ("BIG1-1", 10)), _paper("S", ("BIT1", 5), ("BSC1", 5))]
+    papers = [
+        _big("BIG1", 3500),
+        _big("BIG2", 3400),
+        _paper("R", ("BIG1-1", 10)),
+        _paper("S", ("BIT1", 5), ("BSC1", 5)),
+    ]
     problem = _common_problem(papers, days=2, rooms=[_room("A", 5000)])
     result = solve(problem, time_limit_s=20, workers=2)
     assert result.status in ("OPTIMAL", "FEASIBLE"), result.failure
@@ -669,7 +685,8 @@ def _too_tight() -> ExamProblem:
 
     pairs = list(itertools.combinations(range(5), 2))
     papers = [
-        replace(_paper(f"C{i}", *[(f"{a}-{b}", 1) for a, b in pairs if i in (a, b)]), kind=POSTGRADUATE) for i in range(5)
+        replace(_paper(f"C{i}", *[(f"{a}-{b}", 1) for a, b in pairs if i in (a, b)]), kind=POSTGRADUATE)
+        for i in range(5)
     ]
     return _common_problem(papers, days=2)
 

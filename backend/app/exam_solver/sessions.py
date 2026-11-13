@@ -167,7 +167,12 @@ def _spread_common(mm: _Model, problem: ExamProblem) -> None:
         return
     share = -(-len(common) // days)
     for d in range(days):
-        terms = [x[p.id, t] for p in common for t in range(d * problem.sessions, (d + 1) * problem.sessions) if (p.id, t) in x]
+        terms = [
+            x[p.id, t]
+            for p in common
+            for t in range(d * problem.sessions, (d + 1) * problem.sessions)
+            if (p.id, t) in x
+        ]
         if len(terms) > share:
             over = m.new_int_var(0, len(common), f"commonday[{d}]")
             m.add(sum(terms) - share <= over)
@@ -199,16 +204,16 @@ def _guesses(mm: _Model, problem: ExamProblem) -> None:
     week = [p for p in unknown if problem.first_week_only(p)]
     edge = [p for p in unknown if problem.edges_only(p) and not problem.first_week_only(p)]
     week_slots = len([t for t in problem.edge_slots() if problem.in_first_week(t)])
-    for name, group, count in (
+    for name, members, count in (
         ("any", [p for p in unknown if not problem.edges_only(p)], problem.slots),
         ("edge", edge, len(problem.edge_slots())),
         ("week", week, week_slots),
     ):
-        if len(group) < 2 or not count or not w.spread:
+        if len(members) < 2 or not count or not w.spread:
             continue
-        share = -(-len(group) // count)  # an even share of the sessions, rounded up
+        share = -(-len(members) // count)  # an even share of the sessions, rounded up
         for t in slots:
-            terms = [x[p.id, t] for p in group if (p.id, t) in x]
+            terms = [x[p.id, t] for p in members if (p.id, t) in x]
             if len(terms) > share:
                 over = m.new_int_var(0, len(terms), f"spread[{name},{t}]")
                 m.add(sum(terms) - share <= over)
@@ -251,22 +256,32 @@ def diagnose(problem: ExamProblem, time_limit_s: float, workers: int = 8) -> lis
     w = problem.weights
     tests: list[tuple[str, str, ExamProblem, tuple[str, ...]]] = []
     if problem.rules_on:
-        tests.append((
-            "H-E8",
-            "Postgraduate papers sit only in the first or last session of a day, and "
-            f"the period's {len(problem.edge_slots())} such sessions are too few for them. Add exam days.",
-            replace(problem, weights=replace(w, category_rules=0)),
-            (),
-        ))
-        if w.postgraduate_first_week:
-            tests.append((
-                "H-E10",
-                "Postgraduate papers sit only in the first week, and it is too short for them.",
-                replace(problem, weights=replace(w, postgraduate_first_week=0)),
+        tests.append(
+            (
+                "H-E8",
+                "Postgraduate papers sit only in the first or last session of a day, and "
+                f"the period's {len(problem.edge_slots())} such sessions are too few for them. Add exam days.",
+                replace(problem, weights=replace(w, category_rules=0)),
                 (),
-            ))
+            )
+        )
+        if w.postgraduate_first_week:
+            tests.append(
+                (
+                    "H-E10",
+                    "Postgraduate papers sit only in the first week, and it is too short for them.",
+                    replace(problem, weights=replace(w, postgraduate_first_week=0)),
+                    (),
+                )
+            )
     tests += [
-        ("H-E7", "A named main invigilator's papers can't each have their own session. Check who is named on several papers.", problem, ("H-E7",)),
+        (
+            "H-E7",
+            "A named main invigilator's papers can't each have their own session. "
+            "Check who is named on several papers.",
+            problem,
+            ("H-E7",),
+        ),
         ("H-E3", "Some sessions need more than the exam seats. Open more rooms, or add exam days.", problem, ("H-E3",)),
         ("H-E2", "Classes have too many papers for at most 2 a day. Add exam days.", problem, ("H-E2",)),
     ]
@@ -279,13 +294,22 @@ def diagnose(problem: ExamProblem, time_limit_s: float, workers: int = 8) -> lis
         last = problem.days[-1]
         more = [last + timedelta(days=i + 1) for i in range(extra)]
         if _fits(replace(problem, days=[*problem.days, *more]), (), each, workers):
-            out.append({"rule": "H-E2", "entity": "period", "message": f"With every rule on, it fits with {extra} more exam day{'s' if extra > 1 else ''}."})
+            out.append(
+                {
+                    "rule": "H-E2",
+                    "entity": "period",
+                    "message": f"With every rule on, it fits with {extra} more exam day{'s' if extra > 1 else ''}.",
+                }
+            )
             break
     return out
 
 
 def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
-    """The class rows and sessions whose rules can't all hold together; the rule at fault when they can't be named in time."""
+    """
+    The class rows and sessions whose rules can't all hold together; the rule at fault when they
+    can't be named in time.
+    """
     reasons = _named(problem, time_limit_s)
     return reasons if reasons else diagnose(problem, time_limit_s)
 

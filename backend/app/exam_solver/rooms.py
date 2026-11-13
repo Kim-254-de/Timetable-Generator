@@ -210,7 +210,7 @@ def seat_session(papers: list[Paper], rooms: list[ExamRoom], postgraduate_room: 
                 if can:
                     room = min(
                         can,
-                        key=lambda r, lot_size=students: (
+                        key=lambda r, lot_size=students: (  # type: ignore[misc]
                             bool(group) and r.id not in own,
                             r.id in others,
                             r.id not in paper_rooms[paper.id],
