@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { Download, Printer } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, Layers, Play, Send } from 'lucide-react'
 import { errorBody, errorMessage } from '@/lib/api'
 import { DAYS, FIRST_HOUR, HOURS, SCORE_LABELS, dateTime, termText } from '@/lib/format'
 import { BulkPaste } from '@/components/BulkPaste'
 import { DepartmentSubmissions } from '@/components/DepartmentSubmissions'
-import { ExamsTab } from '@/components/ExamsTab'
+import { DownloadMenu } from '@/components/DownloadMenu'
+import { ExamGenerateStep, ExamPapersStep, ExamPeriodStep, ExamPublishStep } from '@/components/ExamSteps'
+import { Card, IconBox, Notice, PageTitle, PanelButton, Pill, btn, type Tone } from '@/components/ui'
 import { rememberTerm } from '@/lib/lastTerm'
 import { printPdf } from '@/lib/print'
+import { LEGACY_TABS, STEPS, useExamProgress, useTeachingProgress, type Mode } from '@/lib/steps'
 import {
   exportUrl,
   useBulkClassRows,
@@ -23,6 +26,7 @@ import {
   usePatchOffering,
   usePatchRow,
   useProposeGroups,
+  useRoomList,
   useRuns,
   useSaveGroup,
   useSendPublication,
@@ -30,155 +34,220 @@ import {
   useStartRun,
   useTerm,
 } from '@/lib/queries'
-import type { ClassRow, Group, Offering, RoomType } from '@/lib/types'
-import { CLASS_ROW_COLUMNS, ClassRowForm, OfferingForm, TermDetails, UNIT_COLUMNS } from './TermEntry'
+import type { ClassRow, Group, Offering, PublicationItem, RoomType, Run, TermOverview } from '@/lib/types'
+import { CLASS_ROW_COLUMNS, ClassRowForm, CopyFromTerm, OfferingForm, TermDetailsForm, UNIT_COLUMNS } from './TermEntry'
 
 const ROOM_TYPE_NAMES: Record<RoomType, string> = { lecture_hall: 'Lecture hall', lab: 'Lab', seminar: 'Seminar' }
 
-const TABS = [
-  ['setup', 'Term details'],
-  ['departments', 'Departments'],
-  ['rows', 'Class rows'],
-  ['units', 'Units and groups'],
-  ['runs', 'Generate'],
-  ['drafts', 'Timetables and downloads'],
-  ['exams', 'Exams'],
-] as const
-type Tab = (typeof TABS)[number][0]
-const LABEL = Object.fromEntries(TABS) as Record<Tab, string>
-/** The two jobs on a term, each in the order the work is done (as on Attendance's Teaching page). */
-const SECTIONS: { label: string; tabs: Tab[] }[] = [
-  { label: 'Teaching timetable', tabs: ['setup', 'departments', 'rows', 'units', 'runs', 'drafts'] },
-  { label: 'Exams', tabs: ['exams'] },
-]
-
+/**
+ * A term, worked through step by step: teaching (details, departments, classes and units, generate,
+ * review and publish) or exams. Each step shows a summary and its one main action; lists and forms
+ * open in a side panel. The URL keeps the place (?mode=exams&step=2); old ?tab= links still work.
+ */
 export function TermPage() {
   const { termId = '' } = useParams()
   const [search, setSearch] = useSearchParams()
-  const tab = (search.get('tab') as Tab | null) ?? 'setup'
   const term = useTerm(termId)
+  const legacy = LEGACY_TABS[search.get('tab') ?? '']
+  const mode: Mode = legacy?.mode ?? (search.get('mode') === 'exams' ? 'exams' : 'teaching')
+  const teaching = useTeachingProgress(termId)
+  const exams = useExamProgress(termId)
+  const progress = mode === 'exams' ? exams : teaching
+  const steps = STEPS[mode]
+  const asked = Number(search.get('step')) || legacy?.step || 0
+  const step = Math.min(steps.length, Math.max(1, asked || progress?.current || 1))
+  const go = (m: Mode, s?: number) => setSearch(m === 'exams' ? { mode: m, ...(s ? { step: String(s) } : {}) } : s ? { step: String(s) } : {})
   // The app opens on this term next time (Home).
   useEffect(() => { if (term.isSuccess) rememberTerm(termId) }, [term.isSuccess, termId])
 
   if (term.isPending) return <p className="text-sm text-muted">Loading the term…</p>
   if (term.isError) return <p role="alert" className="text-sm text-danger">{errorMessage(term.error)}</p>
+  const t = term.data
 
   return (
-    <div className="space-y-4">
-      <div>
-        <Link to="/terms" className="text-sm text-brand-ink">Switch term</Link>
-        <h1 className="text-xl font-semibold">{term.data.name || termText(term.data)}</h1>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-        {SECTIONS.map((section) => (
-          <div key={section.label} className="space-y-2 rounded-2xl bg-card p-3 shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-            <p className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">{section.label}</p>
-            <div role="tablist" aria-label={section.label} className="flex flex-wrap gap-2">
-              {section.tabs.map((t, i) => (
-                <button key={t} role="tab" aria-selected={tab === t} onClick={() => setSearch({ tab: t })}
-                  className={clsx('inline-flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold transition',
-                    tab === t ? 'bg-brand text-white' : 'bg-surface text-ink ring-1 ring-line hover:bg-brand-soft')}>
-                  {section.tabs.length > 1 && (
-                    <span aria-hidden className={clsx('grid size-5 place-items-center rounded-full text-xs',
-                      tab === t ? 'bg-white/20 text-white' : 'bg-card text-muted ring-1 ring-line')}>{i + 1}</span>
-                  )}
-                  {LABEL[t]}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      {tab === 'setup' && (
-        <div className="space-y-4">
-          <Readiness termId={termId} />
-          <TermDetails termId={termId} />
-          <SetupTab termId={termId} fromSmarttt={Boolean(term.data.smarttt_term_id)} />
+    <div className="space-y-6">
+      <PageTitle title={t.name || termText(t)} crumb="Terms" />
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="group" aria-label="Timetable" className="inline-flex rounded-xl bg-brand-soft p-1">
+          {(['teaching', 'exams'] as const).map((m) => (
+            <button key={m} type="button" aria-pressed={mode === m} onClick={() => go(m)}
+              className={clsx('rounded-lg px-5 py-2 text-sm font-semibold', mode === m ? 'bg-card text-brand-ink shadow-sm' : 'text-muted hover:text-ink')}>
+              {m === 'teaching' ? 'Teaching' : 'Exams'}
+            </button>
+          ))}
         </div>
-      )}
-      {tab === 'departments' && <DepartmentSubmissions termId={termId} />}
-      {tab === 'rows' && <RowsTab termId={termId} />}
-      {tab === 'units' && <UnitsTab termId={termId} />}
-      {tab === 'runs' && <RunsTab termId={termId} />}
-      {tab === 'drafts' && <DraftsTab termId={termId} />}
-      {tab === 'exams' && <ExamsTab termId={termId} />}
+        <span className="text-sm text-muted">{termText(t)}{t.start_date && t.end_date ? ` · ${dateRange(t.start_date, t.end_date)}` : ''}</span>
+        <Link to="/terms" className={clsx(btn.quiet, 'ml-auto')}>Switch term</Link>
+      </div>
+
+      <ol aria-label="Steps" className="grid gap-2 rounded-xl border border-line bg-card p-3 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]">
+        {steps.map((s, i) => {
+          const n = i + 1
+          const done = progress?.done[i] ?? false
+          const active = n === step
+          return (
+            <li key={s.key}>
+              <button type="button" onClick={() => go(mode, n)} aria-current={active ? 'step' : undefined}
+                className={clsx('flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold',
+                  active ? 'bg-brand-soft text-brand-ink' : done ? 'text-ink hover:bg-surface' : 'text-muted hover:bg-surface')}>
+                <span className={clsx('grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold',
+                  done ? 'bg-success text-white dark:text-brand-950' : active ? 'bg-brand text-white' : 'bg-surface text-muted')}>
+                  {done ? <Check className="size-4" strokeWidth={3} aria-label="done" /> : n}
+                </span>
+                {s.label}
+              </button>
+            </li>
+          )
+        })}
+      </ol>
+
+      {mode === 'teaching' && step === 1 && <DetailsStep term={t} />}
+      {mode === 'teaching' && step === 2 && <DepartmentSubmissions termId={termId} />}
+      {mode === 'teaching' && step === 3 && <ClassesStep term={t} onNext={() => go('teaching', 4)} />}
+      {mode === 'teaching' && step === 4 && <GenerateStep termId={termId} />}
+      {mode === 'teaching' && step === 5 && <PublishStep term={t} />}
+      {mode === 'exams' && step === 1 && <ExamPeriodStep termId={termId} />}
+      {mode === 'exams' && step === 2 && <ExamPapersStep termId={termId} />}
+      {mode === 'exams' && step === 3 && <ExamGenerateStep termId={termId} />}
+      {mode === 'exams' && step === 4 && <ExamPublishStep termId={termId} />}
+
+      <div className="flex flex-wrap justify-between gap-2">
+        {step > 1 ? <button type="button" onClick={() => go(mode, step - 1)} className={btn.secondary}><ArrowLeft className="size-4" aria-hidden /> Back</button> : <span />}
+        {step < steps.length && (
+          <button type="button" onClick={() => go(mode, step + 1)} className={btn.secondary}>Next: {steps[step].label.toLowerCase()} <ArrowRight className="size-4" aria-hidden /></button>
+        )}
+      </div>
     </div>
   )
 }
 
-function SetupTab({ termId, fromSmarttt }: { termId: string; fromSmarttt: boolean }) {
-  const term = useTerm(termId)
-  const snapshot = useSnapshot(termId)
-  const importSetup = useImport(termId)
-  const propose = useProposeGroups(termId)
-  const readiness = term.data?.readiness
-  const snap = readiness?.snapshot
+const dateRange = (a: string, b: string) => {
+  const f = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  return `${f(a)} – ${f(b)}`
+}
 
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><dt className="text-sm text-muted">{label}</dt><dd className="mt-0.5 text-[15px]">{children || '—'}</dd></div>
+}
+
+// -- step 1: term details ------------------------------------------------------------------
+
+function DetailsStep({ term }: { term: TermOverview }) {
+  const rooms = useRoomList()
+  const departments = useDepartments()
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      {fromSmarttt && (<>
-      <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-        <h2 className="font-semibold">Optional: import from SMARTTT</h2>
-        <p className="text-sm text-muted">Copies rooms, programmes, units, curricula, class sizes, lecturer counts and the current published timetable.</p>
-        {snap ? (
-          <p className="text-sm">Taken {dateTime(snap.taken_at)} by {snap.taken_by}: {snap.counts.rooms} rooms, {snap.counts.units} units,{' '}
-            {snap.counts.programs} programmes; published version {snap.published_version ?? 'none'}.</p>
-        ) : <p className="text-sm text-warning">No snapshot yet.</p>}
-        <button onClick={() => snapshot.mutate(undefined)} disabled={snapshot.isPending}
-          className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">
-          {snapshot.isPending ? 'Reading SMARTTT…' : 'Take a new snapshot'}
-        </button>
-        {snapshot.isError && <p role="alert" className="text-sm text-danger">{errorMessage(snapshot.error)}</p>}
-        {snap && snap.warnings.length > 0 && (
-          <details className="text-sm">
-            <summary className="cursor-pointer text-warning">{snap.warnings.length} data warnings from SMARTTT</summary>
-            <ul className="mt-2 max-h-48 list-disc overflow-y-auto pl-5 text-ink">
-              {snap.warnings.map((w) => <li key={w.detail}>{w.detail}</li>)}
-            </ul>
-          </details>
-        )}
-      </section>
-
-      <section className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-        <h2 className="font-semibold">Add class rows, units, halls and departments from the snapshot</h2>
-        <p className="text-sm text-muted">Adds what is missing. Anything entered here is never overwritten.</p>
+      <Card title="Term details">
+        <dl className="grid grid-cols-2 gap-4">
+          <Detail label="Name on the timetable">{term.name}</Detail>
+          <Detail label="Dates">{term.start_date && term.end_date ? dateRange(term.start_date, term.end_date) : ''}</Detail>
+          <Detail label="Class length">{`${term.default_session_length} hours`}</Detail>
+          <Detail label="Prepared by">{[term.prepared_by, term.prepared_by_title].filter(Boolean).join(', ')}</Detail>
+        </dl>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => importSetup.mutate(undefined)} disabled={importSetup.isPending || !snap}
-            className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Import from the snapshot</button>
-          <button onClick={() => propose.mutate(false)} disabled={propose.isPending || !snap}
-            className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Propose groups for new units</button>
+          <PanelButton label="Edit details" title="Term details" className={btn.primary}><TermDetailsForm term={term} key={term.id} /></PanelButton>
+          <PanelButton label="Copy from a previous term" title="Start from a previous term"><CopyFromTerm termId={term.id} /></PanelButton>
         </div>
-        {importSetup.isSuccess && (
-          <p className="text-sm text-success">Added {importSetup.data.class_rows_created} class rows and {importSetup.data.offerings_created} units.
-            {importSetup.data.unresolved.length > 0 && ` ${importSetup.data.unresolved.length} items need attention.`}</p>
-        )}
-        {propose.isSuccess && (
-          <p className="text-sm text-success">Proposed groups for {propose.data.proposed} units.
-            {propose.data.skipped.length > 0 && ` Skipped ${propose.data.skipped.length}: ${propose.data.skipped.slice(0, 5).map((s) => `${s.unit_code} (${s.reason})`).join('; ')}`}</p>
-        )}
-        {(importSetup.isError || propose.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(importSetup.error ?? propose.error)}</p>}
-      </section>
-      </>)}
-
+      </Card>
+      <Card title="Shared by every term">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Link to="/rooms" className="flex items-center gap-3 rounded-lg bg-surface p-3 hover:bg-brand-soft">
+            <span className="text-2xl font-bold">{rooms.data?.length ?? '–'}</span><span className="text-sm text-muted">lecture halls</span>
+          </Link>
+          <Link to="/departments" className="flex items-center gap-3 rounded-lg bg-surface p-3 hover:bg-brand-soft">
+            <span className="text-2xl font-bold">{departments.data?.length ?? '–'}</span><span className="text-sm text-muted">departments</span>
+          </Link>
+        </div>
+      </Card>
+      {term.smarttt_term_id && <SmartttCard term={term} />}
     </div>
   )
 }
 
-/** Whether the term can be generated, at the top of Term details. */
-function Readiness({ termId }: { termId: string }) {
-  const readiness = useTerm(termId).data?.readiness
-  if (!readiness) return null
-  if (readiness.ready) {
-    return <p role="status" className="rounded-xl bg-success-soft px-4 py-3 text-sm text-success">Ready to generate. Go to step 5, Generate.</p>
-  }
-  const count = readiness.problem_count ?? readiness.problems.length
+function SmartttCard({ term }: { term: TermOverview }) {
+  const snapshot = useSnapshot(term.id)
+  const importSetup = useImport(term.id)
+  const propose = useProposeGroups(term.id)
+  const snap = term.readiness.snapshot
   return (
-    <details className="rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning" open={count <= 5}>
-      <summary className="cursor-pointer font-semibold">Not ready to generate: {count} {count === 1 ? 'thing' : 'things'} to fix first</summary>
-      <ul className="mt-1 max-h-64 list-disc overflow-y-auto pl-5">
-        {readiness.problems.map((p, i) => <li key={`${p.code}${i}`}>{p.message}</li>)}
-      </ul>
-    </details>
+    <Card title="Bring in data from SMARTTT" className="lg:col-span-2"
+      action={snap && snap.warnings.length > 0 && (
+        <PanelButton label={`${snap.warnings.length} data warnings`} title="Data warnings from SMARTTT" icon={AlertTriangle} className={btn.quiet}>
+          <ul className="list-disc space-y-1 pl-5 text-sm">{snap.warnings.map((w) => <li key={w.detail}>{w.detail}</li>)}</ul>
+        </PanelButton>
+      )}>
+      <p className="text-sm text-muted">Optional. Copies rooms, programmes, units, curricula, class sizes, lecturer counts and the current published timetable.
+        Adding from it never overwrites what was entered here.</p>
+      {snap ? (
+        <Pill tone="success"><Check className="size-3.5" aria-hidden /> Taken {dateTime(snap.taken_at)}: {snap.counts.rooms} rooms, {snap.counts.units} units, {snap.counts.programs} programmes</Pill>
+      ) : <Pill tone="warning">No snapshot yet</Pill>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => snapshot.mutate(undefined)} disabled={snapshot.isPending} className={btn.primary}>
+          {snapshot.isPending ? 'Reading SMARTTT…' : 'Take a new snapshot'}
+        </button>
+        <button type="button" onClick={() => importSetup.mutate(undefined)} disabled={importSetup.isPending || !snap} className={btn.secondary}>Add from the snapshot</button>
+        <button type="button" onClick={() => propose.mutate(false)} disabled={propose.isPending || !snap} className={btn.secondary}>Propose groups for new units</button>
+      </div>
+      {importSetup.isSuccess && (
+        <p role="status" className="text-sm text-success">Added {importSetup.data.class_rows_created} class rows and {importSetup.data.offerings_created} units.
+          {importSetup.data.unresolved.length > 0 && ` ${importSetup.data.unresolved.length} items need attention.`}</p>
+      )}
+      {propose.isSuccess && (
+        <p role="status" className="text-sm text-success">Proposed groups for {propose.data.proposed} units.
+          {propose.data.skipped.length > 0 && ` Skipped ${propose.data.skipped.length}: ${propose.data.skipped.slice(0, 5).map((s) => `${s.unit_code} (${s.reason})`).join('; ')}`}</p>
+      )}
+      {(snapshot.isError || importSetup.isError || propose.isError) && (
+        <p role="alert" className="text-sm text-danger">{errorMessage(snapshot.error ?? importSetup.error ?? propose.error)}</p>
+      )}
+    </Card>
+  )
+}
+
+// -- step 3: classes and units ------------------------------------------------------------
+
+function ClassesStep({ term, onNext }: { term: TermOverview; onNext: () => void }) {
+  const rows = useClassRows(term.id)
+  const offerings = useOfferings(term.id)
+  const noStudents = (rows.data ?? []).filter((r) => r.student_count == null).length
+  const noGroups = (offerings.data ?? []).filter((o) => o.groups.length === 0).length
+  const readiness = term.readiness
+  const tiles = [
+    { icon: Layers, value: rows.data?.length, label: 'Class rows (programme, year and semester)', title: 'Class rows',
+      note: noStudents ? `${noStudents} without a number of students` : '', body: <RowsTab termId={term.id} /> },
+    { icon: BookOpen, value: offerings.data?.length, label: 'Units and their groups', title: 'Units and groups',
+      note: noGroups ? `${noGroups} without a group` : '', body: <UnitsTab termId={term.id} /> },
+  ]
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        {tiles.map((tile) => (
+          <Card key={tile.title}>
+            <div className="flex items-center gap-4">
+              <IconBox icon={tile.icon} size="lg" />
+              <div>
+                <p className="text-3xl font-bold tracking-tight">{tile.value ?? '–'}</p>
+                <p className="text-sm text-muted">{tile.label}</p>
+              </div>
+            </div>
+            {tile.note && <Pill tone="warning">{tile.note}</Pill>}
+            <PanelButton label="View and edit" title={tile.title} wide className={btn.primary}>{tile.body}</PanelButton>
+          </Card>
+        ))}
+      </div>
+      {readiness.ready ? (
+        <Notice tone="success" icon={CheckCircle2} action={<button type="button" onClick={onNext} className={btn.primary}>Next: generate <ArrowRight className="size-4" aria-hidden /></button>}>
+          Everything is set to generate.
+        </Notice>
+      ) : (
+        <Notice icon={AlertTriangle} action={
+          <PanelButton label="Show them" title="To fix before generating">
+            <ul className="list-disc space-y-1.5 pl-5 text-sm">{readiness.problems.map((p, i) => <li key={`${p.code}${i}`}>{p.message}</li>)}</ul>
+          </PanelButton>
+        }>
+          {readiness.problem_count ?? readiness.problems.length} things to fix before generating.
+        </Notice>
+      )}
+    </div>
   )
 }
 
@@ -217,15 +286,15 @@ function RowsTab({ termId }: { termId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter class rows"
-          className="w-72 rounded-xl border border-line px-3 py-2 text-sm" />
+          className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Paste from Excel</button>
-          <button onClick={() => setForm('new')} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">+ Add a class row</button>
+          <button onClick={() => setPasting(true)} className={btn.secondary}>Paste from Excel</button>
+          <button onClick={() => setForm('new')} className={btn.primary}>+ Add a class row</button>
         </div>
       </div>
       {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
       {deleted && <p role="status" className="text-sm text-success">{deleted}</p>}
-      <div className="overflow-x-auto rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
+      <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Class row</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Students</th><th className="px-3 py-2">Unavailable hours</th><th /></tr>
@@ -244,7 +313,7 @@ function RowsTab({ termId }: { termId: string }) {
                       const v = e.target.value === '' ? null : Number(e.target.value)
                       if (v !== null && v !== r.student_count) patch.mutate({ id: r.id, body: { student_count: v } })
                     }}
-                    className={clsx('w-24 rounded-lg border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />}
+                    className={clsx('w-24 rounded-md border px-2 py-1', r.student_count == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2 text-muted">{r.unavailable.length ? `${r.unavailable.length} hours` : '—'}</td>
                 <td className="space-x-3 whitespace-nowrap px-3 py-2 text-right">
@@ -294,8 +363,8 @@ function UnavailableEditor({ row, onClose, onSave }: { row: ClassRow; onClose: (
           </tbody>
         </table>
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
-          <button onClick={() => onSave([...slots].sort((a, b) => a - b))} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save</button>
+          <button onClick={onClose} className={btn.secondary}>Cancel</button>
+          <button onClick={() => onSave([...slots].sort((a, b) => a - b))} className={btn.primary}>Save</button>
         </div>
       </div>
     </div>
@@ -324,14 +393,14 @@ function UnitsTab({ termId }: { termId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter units"
-          className="w-72 rounded-xl border border-line px-3 py-2 text-sm" />
+          className="w-72 rounded-md border border-line px-3 py-1.5 text-sm" />
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Paste from Excel</button>
-          <button onClick={() => setForm('new')} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">+ Add a unit</button>
+          <button onClick={() => setPasting(true)} className={btn.secondary}>Paste from Excel</button>
+          <button onClick={() => setForm('new')} className={btn.primary}>+ Add a unit</button>
         </div>
       </div>
       {(patch.isError || remove.isError) && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error ?? remove.error)}</p>}
-      <div className="overflow-x-auto rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
+      <div className="overflow-x-auto rounded-lg border border-line bg-card">
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-xs uppercase text-muted">
             <tr><th className="px-3 py-2">Unit</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Class rows</th><th className="px-3 py-2">Hours / week</th>
@@ -349,17 +418,17 @@ function UnitsTab({ termId }: { termId: string }) {
                 <td className="px-3 py-2">
                   {o.from_allocator ? o.weekly_hours : <input type="number" min={1} max={20} defaultValue={o.weekly_hours ?? ''} aria-label={`Weekly hours of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.weekly_hours && patch.mutate({ id: o.id, body: { weekly_hours: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-lg border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />}
+                    className={clsx('w-16 rounded-md border px-2 py-1', o.weekly_hours == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2">
                   {o.from_allocator ? o.session_length : <input type="number" min={1} max={6} defaultValue={o.session_length ?? ''} aria-label={`Session length of ${o.unit_code}`}
                     onBlur={(e) => e.target.value && Number(e.target.value) !== o.session_length && patch.mutate({ id: o.id, body: { session_length: Number(e.target.value) } })}
-                    className={clsx('w-16 rounded-lg border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />}
+                    className={clsx('w-16 rounded-md border px-2 py-1', o.session_length == null ? 'border-warning/40' : 'border-line')} />}
                 </td>
                 <td className="px-3 py-2">
                   {o.from_allocator ? ROOM_TYPE_NAMES[o.room_type] : <select value={o.room_type} aria-label={`Room type of ${o.unit_code}`}
                     onChange={(e) => patch.mutate({ id: o.id, body: { room_type: e.target.value as RoomType } })}
-                    className="rounded-xl border border-line px-3 py-2">
+                    className="rounded-md border border-line px-2 py-1">
                     <option value="lecture_hall">Lecture hall</option><option value="lab">Lab</option><option value="seminar">Seminar</option>
                   </select>}
                 </td>
@@ -410,7 +479,7 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
         </p>
         <ul className="mt-3 space-y-2">
           {offering.groups.map((g) => (
-            <li key={g.id} className="flex items-start justify-between rounded-xl border border-line p-2 text-sm">
+            <li key={g.id} className="flex items-start justify-between rounded-md border border-line p-2 text-sm">
               <span><b>{g.label || 'Whole class'}</b> · {g.student_count} students
                 <span className="block text-muted">{g.members.map((m) => `${m.label} (${m.students})`).join(', ')}</span>
                 {g.lecturer_name && <span className="block">{g.lecturer_name}{g.lecturer_staff_number ? ` · ${g.lecturer_staff_number}` : ''}</span>}</span>
@@ -426,10 +495,10 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
         {!offering.from_allocator && <button onClick={() => setDraft(blank())} className="mt-2 text-sm text-brand-ink">+ Add a group</button>}
 
         {draft && (
-          <div className="mt-4 space-y-2 rounded-xl border border-line p-3 text-sm">
+          <div className="mt-4 space-y-2 rounded-md border border-line p-3 text-sm">
             <label className="block">Label (blank for the whole class)
               <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="GR A"
-                className="mt-1 w-40 rounded-xl border border-line px-3 py-2" />
+                className="mt-1 w-40 rounded-md border border-line px-2 py-1" />
             </label>
             {eligible.map((r) => {
               const member = draft.members.find((m) => m.class_row_id === r.id)
@@ -444,146 +513,168 @@ function GroupsEditor({ offering, rows, termId, onClose }: { offering: Offering;
                   <span className="flex-1">{r.label}</span>
                   {member && <input type="number" min={1} value={member.students} aria-label={`Students from ${r.label}`}
                     onChange={(e) => setDraft({ ...draft, members: draft.members.map((m) => m.class_row_id === r.id ? { ...m, students: Number(e.target.value) } : m) })}
-                    className="w-20 rounded-xl border border-line px-3 py-2" />}
+                    className="w-20 rounded-md border border-line px-2 py-1" />}
                 </label>
               )
             })}
             {failure && <p role="alert" className="text-danger">{failure.message}</p>}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setDraft(null)} className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
+              <button onClick={() => setDraft(null)} className={btn.secondary}>Cancel</button>
               <button disabled={!draft.members.length || save.isPending}
                 onClick={() => save.mutate({ offeringId: offering.id, groupId: draft.id || undefined,
                   body: { label: draft.label, members: draft.members.map((m) => ({ class_row_id: m.class_row_id, students: m.students })) } },
                 { onSuccess: () => setDraft(null) })}
-                className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save group</button>
+                className={btn.primary}>Save group</button>
             </div>
           </div>
         )}
-        <div className="mt-4 flex justify-end"><button onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Done</button></div>
+        <div className="mt-4 flex justify-end"><button onClick={onClose} className={btn.secondary}>Done</button></div>
       </div>
     </div>
   )
 }
 
-function RunsTab({ termId }: { termId: string }) {
+// -- step 4: generate ---------------------------------------------------------------------
+
+const RUN_TONE: Record<Run['status'], Tone> = { succeeded: 'success', failed: 'danger', running: 'brand', queued: 'brand' }
+const RUN_STATUS: Record<Run['status'], string> = { succeeded: 'Finished', failed: 'Failed', running: 'Running', queued: 'Waiting to start' }
+
+function GenerateStep({ termId }: { termId: string }) {
   const runs = useRuns(termId)
   const start = useStartRun(termId)
   const [mode, setMode] = useState<'full' | 'repair'>('full')
   const [minutes, setMinutes] = useState(10)
   const failure = errorBody(start.error)
   const problems = (failure?.details as { problems?: { message: string }[] } | undefined)?.problems
-
-  return (
-    <div className="space-y-4">
-      <section className="flex flex-wrap items-end gap-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-        <label>Run
-          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} className="mt-1 block rounded-xl border border-line px-3 py-2">
-            <option value="full">Full solve</option>
-            <option value="repair">Repair the published timetable (mid-term change)</option>
-          </select>
-        </label>
-        <label>Time limit (minutes)
-          <input type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}
-            className="mt-1 block w-24 rounded-xl border border-line px-3 py-2" />
-        </label>
-        <button onClick={() => start.mutate({ mode, time_limit_s: minutes * 60 })} disabled={start.isPending}
-          className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Start</button>
-        {failure && <p role="alert" className="w-full text-danger">{failure.message}
-          {problems && <span className="block">{problems.slice(0, 5).map((p) => p.message).join('; ')}</span>}</p>}
-      </section>
-      <ul className="space-y-2">
-        {(runs.data ?? []).map((r) => (
-          <li key={r.id} className="p-3 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span><b className="capitalize">{r.mode}</b> run · started {dateTime(r.created_at)} by {r.created_by}</span>
-              <span className={clsx('rounded px-2 py-0.5 text-xs font-medium',
-                r.status === 'succeeded' ? 'bg-success-soft text-success' : r.status === 'failed' ? 'bg-danger-soft text-danger' : 'bg-brand-soft text-brand-ink')}>
-                {r.status}{(r.status === 'running' && r.progress.seconds != null) ? ` · ${r.progress.phase} ${r.progress.seconds}s` : ''}
-              </span>
-            </div>
-            {r.status === 'succeeded' && r.draft_id && (
-              <p className="mt-1">{SCORE_LABELS.slice(0, 5).map(([k, l]) => `${l}: ${r.soft_scores[k] ?? 0}`).join(' · ')}{' '}
-                <Link to={`/terms/${termId}/drafts/${r.draft_id}`} className="text-brand-ink">Review the draft →</Link></p>
-            )}
-            {r.failure && (
-              <ul className="mt-1 list-disc pl-5 text-danger">
-                {r.failure.reasons.slice(0, 10).map((x, i) => <li key={i}>{x.message}</li>)}
-                {r.failure.count > 10 && <li>…and {r.failure.count - 10} more</li>}
-              </ul>
-            )}
-          </li>
-        ))}
-        {runs.data?.length === 0 && <li className="text-sm text-muted">No runs yet.</li>}
-      </ul>
-    </div>
+  const teaching = (runs.data ?? []).filter((r) => r.mode !== 'exam')
+  const latest = teaching[0]
+  const choice = (value: typeof mode, title: string, hint: string) => (
+    <button type="button" role="radio" aria-checked={mode === value} onClick={() => setMode(value)}
+      className={clsx('flex flex-col items-start gap-0.5 rounded-xl border-2 px-4 py-3 text-left',
+        mode === value ? 'border-brand bg-brand-soft' : 'border-line bg-card hover:border-brand-200')}>
+      <span className="text-[15px] font-semibold">{title}</span>
+      <span className="text-sm text-muted">{hint}</span>
+    </button>
   )
-}
 
-function DraftsTab({ termId }: { termId: string }) {
-  const term = useTerm(termId)
-  const send = useSendPublication(termId)
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <section className="p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-        <h2 className="mb-2 font-semibold">Drafts</h2>
-        <ul className="space-y-1 text-sm">
-          {term.data?.drafts.map((d) => (
-            <li key={d.id} className="flex justify-between">
-              <Link to={`/terms/${termId}/drafts/${d.id}`} className="text-brand-ink">{d.name}</Link>
-              <span className="text-muted">{d.status} · {dateTime(d.created_at)}</span>
-            </li>
-          ))}
-          {term.data?.drafts.length === 0 && <li className="text-muted">None yet.</li>}
-        </ul>
-      </section>
-      <section className="p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-        <h2 className="mb-2 font-semibold">Published versions</h2>
-        <ul className="space-y-1 text-sm">
-          {term.data?.publications.map((p) => (
-            <li key={p.version} className="space-y-0.5">
-              <b>Version {p.version}</b> · {dateTime(p.published_at)} by {p.published_by}
-              {p.changes && <span className="block text-muted">{p.changes.added?.length ?? 0} added, {p.changes.moved?.length ?? 0} moved, {p.changes.removed?.length ?? 0} removed</span>}
-              {!p.sent_to_smarttt && <span className="block text-warning">Approved here, not yet in SMARTTT{p.not_sent_reason ? `: ${p.not_sent_reason}` : ''}</span>}
-              {p.can_send && (
-                <button onClick={() => send.mutate(p.version)} disabled={send.isPending}
-                  className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-warning-soft text-warning">
-                  {send.isPending ? 'Sending…' : 'Send to SMARTTT now'}
-                </button>
-              )}
-              <span className="flex flex-wrap items-center gap-3">
-                Download:
-                {([['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel']] as const).map(([format, label]) => (
-                  <a key={format} href={exportUrl(p.draft_id, 'row', format)} className="inline-flex items-center gap-1 text-brand-ink">
-                    <Download size={14} aria-hidden /> {label}
-                  </a>
-                ))}
-                <PrintButton draftId={p.draft_id} />
-              </span>
-            </li>
-          ))}
-          {term.data?.publications.length === 0 && <li className="text-muted">Nothing published yet.</li>}
-        </ul>
-        {send.isError && <p role="alert" className="mt-2 text-sm text-danger">{errorMessage(send.error)}</p>}
-      </section>
+      <Card title="Generate the timetable">
+        <div role="radiogroup" aria-label="Kind of run" className="grid gap-2">
+          {choice('full', 'Full timetable', 'Start from scratch for the whole term')}
+          {choice('repair', 'Repair the published one', 'A mid-term change; keeps everything else in place')}
+        </div>
+        <label className="flex items-center gap-3 text-sm text-muted">Stop after
+          <input type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}
+            aria-label="Time limit in minutes" className="w-20 rounded-md border border-line px-3 py-1.5 text-ink" /> minutes
+        </label>
+        <button type="button" onClick={() => start.mutate({ mode, time_limit_s: minutes * 60 })} disabled={start.isPending} className={clsx(btn.gold, 'w-full')}>
+          <Play className="size-5 fill-current" aria-hidden /> {start.isPending ? 'Starting…' : 'Generate'}
+        </button>
+        {failure && <p role="alert" className="text-sm text-danger">{failure.message}
+          {problems && <span className="block">{problems.slice(0, 5).map((p) => p.message).join('; ')}</span>}</p>}
+      </Card>
+      <Card title="Last run" action={teaching.length > 1 && (
+        <PanelButton label="All runs" title="Runs" className={btn.quiet}>
+          <ul className="space-y-3">{teaching.map((r) => <li key={r.id}><RunSummary run={r} termId={termId} /></li>)}</ul>
+        </PanelButton>
+      )}>
+        {latest ? <RunSummary run={latest} termId={termId} /> : <p className="text-sm text-muted">No runs yet.</p>}
+      </Card>
     </div>
   )
 }
 
+function RunSummary({ run, termId }: { run: Run; termId: string }) {
+  return (
+    <div className="space-y-3 rounded-lg bg-surface p-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Pill tone={RUN_TONE[run.status]}>
+          {run.status === 'succeeded' && <Check className="size-3.5" aria-hidden />}
+          {RUN_STATUS[run.status]}{run.status === 'running' && run.progress.seconds != null ? ` · ${run.progress.phase ?? ''} ${run.progress.seconds}s` : ''}
+        </Pill>
+        <span className="text-muted"><span className="capitalize">{run.mode}</span> · {dateTime(run.created_at)} by {run.created_by}</span>
+      </div>
+      {run.status === 'succeeded' && run.draft_id && (
+        <>
+          <p className="text-muted">{SCORE_LABELS.slice(0, 5).map(([k, l]) => `${l}: ${run.soft_scores[k] ?? 0}`).join(' · ')}</p>
+          <Link to={`/terms/${termId}/drafts/${run.draft_id}`} className={btn.primary}>Review the draft <ArrowRight className="size-4" aria-hidden /></Link>
+        </>
+      )}
+      {run.failure && (
+        <ul className="list-disc pl-5 text-danger">
+          {run.failure.reasons.slice(0, 10).map((x, i) => <li key={i}>{x.message}</li>)}
+          {run.failure.count > 10 && <li>…and {run.failure.count - 10} more</li>}
+        </ul>
+      )}
+    </div>
+  )
+}
 
-/** Prints the approved version as the PDF download lays it out (by class row). */
-function PrintButton({ draftId }: { draftId: string }) {
-  const [state, setState] = useState<'idle' | 'preparing' | 'failed'>('idle')
+// -- step 5: review and publish -----------------------------------------------------------
+
+const DRAFT_TONE = { draft: 'brand', published: 'success', superseded: 'muted' } as const
+
+function PublishStep({ term }: { term: TermOverview }) {
+  const send = useSendPublication(term.id)
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card title="Drafts">
+        <ul className="space-y-2">
+          {term.drafts.map((d) => (
+            <li key={d.id} className="flex flex-wrap items-center gap-3 rounded-lg bg-surface px-4 py-3">
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold">{d.name}</span>
+                <span className="block text-sm text-muted">{dateTime(d.created_at)} · {d.session_count} classes</span>
+              </span>
+              <Pill tone={DRAFT_TONE[d.status]}>{d.status}</Pill>
+              <Link to={`/terms/${term.id}/drafts/${d.id}`} className={btn.secondary}>Open</Link>
+            </li>
+          ))}
+          {term.drafts.length === 0 && <li className="text-sm text-muted">None yet. Generate one first.</li>}
+        </ul>
+        {term.drafts.length > 0 && <p className="text-sm text-muted">To publish, open a draft and choose Approve and publish.</p>}
+      </Card>
+      <Card title="Published">
+        <ul className="space-y-2">
+          {term.publications.map((p, i) => <PublishedVersion key={p.version} item={p} latest={i === 0} sending={send.isPending} onSend={() => send.mutate(p.version)} />)}
+          {term.publications.length === 0 && <li className="text-sm text-muted">Nothing published yet.</li>}
+        </ul>
+        {send.isError && <p role="alert" className="text-sm text-danger">{errorMessage(send.error)}</p>}
+      </Card>
+    </div>
+  )
+}
+
+function PublishedVersion({ item: p, latest, sending, onSend }: { item: PublicationItem; latest: boolean; sending: boolean; onSend: () => void }) {
+  const [printing, setPrinting] = useState<'idle' | 'preparing' | 'failed'>('idle')
   const print = () => {
-    setState('preparing')
-    printPdf(`/drafts/${draftId}/export.pdf?view=row`).then(() => setState('idle'), () => setState('failed'))
+    setPrinting('preparing')
+    printPdf(`/drafts/${p.draft_id}/export.pdf?view=row`).then(() => setPrinting('idle'), () => setPrinting('failed'))
   }
   return (
-    <>
-      <button type="button" onClick={print} disabled={state === 'preparing'}
-        className="inline-flex items-center gap-1 text-brand-ink disabled:opacity-60">
-        <Printer size={14} aria-hidden /> {state === 'preparing' ? 'Preparing…' : 'Print'}
-      </button>
-      {state === 'failed' && <span role="alert" className="text-danger">Couldn't prepare the timetable to print. Try again, or download the PDF.</span>}
-    </>
+    <li className={clsx('space-y-2 rounded-lg px-4 py-3', latest ? 'bg-brand-soft' : 'bg-surface')}>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">Version {p.version}</span>
+          <span className="block text-sm text-muted">{dateTime(p.published_at)} by {p.published_by}
+            {p.changes && ` · ${p.changes.added?.length ?? 0} added, ${p.changes.moved?.length ?? 0} moved, ${p.changes.removed?.length ?? 0} removed`}</span>
+        </span>
+        {p.sent_to_smarttt ? <Pill tone="success">On SMARTTT</Pill> : <Pill tone="warning">Not in SMARTTT</Pill>}
+        <DownloadMenu items={[
+          { label: 'PDF', href: exportUrl(p.draft_id, 'row', 'pdf') },
+          { label: 'Word', href: exportUrl(p.draft_id, 'row', 'docx') },
+          { label: 'Excel', href: exportUrl(p.draft_id, 'row', 'xlsx') },
+          { label: printing === 'preparing' ? 'Preparing to print…' : 'Print', onClick: print, busy: printing === 'preparing' },
+        ]} />
+      </div>
+      {!p.sent_to_smarttt && p.not_sent_reason && <p className="text-sm text-warning">{p.not_sent_reason}</p>}
+      {p.can_send && (
+        <button type="button" onClick={onSend} disabled={sending} className={btn.primary}>
+          <Send className="size-4" aria-hidden /> {sending ? 'Sending…' : 'Send to SMARTTT now'}
+        </button>
+      )}
+      {printing === 'failed' && <p role="alert" className="text-sm text-danger">Couldn't prepare the timetable to print. Try again, or download the PDF.</p>}
+    </li>
   )
 }

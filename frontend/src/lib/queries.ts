@@ -94,6 +94,19 @@ export function useLogout() {
   })
 }
 
+/** My profile: the name is kept in Smart Attendance, so every session shows the new one. */
+export function useRenameMe() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (fullName: string) => patch<Me>('/auth/me', { full_name: fullName }),
+    onSuccess: (me) => qc.setQueryData(keys.me, me),
+  })
+}
+
+/** Changed in Smart Attendance; the Director's other Generator sessions are signed out. */
+export const useChangePassword = () =>
+  useMutation({ mutationFn: (body: { current_password: string; new_password: string }) => post<{ changed: true }>('/auth/password', body) })
+
 /** Any change to a term's setup invalidates everything derived from it. */
 function useTermMutation<TVars, TData>(termId: string, fn: (vars: TVars) => Promise<TData>) {
   const qc = useQueryClient()

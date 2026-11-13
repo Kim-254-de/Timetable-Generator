@@ -25,6 +25,7 @@ from app.api.schemas import (
     GroupBody,
     LoginBody,
     MoveBody,
+    NameBody,
     OfferingBody,
     OfferingPatch,
     OpenTermBody,
@@ -32,6 +33,7 @@ from app.api.schemas import (
     PaperIdsBody,
     PaperInvigilatorsBody,
     PaperRowsBody,
+    PasswordBody,
     ProposeBody,
     PublishBody,
     ResolveBody,
@@ -40,7 +42,7 @@ from app.api.schemas import (
     RunBody,
     TermPatch,
 )
-from app.auth import Identity, current_identity, sign_in, sign_out
+from app.auth import Identity, change_password, current_identity, rename, sign_in, sign_out
 from app.clients.attendance import AttendanceClient, AttendanceError, get_attendance
 from app.clients.smarttt import SmartttClient, SmartttError, get_smarttt
 from app.clients.teaching import TeachingClient, get_teaching
@@ -126,6 +128,19 @@ def logout(request: Request, response: Response, db: Db, settings: Cfg) -> dict[
 @router.get("/auth/me")
 def me(identity: Me) -> dict[str, Any]:
     return ok(identity.public())
+
+
+@router.patch("/auth/me")
+def rename_me(body: NameBody, identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    """The Director's name, kept in Smart Attendance (My profile)."""
+    return ok(rename(db, identity, body.full_name, attendance).public())
+
+
+@router.post("/auth/password")
+def change_my_password(body: PasswordBody, identity: Me, db: Db, attendance: Attendance) -> dict[str, Any]:
+    """Changed in Smart Attendance; the Director's other Generator sessions are signed out."""
+    change_password(db, identity, body.current_password, body.new_password, attendance)
+    return ok({"changed": True})
 
 
 # -- terms and setup ------------------------------------------------------------------

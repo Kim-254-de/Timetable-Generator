@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { Download } from 'lucide-react'
+import { DownloadMenu } from '@/components/DownloadMenu'
+import { PageTitle, btn } from '@/components/ui'
 import { errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
 import { examExportUrl, useChangeExamVenue, useExamDraft, useExamDraftAction, useMoveExamPaper, useSetDirectorInvigilators } from '@/lib/queries'
@@ -36,8 +37,8 @@ export function ExamDraftPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link to={`/terms/${termId}?tab=exams`} className="text-sm text-brand-ink">← Back to the term</Link>
-          <h1 className="text-xl font-semibold">{draft.name}{data.version ? ` · version ${data.version}` : ''}</h1>
+          <Link to={`/terms/${termId}?mode=exams&step=4`} className={btn.quiet}>← Back to the term</Link>
+          <PageTitle title={`${draft.name}${data.version ? ` · version ${data.version}` : ''}`} crumb="Exam timetable" />
           <p className="text-sm text-muted">
             {draft.placed} of {draft.papers} papers placed · {draft.pinned} pinned · <span className="capitalize">{draft.status}</span>
             {draft.shared_at && ` · shared with departments ${dateTime(draft.shared_at)}`}
@@ -49,28 +50,27 @@ export function ExamDraftPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          {(['timetable', 'rooms', 'roster'] as const).map((kind) => (
-            <span key={kind} className="inline-flex items-center gap-1 rounded-md border border-line bg-card px-2 py-1">
-              <Download size={14} aria-hidden />
-              {kind === 'timetable' ? 'Timetable' : kind === 'rooms' ? 'Room sheets' : 'Roster'}:
-              <a href={examExportUrl(draftId, kind, 'docx')} className="text-brand-ink">Word</a>
-              <a href={examExportUrl(draftId, kind, 'pdf')} className="text-brand-ink">PDF</a>
-            </span>
-          ))}
+          <DownloadMenu items={(['timetable', 'rooms', 'roster'] as const).flatMap((kind) => {
+            const name = kind === 'timetable' ? 'Timetable' : kind === 'rooms' ? 'Room sheets' : 'Roster'
+            return [
+              { label: `${name}, Word`, href: examExportUrl(draftId, kind, 'docx') },
+              { label: `${name}, PDF`, href: examExportUrl(draftId, kind, 'pdf') },
+            ]
+          })} />
           {editable ? (
             <>
-              <button onClick={() => act.mutate('resolve', { onSuccess: () => navigate(`/terms/${termId}?tab=exams`) })} disabled={act.isPending}
-                className="rounded-md border border-line bg-card px-3 py-2">Re-solve around pins</button>
-              <button onClick={() => act.mutate('share')} disabled={act.isPending} className="rounded-md border border-line bg-card px-3 py-2">
+              <button onClick={() => act.mutate('resolve', { onSuccess: () => navigate(`/terms/${termId}?mode=exams&step=4`) })} disabled={act.isPending}
+                className={btn.secondary}>Re-solve around pins</button>
+              <button onClick={() => act.mutate('share')} disabled={act.isPending} className={btn.secondary}>
                 {draft.shared_at ? 'Share again' : 'Share with departments'}
               </button>
               <button onClick={() => act.mutate('publish')} disabled={act.isPending || !draft.publishable}
                 title={draft.publishable ? 'Approve and publish (every paper needs an invigilator)' : 'Fix the hard-rule problems first'}
-                className="rounded-md bg-brand px-4 py-2 font-medium text-white disabled:opacity-50">Approve and publish</button>
+                className={btn.primary}>Approve and publish</button>
             </>
           ) : (
             <button onClick={() => act.mutate('copy', { onSuccess: (d) => navigate(`/terms/${termId}/exam-drafts/${d.id}`) })}
-              className="rounded-md border border-line bg-card px-3 py-2">Copy to a new draft</button>
+              className={btn.secondary}>Copy to a new draft</button>
           )}
         </div>
       </div>
@@ -243,7 +243,7 @@ function VenueRow({ termId, draftId, data, paper, room }: { termId: string; draf
           })}
         </select>
         <button type="button" disabled={!to || tooSmall || change.isPending} onClick={submit}
-          className="rounded-md border border-line px-3 py-1 disabled:opacity-50">{full ? 'Make room' : 'Change'}</button>
+          className={btn.secondary}>{full ? 'Make room' : 'Change'}</button>
       </div>
       {full && (
         <p className="mt-1 text-xs text-muted">
@@ -282,7 +282,7 @@ function DirectorInvigilators({ termId, paper }: { termId: string; paper: ExamGr
       ))}
       {save.isError && <p role="alert" className="text-danger">{errorMessage(save.error)}</p>}
       {save.isSuccess && <p role="status" className="text-muted">Saved.</p>}
-      <button type="button" disabled={save.isPending} onClick={() => save.mutate({ paperId: paper.id, invigilators: named })} className="rounded-md border border-line px-3 py-1">Save invigilators</button>
+      <button type="button" disabled={save.isPending} onClick={() => save.mutate({ paperId: paper.id, invigilators: named })} className={btn.secondary}>Save invigilators</button>
     </fieldset>
   )
 }
@@ -324,13 +324,13 @@ function MoveDialog({ termId, draftId, data, paper: picked, onClose }: {
           </label>
           {move.isError && <p role="alert" className="text-danger">{errorMessage(move.error)}</p>}
           <button onClick={() => move.mutate({ paperId: paper.id, day, session }, { onSuccess: onClose })} disabled={move.isPending}
-            className="rounded-md bg-brand px-4 py-2 text-white disabled:opacity-50">Move</button>
+            className={btn.primary}>Move</button>
         </section>
 
         {paper.director_paper && paper.seating.length > 0 && <DirectorInvigilators key={paper.extra_rooms.join()} termId={termId} paper={paper} />}
 
         <div className="flex justify-end">
-          <button onClick={onClose} className="rounded-md border border-line px-3 py-2">Close</button>
+          <button onClick={onClose} className={btn.secondary}>Close</button>
         </div>
       </div>
     </div>

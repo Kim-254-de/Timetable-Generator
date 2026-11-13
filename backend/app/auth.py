@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import logging
 import secrets
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Any
@@ -44,6 +45,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 class Identity:
     account_id: str
     full_name: str
+    email: str
     university_id: str | None
     timetabling_office: bool
     session_id: str
@@ -54,6 +56,7 @@ class Identity:
         return cls(
             account_id=str(account["id"]),
             full_name=str(account.get("full_name") or account.get("email") or account["id"]),
+            email=str(account.get("email") or ""),
             university_id=account.get("university_id"),
             timetabling_office=bool(data.get("timetabling_office")),
             session_id=session_id,
@@ -67,6 +70,7 @@ class Identity:
         return {
             "account_id": self.account_id,
             "full_name": self.full_name,
+            "email": self.email,
             "university_id": self.university_id,
             "timetabling_office": self.timetabling_office,
         }
@@ -246,3 +250,90 @@ def current_identity(
         session.last_seen_at = now
         db.commit()
     return Identity.from_attendance(session.identity, str(session.id))
+
+
+# ---------------------------------------------------------------------------
+# The Director's own account (My profile). Name and password live in Attendance.
+# ---------------------------------------------------------------------------
+
+
+def _profile_call(call: Any) -> Any:
+    try:
+        return call()
+    except AttendanceSignInError as exc:
+        raise ApiError(503, "ATTENDANCE_UNAVAILABLE", exc.message) from exc
+    except AttendanceError as exc:
+        raise ApiError(
+            503, "ATTENDANCE_UNAVAILABLE", "Smart Attendance could not be reached. Try again in a minute."
+        ) from exc
+
+
+def _gone(db: Session, account_id: str) -> ApiError:
+    now = utcnow()
+    for session in db.scalars(
+        select(AuthSession).where(AuthSession.account_id == account_id, AuthSession.revoked_at.is_(None))
+    ):
+        session.revoked_at = now
+    db.commit()
+    return ApiError(401, "UNAUTHENTICATED", "Your account is no longer active.")
+
+
+def clean_name(value: str) -> str:
+    """Attendance's own rule for a full name: letters first, then letters, marks, ' - . and spaces; 3 to 160."""
+    name = " ".join(value.split())
+    allowed = all(c.isalpha() or c in "'-. " or unicodedata.category(c).startswith("M") for c in name)
+    if not (3 <= len(name) <= 160) or not name[:1].isalpha() or not allowed:
+        raise ApiError(
+            422,
+            "INVALID_NAME",
+            "Enter at least 3 characters: letters, spaces, apostrophes, hyphens and full stops.",
+        )
+    return name
+
+
+def rename(db: Session, identity: Identity, full_name: str, attendance: AttendanceClient) -> Identity:
+    """The new name is saved in Attendance, then on every open session of the account."""
+    name = clean_name(full_name)
+    fresh = _profile_call(lambda: attendance.rename(identity.account_id, name))
+    if fresh is None:
+        raise _gone(db, identity.account_id)
+    now = utcnow()
+    for session in db.scalars(select(AuthSession).where(AuthSession.account_id == identity.account_id)):
+        session.identity = fresh
+        session.identity_checked_at = now
+    db.commit()
+    return Identity.from_attendance(fresh, identity.session_id)
+
+
+def password_problem(password: str) -> str | None:
+    """Attendance's password rules, said before asking it."""
+    if not 6 <= len(password) <= 128:
+        return "Use 6 to 128 characters."
+    if not any(c.islower() for c in password) or not any(c.isupper() for c in password):
+        return "Include a lowercase and an uppercase letter."
+    if not any(c.isdigit() for c in password):
+        return "Include a digit."
+    return None
+
+
+def change_password(
+    db: Session, identity: Identity, current_password: str, new_password: str, attendance: AttendanceClient
+) -> None:
+    """Checked and saved by Attendance; every other Generator session of the account is then signed out."""
+    problem = password_problem(new_password)
+    if problem:
+        raise ApiError(422, "WEAK_PASSWORD", f"The new password is too weak. {problem}")
+    outcome = _profile_call(lambda: attendance.change_password(identity.account_id, current_password, new_password))
+    if outcome is None:
+        raise _gone(db, identity.account_id)
+    if outcome == "wrong_password":
+        raise ApiError(400, "WRONG_PASSWORD", "Your current password is not right.")
+    if outcome == "same_password":
+        raise ApiError(400, "SAME_PASSWORD", "The new password must differ from your current one.")
+    now = utcnow()
+    for session in db.scalars(
+        select(AuthSession).where(AuthSession.account_id == identity.account_id, AuthSession.revoked_at.is_(None))
+    ):
+        if str(session.id) != identity.session_id:
+            session.revoked_at = now
+    db.commit()

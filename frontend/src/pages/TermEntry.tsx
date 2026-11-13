@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
 import { Dialog, Field, inputClass } from '@/components/Dialog'
+import { btn } from '@/components/ui'
 import type { BulkColumn } from '@/components/BulkPaste'
 import { errorMessage } from '@/lib/api'
 import { termText } from '@/lib/format'
@@ -12,7 +12,6 @@ import {
   useEditOffering,
   usePatchRow,
   usePatchTerm,
-  useRoomList,
   useTerm,
   useTerms,
   type ClassRowInput,
@@ -41,28 +40,8 @@ export const UNIT_COLUMNS: BulkColumn[] = [
     hint: 'The class rows that take the unit, separated by ";" (exactly as on the Class rows tab)' },
 ]
 
-/** Term details printed on the timetable, plus links to the shared lists. */
-export function TermDetails({ termId }: { termId: string }) {
-  const term = useTerm(termId)
-  const rooms = useRoomList()
-  const departments = useDepartments()
-  if (!term.data) return null
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <TermDetailsForm term={term.data} key={term.data.id} />
-      <section className="space-y-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-        <h2 className="font-semibold">Shared lists</h2>
-        <p className="text-muted">
-          <Link to="/rooms" className="font-medium text-brand-ink">{rooms.data?.length ?? 0} lecture halls</Link> and{' '}
-          <Link to="/departments" className="font-medium text-brand-ink">{departments.data?.length ?? 0} departments</Link>, used by every term.
-        </p>
-        <CopyFromTerm termId={termId} />
-      </section>
-    </div>
-  )
-}
-
-function TermDetailsForm({ term }: { term: Term }) {
+/** Term details printed on the timetable. */
+export function TermDetailsForm({ term }: { term: Term }) {
   const patch = usePatchTerm(term.id)
   const [form, setForm] = useState({
     name: term.name,
@@ -86,9 +65,8 @@ function TermDetailsForm({ term }: { term: Term }) {
     })
   }
   return (
-    <form onSubmit={submit} className="space-y-3 p-5 rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
-      <h2 className="font-semibold">Term details <span className="font-normal text-muted">· {termText(term)}</span></h2>
-      <p className="text-sm text-muted">Printed on the downloaded timetable.</p>
+    <form onSubmit={submit} className="space-y-4">
+      <p className="text-sm text-muted">{termText(term)}. Printed on the downloaded timetable.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Name" hint="e.g. September-December 2026"><input value={form.name} onChange={set('name')} className={inputClass} /></Field>
         <Field label="Class length (hours)" hint="Used for units without their own">
@@ -102,29 +80,27 @@ function TermDetailsForm({ term }: { term: Term }) {
         <Field label="Title"><input value={form.prepared_by_title} onChange={set('prepared_by_title')} className={inputClass} /></Field>
       </div>
       {patch.isError && <p role="alert" className="text-sm text-danger">{errorMessage(patch.error)}</p>}
-      {patch.isSuccess && <p className="text-sm text-success">Saved.</p>}
-      <button type="submit" disabled={patch.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save details</button>
+      {patch.isSuccess && <p role="status" className="text-sm text-success">Saved.</p>}
+      <button type="submit" disabled={patch.isPending} className={btn.primary}>Save details</button>
     </form>
   )
 }
 
-function CopyFromTerm({ termId }: { termId: string }) {
+export function CopyFromTerm({ termId }: { termId: string }) {
   const terms = useTerms()
   const copy = useCopyTerm(termId)
   const [source, setSource] = useState('')
   const others = (terms.data ?? []).filter((t) => t.id !== termId)
-  if (!others.length) return null
+  if (!others.length) return <p className="text-sm text-muted">There is no other term to copy from.</p>
   return (
-    <div className="border-t border-line pt-3">
-      <p className="font-medium">Start from a previous term</p>
+    <div className="space-y-3 text-sm">
       <p className="text-muted">Copies its class rows, units and groups. Anything already here is kept.</p>
-      <div className="mt-2 flex gap-2">
-        <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-xl border border-line px-3 py-2">
+      <div className="flex flex-wrap gap-2">
+        <select aria-label="Term to copy from" value={source} onChange={(e) => setSource(e.target.value)} className={inputClass + ' mt-0 w-auto flex-1'}>
           <option value="">Choose a term…</option>
           {others.map((t) => <option key={t.id} value={t.id}>{t.name || termText(t)}</option>)}
         </select>
-        <button disabled={!source || copy.isPending} onClick={() => copy.mutate(source)}
-          className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Copy</button>
+        <button type="button" disabled={!source || copy.isPending} onClick={() => copy.mutate(source)} className={btn.primary}>Copy</button>
       </div>
       {copy.isSuccess && <p className="mt-1 text-success">Copied {copy.data.class_rows_copied} class rows and {copy.data.units_copied} units.</p>}
       {copy.isError && <p role="alert" className="mt-1 text-danger">{errorMessage(copy.error)}</p>}
@@ -197,8 +173,8 @@ export function ClassRowForm({ termId, row, onClose }: { termId: string; row: Cl
         </div>
         {failure && <p role="alert" className="text-sm text-danger">{errorMessage(failure)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
-          <button type="submit" disabled={create.isPending || edit.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save</button>
+          <button type="button" onClick={onClose} className={btn.secondary}>Cancel</button>
+          <button type="submit" disabled={create.isPending || edit.isPending} className={btn.primary}>Save</button>
         </div>
       </form>
     </Dialog>
@@ -273,9 +249,9 @@ export function OfferingForm({
           <div className="flex flex-wrap items-end justify-between gap-2">
             <p className="text-sm font-medium text-ink">Class rows taking this unit · {chosen.size} chosen, {students} students</p>
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search class rows"
-              className="w-60 rounded-xl border border-line px-3 py-2 text-sm" />
+              className="w-60 rounded-md border border-line px-2 py-1 text-sm" />
           </div>
-          <div className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-xl border border-line p-2 text-sm sm:grid-cols-2">
+          <div className="mt-2 grid max-h-64 gap-1 overflow-y-auto rounded-md border border-line p-2 text-sm sm:grid-cols-2">
             {shown.map((r) => (
               <label key={r.id} className="flex items-center gap-2">
                 <input type="checkbox" checked={chosen.has(r.id)} onChange={() => toggle(r.id)} />
@@ -289,8 +265,8 @@ export function OfferingForm({
         </div>
         {failure && <p role="alert" className="text-sm text-danger">{errorMessage(failure)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-line bg-card text-ink hover:bg-surface">Cancel</button>
-          <button type="submit" disabled={create.isPending || edit.isPending} className="inline-flex h-11 px-5 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 bg-brand text-white shadow-sm hover:bg-brand-strong">Save</button>
+          <button type="button" onClick={onClose} className={btn.secondary}>Cancel</button>
+          <button type="submit" disabled={create.isPending || edit.isPending} className={btn.primary}>Save</button>
         </div>
       </form>
     </Dialog>

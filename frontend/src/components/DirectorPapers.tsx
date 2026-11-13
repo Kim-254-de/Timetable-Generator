@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { btn } from '@/components/ui'
 import { useRemoveDirectorPapers } from '@/lib/queries'
 import { errorMessage } from '@/lib/api'
 import type { ExamPaperItem } from '@/lib/types'
@@ -25,7 +26,7 @@ export function DirectorPapers({ termId, papers }: { termId: string; papers: Exa
     remove.mutate(chosen.map((p) => p.id), { onSuccess: () => setPicked(new Set()) })
   }
   return (
-    <section className="space-y-3 p-5 text-sm rounded-2xl bg-card shadow-[0_1px_3px_rgba(18,48,95,0.08)]">
+    <section className="space-y-3 rounded-lg border border-line bg-card p-4 text-sm">
       <div>
         <h2 className="font-semibold">Papers you uploaded earlier</h2>
         <p className="text-muted">Health and nursing departments now upload their moderation letters in Smart Attendance like any other department. Each of these stays until you remove it, or a department lists its unit.</p>
@@ -36,7 +37,7 @@ export function DirectorPapers({ termId, papers }: { termId: string; papers: Exa
           Select all {mine.length}
         </label>
         <button type="button" disabled={chosen.length === 0 || remove.isPending} onClick={removeChosen}
-          className="inline-flex h-9 px-3 cursor-pointer items-center justify-center gap-2 rounded-xl text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 border border-danger-solid bg-card text-danger hover:bg-danger-solid hover:text-white">
+          className={btn.danger}>
           {remove.isPending ? 'Removing…' : `Remove selected (${chosen.length})`}
         </button>
       </div>
