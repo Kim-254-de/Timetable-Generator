@@ -11,6 +11,8 @@ import type {
   ExamGrid,
   ExamOverview,
   ExamCategory,
+  ExamLetterPaper,
+  ExamLetterReview,
   ExamPeriod,
   ExamSwitchAction,
   ExamSwitchState,
@@ -402,6 +404,21 @@ export const useImportExams = (termId: string) =>
     post<{ departments: string[]; papers: { added: string[]; changed: string[]; removed: string[] }; not_published: { code: string }[] }>(
       `/terms/${termId}/exams/import`,
     ))
+
+/** A department's moderation letter, read and reviewed by Smart Attendance as on the department's Exams tab. */
+export const readExamLetter = (termId: string, department: string, file: File) =>
+  api.post<ExamLetterReview>(`/terms/${termId}/exam-list/read`, file, {
+    params: { department },
+    headers: { 'Content-Type': 'application/octet-stream' },
+    timeout: 120_000,
+  }).then((r) => r.data)
+
+/** The reviewed letter saved into the department's list (published in the Director's name), then imported here. */
+export const useSaveExamLetter = (termId: string) =>
+  useExamMutation(termId, (body: { department_code: string; papers: ExamLetterPaper[] }) =>
+    api.post<{ saved: { created: number; updated: number; switched: number; published: number }; imported: { papers: { added: string[]; changed: string[]; removed: string[] } } }>(
+      `/terms/${termId}/exam-list`, body, { timeout: 180_000 },
+    ).then((r) => r.data))
 
 export const useStartExamRun = (termId: string) =>
   useExamMutation(termId, (time_limit_s: number) => post<Run>('/exam-runs', { term_id: termId, time_limit_s }))

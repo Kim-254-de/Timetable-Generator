@@ -230,8 +230,10 @@ function TermsPage() {
   const [creating, setCreating] = useState(false)
   const [choice, setChoice] = useState('')
   const working = useWorkingTerm()
+  // A SMARTTT term already open here, or the same year and semester as a term here, isn't offered again.
   const opened = new Set(terms.data?.map((t) => t.smarttt_term_id))
-  const available = (smarttt.data ?? []).filter((t) => !opened.has(t.id))
+  const same = new Set(terms.data?.map((t) => `${t.academic_year}|${t.semester}`))
+  const available = (smarttt.data ?? []).filter((t) => !opened.has(t.id) && !same.has(`${t.academic_year}|${t.semester}`))
 
   return (
     <div className="max-w-4xl space-y-4">

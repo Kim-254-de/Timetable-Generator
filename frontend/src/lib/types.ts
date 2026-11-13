@@ -480,3 +480,48 @@ export interface ExamSwitchState {
 }
 
 export type ExamSwitchAction = 'schedule_switch' | 'cancel_switch' | 'switch_now' | 'schedule_close' | 'cancel_close' | 'close_now'
+
+// -- moderation letters the Director uploads (read by Smart Attendance, as departments' are) --------
+
+export interface ExamLetterEntry {
+  line: number
+  codes: string[]
+  title: string
+  section: string
+  sitting: 'regular' | 'odel'
+  secondListingOf: number | null
+  students: number | null
+  classRows: { label: string; students: number }[]
+  unknownCodes: string[]
+  duplicateOf: number | null
+  otherDepartments: string[]
+  existingPaperId: string | null
+  switchesPaperId: string | null
+  letterClasses: string[]
+}
+
+export interface ExamLetterClass {
+  id: string
+  heading: string
+  name: string
+  year: number | null
+  semester: number | null
+  students: number
+  programme: string
+}
+
+export interface ExamLetterReview {
+  entries: ExamLetterEntry[]
+  classes: ExamLetterClass[]
+  programmes: { code: string; name: string }[]
+  smarttt: { available: boolean; reason: string | null }
+  summary: { papers: number; newPapers: number; duplicates: number; unknown: number; noStudents: number; noClasses: number; secondListings: number; toOdel: number }
+}
+
+export interface ExamLetterPaper {
+  codes: string[]
+  title: string
+  sitting: 'regular' | 'odel'
+  classes?: { programme: string; year: number; semester: number; students: number }[]
+  replacesPaperId?: string
+}

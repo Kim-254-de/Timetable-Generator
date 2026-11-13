@@ -306,9 +306,9 @@ def diagnose(problem: ExamProblem, time_limit_s: float, workers: int = 8) -> lis
 
 
 def explain(problem: ExamProblem, time_limit_s: float) -> list[dict[str, str]]:
-    """The class rows and sessions whose rules can't all hold together.
-
-    The rule at fault when they can't be named in time.
+    """
+    The class rows and sessions whose rules can't all hold together; the rule at fault when they
+    can't be named in time.
     """
     reasons = _named(problem, time_limit_s)
     return reasons if reasons else diagnose(problem, time_limit_s)

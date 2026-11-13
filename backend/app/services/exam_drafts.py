@@ -224,8 +224,8 @@ def change_venue(
             if pid in by_paper
         ]
         try:
-            for new_seat in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
-                new_seats.setdefault(new_seat.paper_id, []).append(new_seat)
+            for seat in seating.seat_session(in_slot, problem.rooms, problem.postgraduate_room):
+                new_seats.setdefault(seat.paper_id, []).append(seat)
         except seating.SeatingError as exc:
             raise ApiError(
                 409,
@@ -358,9 +358,9 @@ def record(db: Session, draft: ExamDraft, invigilators: dict[str, Any] | None = 
                 "director_paper": p.is_director_paper,
             }
         )
-        seating = cast(list[dict[str, Any]], out[-1]["seating"])
-        out[-1]["main_room"] = main_room(seating)
-        out[-1]["extra_rooms"] = sorted({s["room"] for s in seating} - {out[-1]["main_room"]})
+        seats_of_paper = cast("list[dict[str, Any]]", out[-1]["seating"])
+        out[-1]["main_room"] = main_room(seats_of_paper)
+        out[-1]["extra_rooms"] = sorted({s["room"] for s in seats_of_paper} - {out[-1]["main_room"]})
     return {
         "days": [{"date": d.isoformat(), "label": d.strftime("%a %d/%m/%Y").upper()} for d in built.problem.days],
         "sessions": list(term.exam_sessions or []),

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import copy
+import json
 from typing import Any
 
 import httpx
@@ -69,6 +71,9 @@ class FakeTeaching:
         self.exam_published: list[dict[str, Any]] = []
         self.exam_not_published: list[dict[str, Any]] = []
         self.invigilators: dict[str, dict[str, dict[str, str]]] = {}
+        # Moderation letters the Director uploads: what was read, and what was saved (published at once).
+        self.letters_read: list[dict[str, Any]] = []
+        self.letters_saved: list[dict[str, Any]] = []
 
     def publish(self, code: str, name: str, units: list[dict[str, Any]], at: str = "2026-10-20T08:00:00+00:00") -> None:
         self.not_published = [d for d in self.not_published if d["code"] != code]
@@ -105,6 +110,36 @@ class FakeTeaching:
                 "published": copy.deepcopy(self.exam_published),
                 "not_published": copy.deepcopy(self.exam_not_published),
             }
+            return httpx.Response(200, json={"success": True, "data": data})
+        if path.startswith("/terms/") and path.endswith("/exam-list/read"):
+            body = json.loads(request.content)
+            self.letters_read.append(body)
+            if base64.b64decode(body["file"])[:2] != b"PK":
+                error = {"code": "VALIDATION_FAILED", "message": "This file is not a Word document (.docx)."}
+                return httpx.Response(422, json={"success": False, "error": error})
+            entry = {"line": 1, "codes": ["HRIM 111"], "title": "Records", "section": "", "sitting": "regular"}
+            review = {"entries": [entry], "classes": [], "summary": {"papers": 1}}
+            return httpx.Response(200, json={"success": True, "data": review})
+        if path.startswith("/terms/") and path.endswith("/exam-list"):
+            body = json.loads(request.content)
+            self.letters_saved.append(body)
+            if body["department_code"] != "DHRM":
+                error = {"code": "NOT_FOUND", "message": f"No department has the code {body['department_code']}."}
+                return httpx.Response(404, json={"success": False, "error": error})
+            rows = [("hrm-y1", 3, "regular")]
+            papers = [paper(f"letter-{i}", p["codes"], rows) for i, p in enumerate(body["papers"])]
+            self.exam_courses = [c for c in self.exam_courses if c["id"] != "hrm-y1"] + [
+                course("hrm-y1", "DHRM", "BSC.HRIM", 3)
+            ]
+            self.exam_published = [d for d in self.exam_published if d["code"] != "DHRM"] + [
+                {
+                    "code": "DHRM",
+                    "name": "Health Records",
+                    "published_at": "2026-11-13T09:00:00+00:00",
+                    "papers": papers,
+                }
+            ]
+            data = {"created": len(papers), "updated": 0, "switched": 0, "published": len(papers)}
             return httpx.Response(200, json={"success": True, "data": data})
         if path.startswith("/terms/") and path.endswith("/invigilators"):
             return httpx.Response(200, json={"success": True, "data": copy.deepcopy(self.invigilators)})

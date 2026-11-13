@@ -1,5 +1,7 @@
-"""Venues changed on the draft, and the papers the Director uploaded
-before departments did it for health and nursing."""
+"""
+Venues changed on the draft, and the papers the Director uploaded before departments did it for
+health and nursing.
+"""
 
 from __future__ import annotations
 

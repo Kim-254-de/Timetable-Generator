@@ -128,9 +128,9 @@ def remove_many(db: Session, identity: Identity, term: Term, paper_ids: list[str
 def set_invigilators(
     db: Session, identity: Identity, term: Term, paper_id: str, named: dict[str, dict[str, str]]
 ) -> dict[str, Any]:
-    """Who invigilates: "" is the main invigilator, a room code that extra room's.
-
-    SMARTTT checks the staff numbers on publishing.
+    """
+    Who invigilates: "" is the main invigilator, a room code that extra room's. SMARTTT checks the
+    staff numbers on publishing.
     """
     paper = _director_paper(db, term, paper_id)
     paper.director_invigilators = {

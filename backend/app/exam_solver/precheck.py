@@ -58,10 +58,9 @@ def run(problem: ExamProblem) -> list[dict[str, str]]:
             count = sum(1 for p in papers if problem.first_week_only(p))
             if count > per_day * week_days:
                 label = problem.row_label(row)
-                places = per_day * week_days
                 message = (
-                    f"{label} sits {count} postgraduate papers; "
-                    f"the first week has room for {places} ({week_days} days, {per_day} a day)."
+                    f"{label} sits {count} postgraduate papers; the first week has room for "
+                    f"{per_day * week_days} ({week_days} days, {per_day} a day)."
                 )
                 add("H-E10", label, message)
         entries = sum(p.students for p in graduate)

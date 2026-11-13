@@ -16,6 +16,7 @@ from app.api.schemas import (
     ClassRowPatch,
     CopyTermBody,
     DepartmentPatch,
+    ExamLetterBody,
     ExamMoveBody,
     ExamPeriodBody,
     ExamResolveBody,
@@ -615,6 +616,38 @@ def import_exams(term_id: str, identity: Me, db: Db, teaching: Teaching, smarttt
     rooms = _rooms_from_smarttt(db, smarttt, identity)
     term = setup.get_term(db, term_id)
     return ok({**exam_setup.import_exams(db, teaching, identity, term), "rooms": rooms})
+
+
+@router.post("/terms/{term_id}/exam-list/read")
+async def read_exam_letter(
+    term_id: str, department: str, request: Request, identity: Me, db: Db, teaching: Teaching
+) -> dict[str, Any]:
+    """A department's moderation letter (.docx as the raw body), read and reviewed by Smart Attendance."""
+    term = setup.get_term(db, term_id)
+    content = bytearray()
+    async for chunk in request.stream():
+        content += chunk
+        if len(content) > spreadsheet.MAX_FILE_BYTES:
+            raise ApiError(413, "FILE_TOO_LARGE", "The letter is over 5 MB. Save it again without pictures.")
+    return ok(
+        await run_in_threadpool(teaching.read_exam_list, str(term.id), identity.account_id, department, bytes(content))
+    )
+
+
+@router.post("/terms/{term_id}/exam-list")
+def save_exam_letter(
+    term_id: str, body: ExamLetterBody, identity: Me, db: Db, teaching: Teaching, smarttt: Smarttt
+) -> dict[str, Any]:
+    """
+    The reviewed letter saved into the department's exam list in Smart Attendance and published there
+    in the Director's name, then every published department's papers imported here, as Import does.
+    """
+    term = setup.get_term(db, term_id)
+    papers = [p.model_dump(by_alias=True, exclude_none=True) for p in body.papers]
+    saved = teaching.save_exam_list(str(term.id), identity.account_id, body.department_code, papers)
+    rooms = _rooms_from_smarttt(db, smarttt, identity)
+    imported = exam_setup.import_exams(db, teaching, identity, setup.get_term(db, term_id))
+    return ok({"saved": saved, "imported": {**imported, "rooms": rooms}})
 
 
 @router.post("/exam-runs")

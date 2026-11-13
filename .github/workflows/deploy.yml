@@ -1,0 +1,80 @@
+# Deploys main to the university's KENET VMs once CI has passed on it.
+#
+# 1. build: the API and web images, tagged with the commit, pushed to ghcr.io. The API image gets
+#    NumPy 2.3.5, the newest that starts on KENET's CPUs (they lack SSE4.2/AVX), so the VMs need
+#    no fix-cpu.sh.
+# 2. deploy: one SSH call per app to /opt/nextup/deploy.sh, the only command the deploy key may
+#    run. It pulls the image (with this job's short-lived token, sent on stdin), restarts that app
+#    and checks it comes up, else puts the previous image back. Secrets stay on the VMs.
+#
+# Needs the `kenet` environment's secrets KENET_DEPLOY_KEY and KENET_KNOWN_HOSTS (setup-ci.sh in
+# the deploy kit). Run it by hand from the Actions tab to redeploy a commit.
+name: Deploy to KENET
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kenet-deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  REGISTRY: ghcr.io/kim-254-de
+  VM_APP: 197.137.65.49
+  VM_SOLVER: 197.137.65.51
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    strategy:
+      matrix:
+        include:
+          - { image: nextup-generator-api, context: backend, numpy: true }
+          - { image: nextup-generator-web, context: frontend, numpy: false }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ env.SHA }}" }
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push ${{ matrix.image }}
+        run: |
+          image="$REGISTRY/${{ matrix.image }}:$SHA"
+          docker build --pull -t base \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=$SHA" \
+            ${{ matrix.context }}
+          if [ "${{ matrix.numpy }}" = true ]; then
+            user=$(docker image inspect -f '{{.Config.User}}' base)
+            printf 'FROM base\nUSER root\nRUN pip install --no-cache-dir --no-deps numpy==2.3.5\nUSER %s\n' "${user:-root}" | docker build -t "$image" -
+            docker run --rm --entrypoint python "$image" -c 'import numpy, pandas, ortools.sat.python.cp_model; assert numpy.__version__ == "2.3.5", numpy.__version__'
+          else
+            docker tag base "$image"
+          fi
+          docker push "$image"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: kenet
+    permissions: { packages: read }
+    steps:
+      - name: Deploy the API, the solver worker, then the web app
+        env:
+          KEY: ${{ secrets.KENET_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.KENET_KNOWN_HOSTS }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          deploy() { printf '%s' "$TOKEN" | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 "user@$1" "deploy $2 $SHA"; }
+          deploy "$VM_APP" generator-api
+          deploy "$VM_SOLVER" worker
+          deploy "$VM_APP" generator-web

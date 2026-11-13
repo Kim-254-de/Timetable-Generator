@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { AlertTriangle, ArrowRight, Check, Download, FileText, Play, Send } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, Download, FileText, FileUp, Play, Send } from 'lucide-react'
 import { errorBody, errorMessage } from '@/lib/api'
 import { ExamSwitch } from '@/components/ExamSwitch'
 import { DirectorPapers } from '@/components/DirectorPapers'
+import { ExamLetterUpload } from '@/components/ExamLetterUpload'
 import { Card, IconBox, Notice, PanelButton, Pill, btn, type Tone } from '@/components/ui'
 import { dateTime } from '@/lib/format'
 import {
@@ -93,12 +94,15 @@ export function ExamPapersStep({ termId }: { termId: string }) {
               </p>
             )}
             {departments.isError && <p role="alert" className="text-sm text-danger">{errorMessage(departments.error)}</p>}
-            <p className="text-sm text-muted">Departments list their papers on their Teaching page in Smart Attendance and publish them.</p>
+            <p className="text-sm text-muted">Departments upload their moderation letters in Smart Attendance and publish them. You can upload a department's letter here too.</p>
           </div>
           <div className="flex flex-1 basis-56 flex-col gap-2 sm:max-w-xs">
             <button type="button" onClick={() => importExams.mutate(undefined)} disabled={importExams.isPending} className={clsx(btn.primary, 'py-3 text-base')}>
               <Download className="size-5" aria-hidden /> {importExams.isPending ? 'Importing…' : 'Import exam papers'}
             </button>
+            <PanelButton label="Upload a moderation letter" title="Upload a department's moderation letter" wide icon={FileUp}>
+              {(close) => <ExamLetterUpload termId={termId} onDone={close} />}
+            </PanelButton>
             {data.papers.length > 0 && (
               <PanelButton label="Show the papers" title="Exam papers" wide><PaperList termId={termId} papers={data.papers} /></PanelButton>
             )}
