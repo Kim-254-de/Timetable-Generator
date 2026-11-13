@@ -8,7 +8,12 @@
  * (the top bar). Everything else uses the semantic names below, which dark mode redefines.
  */
 @theme {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  /* SMARTTT's typeface (GoogleFonts.outfitTextTheme) and its rounder shapes: 12px fields, 16-20px cards. */
+  --font-sans: 'Outfit Variable', ui-sans-serif, system-ui, sans-serif;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
 
   --color-brand-100: #dce4f6;
   --color-brand-200: #b7c6ee;
@@ -28,6 +33,12 @@
   --color-brand-ink: #1a3a8f; /* brand-coloured text and links */
   --color-brand-soft: #e8edf8; /* tinted chips, selected rows */
   --color-topbar: #1a3a8f;
+  --color-sidebar: #1a3a8f; /* SMARTTT's royal blue sidebar */
+  --color-on-gold: #1a1f2e; /* text on gold: white on gold is too faint to read */
+  --color-teal: #0f5f57;
+  --color-teal-soft: #e0f2f1;
+  --color-violet: #5b2c9a;
+  --color-violet-soft: #f1ebfb;
   --color-danger: #c62828;
   --color-danger-solid: #dc2626;
   --color-danger-soft: #fdecec;
@@ -49,6 +60,11 @@
   --color-brand-ink: #9db4f5;
   --color-brand-soft: #22346b;
   --color-topbar: #111a33;
+  --color-sidebar: #111a33;
+  --color-teal: #5eead4;
+  --color-teal-soft: #13302f;
+  --color-violet: #c4b5fd;
+  --color-violet-soft: #2a2145;
   --color-danger: #fca5a5;
   --color-danger-soft: #3a1c2a;
   --color-success: #6edc8c;

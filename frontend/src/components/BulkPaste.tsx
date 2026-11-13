@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { btn } from '@/components/ui'
 import { Download } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
 import type { BulkResult } from '@/lib/types'
@@ -256,9 +257,9 @@ export function BulkPaste({
         </div>
       )}
       <div className="mt-4 flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Close</button>
+        <button type="button" onClick={onClose} className={btn.secondary}>Close</button>
         <button type="button" onClick={() => void send()} disabled={!rows.length || busy}
-          className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">
+          className={btn.primary}>
           {busy ? 'Saving…' : `Save ${rows.length} rows`}
         </button>
       </div>

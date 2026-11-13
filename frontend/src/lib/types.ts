@@ -5,6 +5,7 @@ export type View = 'row' | 'room' | 'department'
 export interface Me {
   account_id: string
   full_name: string
+  email: string
   university_id: string | null
   timetabling_office: boolean
 }

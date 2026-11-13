@@ -19,6 +19,15 @@ class LoginBody(_Strict):
     password: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
 
 
+class NameBody(_Strict):
+    full_name: Annotated[str, StringConstraints(max_length=200)]
+
+
+class PasswordBody(_Strict):
+    current_password: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+    new_password: Annotated[str, StringConstraints(max_length=1024)]
+
+
 Text = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 Code = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
 RoomType = Literal["lecture_hall", "lab", "seminar"]

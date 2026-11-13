@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { btn } from '@/components/ui'
 import { useRemoveDirectorPapers } from '@/lib/queries'
 import { errorMessage } from '@/lib/api'
 import type { ExamPaperItem } from '@/lib/types'
@@ -36,7 +37,7 @@ export function DirectorPapers({ termId, papers }: { termId: string; papers: Exa
           Select all {mine.length}
         </label>
         <button type="button" disabled={chosen.length === 0 || remove.isPending} onClick={removeChosen}
-          className="rounded-md border border-danger px-3 py-1 text-danger disabled:opacity-50">
+          className={btn.danger}>
           {remove.isPending ? 'Removing…' : `Remove selected (${chosen.length})`}
         </button>
       </div>

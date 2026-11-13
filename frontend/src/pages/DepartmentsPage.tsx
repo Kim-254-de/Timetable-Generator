@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { BulkPaste, type BulkColumn } from '@/components/BulkPaste'
 import { Dialog, Field, inputClass } from '@/components/Dialog'
+import { PageTitle, btn } from '@/components/ui'
 import { errorMessage } from '@/lib/api'
 import { useBulkDepartments, useDeleteDepartment, useDepartmentList, useSaveDepartment, useSyncDepartments, type DepartmentInput } from '@/lib/queries'
 import type { Department } from '@/lib/types'
@@ -33,15 +34,15 @@ export function DepartmentsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Departments</h1>
+          <PageTitle title="Departments" crumb="From Smart Attendance" />
           <p className="text-sm text-muted">
             From Smart Attendance, where an administrator adds each one with its code. Set each one’s number of lecturers here. Used by every term.
           </p>
         </div>
         <div className="flex gap-2 text-sm">
-          <button onClick={() => setPasting(true)} className="rounded-md border border-line bg-card px-3 py-2">Paste lecturer numbers</button>
+          <button onClick={() => setPasting(true)} className={btn.secondary}>Paste lecturer numbers</button>
           {list.data?.attendance_connected && (
-            <button onClick={() => sync.mutate()} disabled={sync.isPending} className="rounded-md bg-brand px-3 py-2 text-white disabled:opacity-50">
+            <button onClick={() => sync.mutate()} disabled={sync.isPending} className={btn.primary}>
               {sync.isPending ? 'Refreshing…' : 'Refresh from Attendance'}
             </button>
           )}
@@ -128,8 +129,8 @@ function DepartmentForm({ department, onClose }: { department: Department; onClo
         </Field>
         {save.isError && <p role="alert" className="text-sm text-danger">{errorMessage(save.error)}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-2 text-sm">Cancel</button>
-          <button type="submit" disabled={save.isPending} className="rounded-md bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className={btn.secondary}>Cancel</button>
+          <button type="submit" disabled={save.isPending} className={btn.primary}>Save</button>
         </div>
       </form>
     </Dialog>
